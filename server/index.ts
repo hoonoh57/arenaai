@@ -160,7 +160,7 @@ function normalizeChartCodes(raw: unknown): string[] {
     seen.add(value);
     codes.push(value);
   }
-  if (codes.length > 10) throw new Error('멀티차트는 최대 10종목입니다.');
+  if (codes.length > 16) throw new Error('멀티차트는 최대 16종목입니다.');
   return codes;
 }
 let conditions: {seq: string; name: string}[] = [];

@@ -5,6 +5,8 @@
 
 export const DESK_MIN = 1;
 export const DESK_MAX = 8;
+/** 멀티차트 칸 수. 3×n 등 분할과 무관하게 한 화면에 16종목까지. */
+export const MULTI_CHART_MAX = 16;
 export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'captures', 'tr', 'events', 'book'] as const;
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';

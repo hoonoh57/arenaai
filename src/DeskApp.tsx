@@ -3,6 +3,7 @@ import type {Candle, Stock, Weights} from '../server/core';
 import type {Formula} from '../shared/formula';
 import {
   KIND_TITLE,
+  MULTI_CHART_MAX,
   WINDOW_KINDS,
   activeDesk,
   createDesk,
@@ -200,8 +201,8 @@ export function DeskApp() {
   };
   const toggleChart = async (code: string) => {
     const on = chartCodes.includes(code);
-    if (!on && chartCodes.length >= 10) {
-      setNotice('멀티차트는 최대 10종목입니다.');
+    if (!on && chartCodes.length >= MULTI_CHART_MAX) {
+      setNotice(`멀티차트는 최대 ${MULTI_CHART_MAX}종목입니다.`);
       return;
     }
     try {
@@ -483,8 +484,8 @@ function Pane(props: {
           <select value={String(cols)} onChange={(e) => props.patchWin(win.id, {gridCols: Number(e.target.value)})} title="화면 분할">
             <option value={1}>1화면</option>
             <option value={2}>2×n</option>
-            <option value={3}>3×n</option>
-            <option value={4}>4×n</option>
+            <option value={3}>3×n (최대 {MULTI_CHART_MAX})</option>
+            <option value={4}>4×n (최대 {MULTI_CHART_MAX})</option>
           </select>
           <select value={tf} onChange={(e) => props.patchWin(win.id, {timeframe: e.target.value})} title="공통 주기">
             {['1', '3', '5', '10', '15', '30', '60', 'D'].map((id) => (
@@ -520,11 +521,11 @@ function Pane(props: {
             className="hts-tool"
             disabled={!state.captured?.length}
             onClick={() => {
-              const codes = (state.captured || []).slice(0, 10).map((r) => r.code);
+              const codes = (state.captured || []).slice(0, MULTI_CHART_MAX).map((r) => r.code);
               void post('/api/charts', {codes}).then(() => props.load());
             }}
           >
-            포착넣기
+            포착넣기({MULTI_CHART_MAX})
           </button>
           <button className="hts-tool" onClick={() => props.setShowFormulas(true)}>
             수식
@@ -655,7 +656,12 @@ function CapturesPane({
       {rows.map((row) => (
         <div key={row.code} className="rank-row">
           <label className="chart-check">
-            <input type="checkbox" checked={chartCodes.includes(row.code)} onChange={() => void toggleChart(row.code)} />
+            <input
+              type="checkbox"
+              checked={chartCodes.includes(row.code)}
+              disabled={!chartCodes.includes(row.code) && chartCodes.length >= MULTI_CHART_MAX}
+              onChange={() => void toggleChart(row.code)}
+            />
           </label>
           <button type="button" className="rank-name" onClick={() => onCode(row.code)}>
             <b>{row.name}</b>
@@ -711,7 +717,7 @@ function ScannerPane(props: {
             <input
               type="checkbox"
               checked={chartCodes.includes(s.code)}
-              disabled={!chartCodes.includes(s.code) && chartCodes.length >= 10}
+              disabled={!chartCodes.includes(s.code) && chartCodes.length >= MULTI_CHART_MAX}
               onClick={(e) => e.stopPropagation()}
               onChange={() => void props.toggleChart(s.code)}
             />
