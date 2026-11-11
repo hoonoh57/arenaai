@@ -11,7 +11,7 @@ test('수식 세트 유효성 및 중복 시스템 방지',()=>{defaults.forEach
 test('키움 형식 변수, 주석, 과거 봉 및 기본 함수',()=>{const f='// 교차 신호\nA=avg(C, 단기); B=avg(C, 장기); if(Crossup(A,B),1,0)';const values=evaluate(f,candles,{단기:2,장기:3});assert.deepEqual(values,evaluate('CROSSUP(SMA(CLOSE,2),SMA(CLOSE,3))',candles));assert.deepEqual(evaluate('종가(1)',candles),evaluate('REF(CLOSE,1)',candles));assert.deepEqual(evaluate('V',candles),Array(candles.length).fill(null));assert.deepEqual(evaluate('V',candles.map(c=>({...c,volume:42}))),Array(candles.length).fill(42));assert.throws(()=>evaluate('avg(C, 기간)',candles,{기간:0}));});
 test('Supertrend·JMA·VWAP 등 확장 지표',()=>{
  const bars=Array.from({length:30},(_,i)=>({time:1_700_000_000+i*60,open:100+i,high:101+i,low:99+i,close:100+i,volume:1000+i}));
- assert.ok(evaluate('JMA(CLOSE, 7)',bars).at(-1));
+ assert.ok(evaluate('JMA(7, 2, 1)',bars).at(-1));
  assert.ok(evaluate('ST(7, 3)',bars).at(-1));
  assert.ok(evaluate('ADX(5)',bars).at(-1)!>=0);
  assert.ok(evaluate('VWAP()',bars).at(-1));
