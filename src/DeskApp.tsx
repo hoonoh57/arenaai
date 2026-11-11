@@ -473,14 +473,39 @@ function Pane(props: {
     );
   }
   if (win.kind === 'multi-chart') {
-    const cellH = Math.max(140, Math.floor(((win.h || 480) - 72) / Math.max(1, Math.ceil(Math.max(selected.length, 1) / 2))) - 48);
+    const cols = Math.min(4, Math.max(1, win.gridCols || (selected.length <= 1 ? 1 : selected.length <= 4 ? 2 : 3)));
+    const rows = Math.max(1, Math.ceil(Math.max(selected.length, 1) / cols));
+    const cellH = Math.max(110, Math.floor(((win.h || 480) - 36) / rows) - 26);
+    const tf = win.timeframe || '1';
     return (
       <div className="pane-multi">
-        <div className="multi-bar">
+        <div className="chart-toolbar" onMouseDown={(e) => e.stopPropagation()}>
+          <select value={String(cols)} onChange={(e) => props.patchWin(win.id, {gridCols: Number(e.target.value)})} title="화면 분할">
+            <option value={1}>1화면</option>
+            <option value={2}>2×n</option>
+            <option value={3}>3×n</option>
+            <option value={4}>4×n</option>
+          </select>
+          <select value={tf} onChange={(e) => props.patchWin(win.id, {timeframe: e.target.value})} title="공통 주기">
+            {['1', '3', '5', '10', '15', '30', '60', 'D'].map((id) => (
+              <option key={id} value={id}>
+                {id === 'D' ? '일봉' : `${id}분`}
+              </option>
+            ))}
+          </select>
           <select
-            value={draft?.condition || ''}
-            onChange={(e) => props.setDraft({...draft, condition: e.target.value})}
+            value={state.config.strategyId || ''}
+            onChange={(e) => void props.setStrategy(e.target.value)}
+            title="공통 전략"
           >
+            <option value="">전략 없음</option>
+            {props.systems.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+          <select value={draft?.condition || ''} onChange={(e) => props.setDraft({...draft, condition: e.target.value})} title="조건식">
             <option value="">조건식</option>
             {state.conditions.map((c) => (
               <option key={c.seq} value={c.seq}>
@@ -488,38 +513,63 @@ function Pane(props: {
               </option>
             ))}
           </select>
-          <button
-            disabled={!draft?.condition}
-            onClick={() => void props.update({condition: draft.condition})}
-          >
-            조건검색 실행
+          <button className="hts-tool" disabled={!draft?.condition} onClick={() => void props.update({condition: draft.condition})}>
+            실행
           </button>
           <button
+            className="hts-tool"
             disabled={!state.captured?.length}
             onClick={() => {
               const codes = (state.captured || []).slice(0, 10).map((r) => r.code);
               void post('/api/charts', {codes}).then(() => props.load());
             }}
           >
-            포착 종목 넣기
+            포착넣기
+          </button>
+          <button className="hts-tool" onClick={() => props.setShowFormulas(true)}>
+            수식
           </button>
         </div>
-        <div className="chart-grid">
+        <div className="chart-grid multi-grid" style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}>
           {selected.map((s) => (
-            <article className="chart-card" key={s.code}>
-              <div className="chart-top">
-                <div>
-                  <b>{s.name}</b> <span className="stock-code">{s.code}</span>
-                  <div className="price">
-                    {fmt(s.price)} <span className={s.change >= 0 ? 'positive' : 'negative'}>{s.change.toFixed(2)}%</span>
-                  </div>
-                </div>
-                {strategySelect(s.code)}
+            <article
+              className={'chart-card mini' + (code === s.code ? ' current' : '')}
+              key={s.code}
+              onClick={() => props.onCommonCode(s.code)}
+            >
+              <div className="cell-head">
+                <b>{s.name || s.code}</b>
+                <span className="stock-code">{s.code}</span>
+                <span className="cell-px">
+                  {fmt(s.price)}{' '}
+                  <em className={s.change >= 0 ? 'positive' : 'negative'}>
+                    {s.change >= 0 ? '+' : ''}
+                    {s.change.toFixed(2)}%
+                  </em>
+                </span>
+                <button
+                  className="cell-x"
+                  title="제외"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void props.toggleChart(s.code);
+                  }}
+                >
+                  ×
+                </button>
               </div>
-              <StockMiniChart code={s.code} cached={state.candles[s.code] || []} formulas={props.formulasFor(s.code)} height={cellH} grid={props.grid} logScale={props.logScale} />
+              <StockMiniChart
+                code={s.code}
+                cached={state.candles[s.code] || []}
+                formulas={props.formulasFor(s.code)}
+                height={cellH}
+                grid={props.grid}
+                logScale={props.logScale}
+                timeframe={tf}
+              />
             </article>
           ))}
-          {selected.length === 0 && <div className="empty">조건검색 실행 후 「포착 종목 넣기」를 누르거나, 조건검색 창에서 종목을 체크하세요.</div>}
+          {selected.length === 0 && <div className="empty">조건식 실행 후 포착넣기, 또는 조건검색에서 종목을 체크하세요.</div>}
         </div>
       </div>
     );
@@ -550,6 +600,7 @@ function StockMiniChart({
   height,
   grid,
   logScale,
+  timeframe = '1',
 }: {
   code: string;
   cached: Candle[];
@@ -557,6 +608,7 @@ function StockMiniChart({
   height: number;
   grid: boolean;
   logScale: boolean;
+  timeframe?: string;
 }) {
   const [bars, setBars] = useState<Candle[]>(cached);
   useEffect(() => {
@@ -564,9 +616,8 @@ function StockMiniChart({
   }, [cached]);
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
-    if (bars.length) return;
     let stop = false;
-    void post('/api/chart', {code, timeframe: '1'})
+    void post('/api/chart', {code, timeframe})
       .then((d) => {
         if (!stop && d.candles?.length) setBars(d.candles);
       })
@@ -574,7 +625,7 @@ function StockMiniChart({
     return () => {
       stop = true;
     };
-  }, [code]);
+  }, [code, timeframe]);
   if (!bars.length) return <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>;
   return <Chart data={bars} formulas={formulas} chartHeight={height} grid={grid} logScale={logScale} />;
 }

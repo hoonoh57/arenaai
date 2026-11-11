@@ -77,9 +77,16 @@
 .ctx-menu button{background:none;border:0;color:#d5e6d8;text-align:left;padding:6px 8px}
 .ctx-menu button:hover{background:#24352c}
 .formula-pop{position:absolute;right:12px;top:48px;z-index:40;background:#15241c;border:1px solid #3a5344;padding:10px;border-radius:6px;width:200px}
-.multi-bar{display:flex;gap:6px;padding:8px;align-items:center;flex-shrink:0}
-.multi-bar select,.multi-bar button{background:#1b2a24;border:1px solid #355044;color:#d5e6d8;border-radius:4px;padding:6px 8px}
 .pane-multi{display:flex;flex-direction:column;height:100%;min-height:0}
-.pane-multi .chart-grid{flex:1;min-height:0;overflow:hidden}
+.pane-multi .chart-grid{flex:1;min-height:0;overflow:hidden;gap:1px;background:#1a2b22;padding:0}
+.pane-multi .chart-card.mini{border:0;border-radius:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:#111923}
+.pane-multi .chart-card.mini.current{outline:1px solid #b9ef78;outline-offset:-1px}
+.cell-head{display:flex;align-items:center;gap:6px;padding:2px 6px;min-height:22px;background:#15241c;flex-shrink:0;font-size:11px}
+.cell-head b{font-size:11px}
+.cell-px{margin-left:auto;font-size:11px;font-weight:700}
+.cell-px em{font-style:normal;font-size:10px;margin-left:4px}
+.cell-x{background:none;border:0;color:#8fa79a;padding:0 4px;font-size:12px}
+.pane-multi .chart{flex:1;min-height:0}
+.hts-tool{background:#1b2a24;border:1px solid #355044;color:#d5e6d8;border-radius:4px;padding:4px 8px;font-size:11px}
 .rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}
