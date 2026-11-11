@@ -127,6 +127,9 @@ type AppConfig = {
   running: boolean;
   refreshMs: number;
   chartCodes: string[];
+  /** Default system formula for checked codes without an override. */
+  strategyId: string;
+  strategyByCode: Record<string, string>;
 };
 let config: AppConfig = {
   condition: '',
@@ -135,6 +138,8 @@ let config: AppConfig = {
   running: false,
   refreshMs: 60_000,
   chartCodes: [],
+  strategyId: '',
+  strategyByCode: {},
 };
 
 function bridgeCfg() {
@@ -162,16 +167,33 @@ let busy = false;
 let revision = 0;
 
 /** Signal evaluation is delegated to the hub; formulas stay in the app layer. */
+function systemById(id: string) {
+  return formulas.find((f) => f.id === id && f.kind === 'system');
+}
+
+function strategyFor(code: string) {
+  const override = config.strategyByCode[code];
+  if (override) return systemById(override);
+  if (config.strategyId) return systemById(config.strategyId);
+  return formulas.find((f) => f.enabled && f.kind === 'system') ?? null;
+}
+
 function currentEvaluator() {
-  const system = formulas.find((f) => f.enabled && f.kind === 'system');
-  if (!system) return null;
   return (code: string, closed: Candle[]) => {
-    void code;
     if (!closed.length) return null;
+    const system = strategyFor(code);
+    if (!system) return null;
     const buy = evaluate(system.expression, closed, system.variables, formulas).at(-1);
     const sell = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas).at(-1) : false;
     return {buy: Boolean(buy), sell: Boolean(sell)};
   };
+}
+
+function normalizeStrategyId(id: unknown): string {
+  if (id === undefined || id === null || id === '') return '';
+  if (typeof id !== 'string') throw new Error('전략 ID가 올바르지 않습니다.');
+  if (!systemById(id)) throw new Error('시스템 수식이 아닙니다. 수식 관리자에서 시스템트레이딩 수식을 만드세요.');
+  return id;
 }
 
 function syncSignals(): void {
@@ -333,6 +355,26 @@ app.post('/api/conditions', async (_req, res) => {
     res.status(502).json({error: e instanceof Error ? e.message : '조회 실패'});
   }
 });
+app.post('/api/strategy', async (req, res) => {
+  try {
+    const formulaId = normalizeStrategyId(req.body?.formulaId);
+    const code = req.body?.code;
+    if (code === undefined || code === '') {
+      config = {...config, strategyId: formulaId};
+    } else {
+      if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+      const strategyByCode = {...config.strategyByCode};
+      if (formulaId) strategyByCode[code] = formulaId;
+      else delete strategyByCode[code];
+      config = {...config, strategyByCode};
+    }
+    syncSignals();
+    bridge.reevaluate(config.chartCodes);
+    res.json({ok: true, config});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '전략 설정 실패'});
+  }
+});
 app.post('/api/charts', async (req, res) => {
   try {
     const chartCodes = normalizeChartCodes(req.body?.codes);
@@ -340,7 +382,12 @@ app.post('/api/charts', async (req, res) => {
       res.status(400).json({error: '모의 매매 중에는 차트 종목을 모두 해제할 수 없습니다. 먼저 전략을 중지하세요.'});
       return;
     }
-    config = {...config, chartCodes, running: config.running && chartCodes.length > 0};
+    const previous = config.chartCodes;
+    const strategyByCode = {...config.strategyByCode};
+    for (const code of previous) {
+      if (!chartCodes.includes(code)) delete strategyByCode[code];
+    }
+    config = {...config, chartCodes, strategyByCode, running: config.running && chartCodes.length > 0};
     syncSignals();
     if (config.condition) {
       const result = await bridge.syncSubscriptions(bridgeCfg());
@@ -348,6 +395,12 @@ app.post('/api/charts', async (req, res) => {
     } else {
       hub.setActiveCodes(chartCodes);
     }
+    const added = chartCodes.filter((code) => !previous.includes(code));
+    for (const code of added) {
+      try { await bridge.refreshChart(code); }
+      catch (e) { cache.setWarning(code, e instanceof Error ? e.message : '분봉 조회 실패'); }
+    }
+    if (added.length) bridge.reevaluate(added);
     res.json({ok: true, config, ranking});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '차트 종목 설정 실패'});
@@ -386,6 +439,14 @@ app.post('/api/config', async (req, res) => {
     chartCodes = [];
   }
   try {
+    let strategyId = config.strategyId;
+    let strategyByCode = condition !== config.condition ? {} : config.strategyByCode;
+    try {
+      if (req.body.strategyId !== undefined) strategyId = normalizeStrategyId(req.body.strategyId);
+    } catch (e) {
+      res.status(400).json({error: e instanceof Error ? e.message : '전략 설정 실패'});
+      return;
+    }
     const next: AppConfig = {
       condition,
       count,
@@ -393,6 +454,8 @@ app.post('/api/config', async (req, res) => {
       running,
       refreshMs,
       chartCodes,
+      strategyId,
+      strategyByCode,
     };
     await applyConfig(next);
     restartRefreshTimer();

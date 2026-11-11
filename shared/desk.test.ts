@@ -42,10 +42,12 @@ test('공통변수는 잠기지 않은 자식창만 바꾸고 잠긴 창은 강�
   desk = insertWindow(desk, 'tr');
   const locked = desk.windows[1].id;
   desk = toggleLock(desk, locked);
-  desk = syncVars(desk, {code: '005930', name: '삼성전자'});
+  desk = syncVars(desk, {code: '005930', name: '삼성전자', strategyId: 'sys-1'});
   assert.equal(desk.vars.code, '005930');
   assert.equal(desk.windows[0].code, '005930');
+  assert.equal(desk.windows[0].strategyId, 'sys-1');
   assert.notEqual(desk.windows[1].code, '005930');
+  assert.notEqual(desk.windows[1].strategyId, 'sys-1');
   assert.equal(desk.windows[1].locked, true);
 });
 

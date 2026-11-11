@@ -40,3 +40,6 @@
 .tr-pane pre{background:#0c141c;border:1px solid #24343c;padding:10px;overflow:auto;max-height:240px;font-size:10px;color:#b7c9be}
 .pane-head{font-size:12px;color:#9db0a4;margin-bottom:8px}
 .notice{z-index:2000}
+
+.hts-var select,.strategy-select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:5px 8px;border-radius:4px;max-width:180px}
+.pane-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}

@@ -25,7 +25,7 @@ import {
 import {Chart} from './ChartView';
 import {FormulaManager} from './FormulaManager';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>};
 type State = {
   mode: string;
   config: Config;
@@ -83,7 +83,7 @@ export function DeskApp() {
       setState(s);
       setDraft((d) =>
         d
-          ? {...d, chartCodes: s.config.chartCodes || [], running: s.config.running, refreshMs: s.config.refreshMs || d.refreshMs || 60000}
+          ? {...d, chartCodes: s.config.chartCodes || [], running: s.config.running, refreshMs: s.config.refreshMs || d.refreshMs || 60000, strategyId: s.config.strategyId || d.strategyId || '', strategyByCode: s.config.strategyByCode || {}}
           : s.config,
       );
     } catch {
@@ -201,13 +201,28 @@ export function DeskApp() {
     }
   };
 
-  const applyCode = (code: string) => {
+  const applyCode = (code: string, strategyId = desk.vars.strategyId) => {
     try {
-      updateDesk(syncVars(desk, {code, name: desk.vars.name}));
+      updateDesk(syncVars(desk, {code, name: desk.vars.name, strategyId}));
     } catch (e) {
       setNotice((e as Error).message);
     }
   };
+  const systems = state.formulas.filter((f) => f.kind === 'system');
+  const setStrategy = async (formulaId: string, code?: string) => {
+    try {
+      await post('/api/strategy', {formulaId, code});
+      if (!code) applyCode(desk.vars.code, formulaId);
+      await load();
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  };
+  const formulasFor = (code: string) => {
+    const id = (state.config.strategyByCode || {})[code] || state.config.strategyId || systems.find((f) => f.enabled)?.id || '';
+    return state.formulas.map((f) => (f.kind === 'system' ? {...f, enabled: f.id === id} : f));
+  };
+
 
   return (
     <div className="hts">
@@ -252,6 +267,18 @@ export function DeskApp() {
             onChange={(e) => applyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
           />
         </label>
+        <label className="hts-var">
+          공통 전략
+          <select
+            value={desk.vars.strategyId || state.config.strategyId || ''}
+            onChange={(e) => void setStrategy(e.target.value)}
+          >
+            <option value="">선택</option>
+            {systems.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+        </label>
         <span className="hts-desk-name">{desk.number}. {desk.name}</span>
         <span className="mode">
           <i /> {state.mode === 'mock' ? '모의 조회' : '실전 조회'}
@@ -293,6 +320,9 @@ export function DeskApp() {
                 load={load}
                 setNotice={setNotice}
                 setShowFormulas={setShowFormulas}
+                setStrategy={setStrategy}
+                formulasFor={formulasFor}
+                systems={systems}
               />
             </ChildFrame>
           ))}
@@ -397,9 +427,25 @@ function Pane(props: {
   load: () => Promise<void>;
   setNotice: (v: string) => void;
   setShowFormulas: (v: boolean) => void;
+  setStrategy: (formulaId: string, code?: string) => Promise<void>;
+  formulasFor: (code: string) => Formula[];
+  systems: Formula[];
 }) {
   const {win, state, draft, selected, chartCodes} = props;
   const code = win.locked ? win.code || '' : props.desk.vars.code || win.code || '';
+  const strategySelect = (forCode: string) => (
+    <select
+      className="strategy-select"
+      value={(state.config.strategyByCode || {})[forCode] || state.config.strategyId || ''}
+      onChange={(e) => void props.setStrategy(e.target.value, forCode)}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <option value="">전략 없음</option>
+      {props.systems.map((f) => (
+        <option key={f.id} value={f.id}>{f.name}</option>
+      ))}
+    </select>
+  );
   if (win.kind === 'chart') {
     const stock = state.ranking.find((s) => s.code === code);
     const data = state.candles[code] || [];
@@ -407,11 +453,12 @@ function Pane(props: {
       <div className="pane-chart">
         <div className="pane-head">
           {stock ? `${stock.name} ${code}` : code || '공통 종목코드를 입력하거나 창을 잠근 뒤 종목을 고정하세요.'}
+          {code ? strategySelect(code) : null}
         </div>
         {data.length ? (
-          <Chart data={data} formulas={state.formulas} chartHeight={Math.max(180, win.h - 80)} grid={props.grid} logScale={props.logScale} />
+          <Chart data={data} formulas={props.formulasFor(code)} chartHeight={Math.max(180, win.h - 80)} grid={props.grid} logScale={props.logScale} />
         ) : (
-          <div className="empty-chart">이 종목은 멀티차트에 체크되어야 분봉을 불러옵니다.</div>
+          <div className="empty-chart">조건검색에서 이 종목을 체크하면 분봉을 바로 조회합니다. 가상 시세는 만들지 않습니다.</div>
         )}
       </div>
     );
@@ -428,11 +475,12 @@ function Pane(props: {
                   {fmt(s.price)} <span className={s.change >= 0 ? 'positive' : 'negative'}>{s.change.toFixed(2)}%</span>
                 </div>
               </div>
+              {strategySelect(s.code)}
             </div>
             {state.candles[s.code]?.length ? (
-              <Chart data={state.candles[s.code]} formulas={state.formulas} chartHeight={210} grid={props.grid} logScale={props.logScale} />
+              <Chart data={state.candles[s.code]} formulas={props.formulasFor(s.code)} chartHeight={210} grid={props.grid} logScale={props.logScale} />
             ) : (
-              <div className="empty-chart">차트 데이터가 없습니다</div>
+              <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>
             )}
           </article>
         ))}

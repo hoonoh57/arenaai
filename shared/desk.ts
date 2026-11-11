@@ -9,7 +9,7 @@ export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'tr', 'events'] 
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
 
-export type CommonVars = {code: string; name: string};
+export type CommonVars = {code: string; name: string; strategyId: string};
 
 export type ChildWindow = {
   id: string;
@@ -25,6 +25,8 @@ export type ChildWindow = {
   /** When true, parent common-variable changes do not overwrite this window. */
   locked: boolean;
   code?: string;
+  /** System formula id. Locked windows keep this when the desk strategy changes. */
+  strategyId?: string;
 };
 
 export type VirtualDesk = {
@@ -48,7 +50,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
 const CODE = /^\d{6}$/;
 
 export function emptyVars(): CommonVars {
-  return {code: '', name: ''};
+  return {code: '', name: '', strategyId: ''};
 }
 
 export function defaultWorkspace(): DeskWorkspace {
@@ -96,6 +98,7 @@ export function insertWindow(desk: VirtualDesk, kind: WindowKind, offset = desk.
     state: 'normal',
     locked: false,
     code: desk.vars.code || undefined,
+    strategyId: desk.vars.strategyId || undefined,
   };
   return {...desk, windows: [...desk.windows, window]};
 }
@@ -131,8 +134,10 @@ export function setWindowState(desk: VirtualDesk, id: string, state: WindowState
 export function toggleLock(desk: VirtualDesk, id: string): VirtualDesk {
   const win = desk.windows.find((item) => item.id === id);
   if (!win) return desk;
-  if (win.locked) return patchWindow(desk, id, {locked: false, code: desk.vars.code || win.code});
-  return patchWindow(desk, id, {locked: true, code: win.code || desk.vars.code});
+  if (win.locked) {
+    return patchWindow(desk, id, {locked: false, code: desk.vars.code || win.code, strategyId: desk.vars.strategyId || win.strategyId});
+  }
+  return patchWindow(desk, id, {locked: true, code: win.code || desk.vars.code, strategyId: win.strategyId || desk.vars.strategyId});
 }
 
 /**
@@ -141,11 +146,12 @@ export function toggleLock(desk: VirtualDesk, id: string): VirtualDesk {
 export function syncVars(desk: VirtualDesk, vars: CommonVars): VirtualDesk {
   const code = typeof vars.code === 'string' && CODE.test(vars.code) ? vars.code : vars.code === '' ? '' : desk.vars.code;
   const name = typeof vars.name === 'string' ? vars.name.slice(0, 40) : desk.vars.name;
-  const next = {code, name};
+  const strategyId = typeof vars.strategyId === 'string' ? vars.strategyId.slice(0, 80) : desk.vars.strategyId;
+  const next = {code, name, strategyId};
   return {
     ...desk,
     vars: next,
-    windows: desk.windows.map((win) => (win.locked ? win : {...win, code: next.code || undefined})),
+    windows: desk.windows.map((win) => (win.locked ? win : {...win, code: next.code || undefined, strategyId: next.strategyId || undefined})),
   };
 }
 
@@ -177,7 +183,11 @@ export function validateWorkspace(value: unknown): DeskWorkspace {
       id: desk.id.slice(0, 80),
       number: desk.number,
       name: desk.name.trim().slice(0, 40),
-      vars: {code, name: typeof vars.name === 'string' ? vars.name.slice(0, 40) : ''},
+      vars: {
+        code,
+        name: typeof vars.name === 'string' ? vars.name.slice(0, 40) : '',
+        strategyId: typeof vars.strategyId === 'string' ? vars.strategyId.slice(0, 80) : '',
+      },
       windows: windows.map(validateWindow),
     };
   });
@@ -204,6 +214,7 @@ function validateWindow(win: ChildWindow): ChildWindow {
     restore: win.restore,
     locked: Boolean(win.locked),
     code: typeof win.code === 'string' && (win.code === '' || CODE.test(win.code)) ? win.code : undefined,
+    strategyId: typeof win.strategyId === 'string' ? win.strategyId.slice(0, 80) : undefined,
   };
 }
 
