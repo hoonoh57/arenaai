@@ -9,7 +9,7 @@ import {evaluate} from '../shared/formula';
 import {loadFormulas, saveFormulas} from './formulas';
 import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
-import {barReturn, holdEndDate, summarizeVerify, type VerifyRow} from '../shared/verify';
+import {barReturn, HOLD_PRESETS, indexAtOrBefore, maxReturnFrom, parseSearchAt, returnAfterMinutes, summarizeVerify, type VerifyRow} from '../shared/verify';
 import {AuditLog} from './realtime/audit';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
@@ -455,33 +455,38 @@ app.post('/api/verify', async (req, res) => {
   try {
     const formulaId = typeof req.body?.formulaId === 'string' ? req.body.formulaId : '';
     const formula = formulas.find((f) => f.id === formulaId && (f.kind === 'signal' || f.kind === 'system' || f.kind === 'highlight'));
-    if (!formula) throw new Error('검증할 조건(신호·시스템) 수식을 선택하세요.');
+    const conditionName = typeof req.body?.conditionName === 'string' ? req.body.conditionName.slice(0, 80) : '';
     const searchDate = typeof req.body?.searchDate === 'string' ? req.body.searchDate : '';
-    const holdDays = Number(req.body?.holdDays);
-    const endDate = holdEndDate(searchDate, holdDays);
-    const searchMs = Date.parse(`${searchDate}T00:00:00+09:00`) / 1000;
-    const endMs = Date.parse(`${endDate}T00:00:00+09:00`) / 1000;
+    const searchTime = typeof req.body?.searchTime === 'string' ? req.body.searchTime : '09:00';
+    const minute = Boolean(req.body?.minute);
+    const holdMinutes = Number(req.body?.holdMinutes);
+    if (!Number.isInteger(holdMinutes) || holdMinutes < 1 || holdMinutes > 60 * 24 * 20) throw new Error('수익률기간을 확인하세요.');
+    const searchAt = parseSearchAt(searchDate, searchTime);
+    const extraCols = [10, 30, holdMinutes].filter((v, i, a) => a.indexOf(v) === i);
     const raw = Array.isArray(req.body?.codes) ? req.body.codes : [];
     const codes = [...new Set(raw.filter((c: unknown) => typeof c === 'string' && /^\d{6}$/.test(c)))].slice(0, 16) as string[];
-    if (!codes.length) throw new Error('검증 종목을 선택하세요. 한 번에 16종목까지입니다.');
+    if (!codes.length) throw new Error('검증 종목이 없습니다. 조건검색 포착 또는 관심 종목을 넣으세요.');
+    const tf = minute ? '1' : 'D';
     const rows: VerifyRow[] = [];
     for (const code of codes) {
-      const page = await api.chartPage({code, timeframe: 'D', baseDate: endDate.replace(/-/g, '')});
+      const page = await api.chartPage({code, timeframe: tf});
       const candles = page.candles;
       const listed = ranking.find((s) => s.code === code);
       const name = listed?.name && listed.name !== code ? listed.name : await api.stockName(code).catch(() => code);
+      const empty: VerifyRow = {code, name, matched: false, searchPrice: null, endPrice: null, returnPct: null, maxReturnPct: null, returns: {}};
       if (candles.length < 2) {
-        rows.push({code, name, matched: false, searchPrice: null, endPrice: null, returnPct: null});
+        rows.push(empty);
         continue;
       }
-      const values = evaluate(formula.expression, candles, formula.variables, formulas);
-      let searchIdx = -1;
-      for (let i = 0; i < candles.length; i++) if (candles[i].time <= searchMs + 86399) searchIdx = i;
-      let endIdx = -1;
-      for (let i = 0; i < candles.length; i++) if (candles[i].time <= endMs + 86399) endIdx = i;
-      const matched = searchIdx >= 0 && Boolean(values[searchIdx]);
-      const searchPrice = searchIdx >= 0 ? candles[searchIdx].close : null;
-      const endPrice = endIdx >= 0 ? candles[endIdx].close : null;
+      const times = candles.map((c) => c.time);
+      const closes = candles.map((c) => c.close);
+      const searchIdx = indexAtOrBefore(times, searchAt);
+      const endIdx = indexAtOrBefore(times, searchAt + holdMinutes * 60);
+      const matched = formula ? searchIdx >= 0 && Boolean(evaluate(formula.expression, candles, formula.variables, formulas)[searchIdx]) : searchIdx >= 0;
+      const searchPrice = searchIdx >= 0 ? closes[searchIdx] : null;
+      const endPrice = endIdx >= 0 ? closes[endIdx] : null;
+      const returns: Record<string, number | null> = {};
+      for (const m of extraCols) returns[String(m)] = matched && searchIdx >= 0 ? returnAfterMinutes(closes, times, searchIdx, m) : null;
       rows.push({
         code,
         name,
@@ -490,9 +495,23 @@ app.post('/api/verify', async (req, res) => {
         endPrice,
         volume: searchIdx >= 0 ? candles[searchIdx].volume : undefined,
         returnPct: matched ? barReturn(searchPrice || 0, endPrice || 0) : null,
+        maxReturnPct: matched ? maxReturnFrom(closes, searchIdx, endIdx) : null,
+        returns,
       });
     }
-    res.json({formula: formula.name, searchDate, endDate, holdDays, ...summarizeVerify(rows), universe: rows.length});
+    const holdLabel = HOLD_PRESETS.find((p) => p.id === holdMinutes)?.label || `${holdMinutes}분간`;
+    res.json({
+      formula: formula?.name || conditionName || '조건식',
+      searchDate,
+      searchTime,
+      searchAt,
+      holdMinutes,
+      holdLabel,
+      minute,
+      extraCols,
+      ...summarizeVerify(rows),
+      universe: rows.length,
+    });
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '성과검증 실패'});
   }

@@ -27,6 +27,7 @@ import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
+import {HOLD_PRESETS} from '../shared/verify';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
@@ -717,6 +718,11 @@ function StockMiniChart({
   );
 }
 
+function pct(v: number | null | undefined) {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+}
+
 function VerifyPane({
   state,
   chartCodes,
@@ -730,105 +736,171 @@ function VerifyPane({
   setNotice: (v: string) => void;
   onCode: (code: string) => void;
 }) {
-  const candidates = state.formulas.filter((f) => f.kind === 'signal' || f.kind === 'system');
-  const [formulaId, setFormulaId] = useState(candidates.find((f) => f.enabled)?.id || candidates[0]?.id || '');
-  const [searchDate, setSearchDate] = useState(() => new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
-  const [holdDays, setHoldDays] = useState(20);
+  const formulas = state.formulas.filter((f) => f.kind === 'signal' || f.kind === 'system');
+  const [formulaId, setFormulaId] = useState(formulas.find((f) => f.enabled)?.id || formulas[0]?.id || '');
+  const [conditionSeq, setConditionSeq] = useState(state.config.condition || '');
+  const [searchDate, setSearchDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [searchTime, setSearchTime] = useState('09:10');
+  const [minute, setMinute] = useState(true);
+  const [holdMinutes, setHoldMinutes] = useState(420);
+  const [customMin, setCustomMin] = useState(50);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<'all' | 'up' | 'down'>('all');
-  const [result, setResult] = useState<{
+  const [picked, setPicked] = useState<string[]>([]);
+  const [result, setResult] = useState<null | {
     formula: string;
     searchDate: string;
-    endDate: string;
-    holdDays: number;
+    searchTime: string;
+    holdLabel: string;
+    holdMinutes: number;
+    extraCols: number[];
     matched: number;
     upCount: number;
+    flatCount: number;
+    downCount: number;
     upRatio: number | null;
     avgReturn: number | null;
     universe: number;
-    rows: {code: string; name: string; matched: boolean; searchPrice: number | null; endPrice: number | null; returnPct: number | null; volume?: number}[];
-  } | null>(null);
-  const codes = (chartCodes.length ? chartCodes : selected.map((s) => s.code)).slice(0, 16);
+    rows: {code: string; name: string; returnPct: number | null; maxReturnPct: number | null; volume?: number; returns: Record<string, number | null>}[];
+  }>(null);
+  const codes = (
+    state.captured?.length
+      ? state.captured.map((s) => s.code)
+      : chartCodes.length
+        ? chartCodes
+        : selected.length
+          ? selected.map((s) => s.code)
+          : state.ranking.map((s) => s.code)
+  ).slice(0, 16);
+  const condName = state.conditions.find((c) => c.seq === conditionSeq)?.name || '';
   const run = async () => {
-    if (!formulaId) return setNotice('검증할 조건 수식을 고르세요.');
-    if (!codes.length) return setNotice('멀티차트 또는 포착 종목을 넣으세요. 최대 16종목.');
+    if (!codes.length) return setNotice('조건검색을 실행하거나 종목을 포착하세요. 최대 16종목.');
     setBusy(true);
     try {
-      const d = await post('/api/verify', {formulaId, searchDate, holdDays, codes});
+      const d = await post('/api/verify', {
+        formulaId: formulaId || undefined,
+        conditionName: condName,
+        searchDate,
+        searchTime,
+        minute,
+        holdMinutes: holdMinutes === 0 ? customMin : holdMinutes,
+        codes,
+      });
       setResult(d);
+      setPicked([]);
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const rows = (result?.rows || []).filter((r) => (tab === 'up' ? (r.returnPct || 0) > 0 : tab === 'down' ? (r.returnPct || 0) < 0 : true));
+  const cols = result?.extraCols?.length ? result.extraCols : [10, 30, holdMinutes || customMin];
+  const toggle = (code: string) => setPicked((p) => (p.includes(code) ? p.filter((c) => c !== code) : p.length >= 4 ? p : [...p, code]));
   return (
-    <div className="scanner-pane verify-pane">
-      <p className="panel-desc">
-        [1516] 조건식을 과거 검색시점에 적용한 뒤 수익률기간만큼 보유한 성과입니다. 일봉 기준, 종목은 16개까지. 키움 서버 과거조건 검색은 REST에 없습니다.
-      </p>
-      <label>
-        조건
-        <select value={formulaId} onChange={(e) => setFormulaId(e.target.value)}>
-          <option value="">수식 선택</option>
-          {candidates.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        검색시점
-        <input type="date" value={searchDate} onChange={(e) => setSearchDate(e.target.value)} />
-      </label>
-      <label>
-        수익률기간
-        <select value={String(holdDays)} onChange={(e) => setHoldDays(Number(e.target.value))}>
-          <option value={1}>1일</option>
-          <option value={5}>1주</option>
-          <option value={20}>1개월</option>
-          <option value={60}>3개월</option>
-          <option value={120}>6개월</option>
-        </select>
-      </label>
-      <p className="editor-hint">대상 {codes.length}종목 · 일단위 검증</p>
-      <button className="hts-tool on" disabled={busy} onClick={() => void run()}>
-        {busy ? '검증 중…' : '성과 검증하기'}
-      </button>
-      {result && (
-        <div className="verify-result">
-          <p>
-            <b>{result.formula}</b> {result.searchDate} → {result.endDate} ({result.holdDays}일)
-          </p>
-          <div className="verify-stats">
-            <span>검색 {result.matched}/{result.universe}</span>
-            <span>상승종목비율 {result.upRatio == null ? '—' : `${result.upRatio.toFixed(1)}%`}</span>
-            <span>기간수익률 {result.avgReturn == null ? '—' : `${result.avgReturn.toFixed(2)}%`}</span>
+    <div className="verify-1516">
+      <div className="v16-banner">
+        <b>성과 검증이란?</b> 작성한 조건식이 시장대비 초과수익을 달성하는 우수한 조건식인지 검증합니다.
+      </div>
+      <div className="v16-grid">
+        <div className="v16-left">
+          <h4>성과 검증 시작하기</h4>
+          <div className="v16-row">
+            <span>조건</span>
+            <select value={conditionSeq} onChange={(e) => setConditionSeq(e.target.value)}>
+              <option value="">0150 조건식</option>
+              {state.conditions.map((c) => (
+                <option key={c.seq} value={c.seq}>{c.name}</option>
+              ))}
+            </select>
+            <select value={formulaId} onChange={(e) => setFormulaId(e.target.value)}>
+              <option value="">수식(신호)</option>
+              {formulas.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
           </div>
-          <div className="formula-tabs">
-            <button className={tab === 'all' ? 'selected' : ''} onClick={() => setTab('all')}>전체</button>
-            <button className={tab === 'up' ? 'selected' : ''} onClick={() => setTab('up')}>상승</button>
-            <button className={tab === 'down' ? 'selected' : ''} onClick={() => setTab('down')}>하락</button>
+          <p className="v16-target">대상 {codes.length}종목 · {minute ? '분단위 검증' : '일단위 검증'}</p>
+          <div className="v16-row">
+            <span>검색시점</span>
+            <input type="date" value={searchDate} onChange={(e) => setSearchDate(e.target.value)} />
+            <input type="time" value={searchTime} onChange={(e) => setSearchTime(e.target.value)} disabled={!minute} />
+            <label className="v16-check">
+              <input type="checkbox" checked={minute} onChange={(e) => setMinute(e.target.checked)} /> 분단위 검증
+            </label>
           </div>
-          <div className="table-head">
-            <span>종목</span>
-            <span>검색가</span>
-            <span>수익률</span>
+          <div className="v16-holds">
+            <span>수익률기간</span>
+            {HOLD_PRESETS.map((p) => (
+              <button key={p.id} className={holdMinutes === p.id ? 'on' : ''} onClick={() => setHoldMinutes(p.id)}>{p.label}</button>
+            ))}
+            <button className={holdMinutes === 0 ? 'on' : ''} onClick={() => setHoldMinutes(0)}>기타</button>
+            {holdMinutes === 0 && <input type="number" min={1} max={2000} value={customMin} onChange={(e) => setCustomMin(Number(e.target.value) || 1)} />}
           </div>
-          {rows.map((r) => (
-            <button key={r.code} className="rank-row" onClick={() => onCode(r.code)}>
-              <span className="rank-name">
-                <b>{r.name}</b>
-                <small>{r.code}</small>
-              </span>
-              <span>{r.searchPrice ? fmt(Math.round(r.searchPrice)) : '—'}</span>
-              <strong className={(r.returnPct || 0) >= 0 ? 'positive' : 'negative'}>{r.returnPct == null ? '—' : `${r.returnPct.toFixed(2)}%`}</strong>
-            </button>
-          ))}
+          <button className="v16-run" disabled={busy} onClick={() => void run()}>{busy ? '검증 중…' : '성과 검증하기'}</button>
+          <h4>성과 검증 결과</h4>
+          {result ? (
+            <>
+              <p className="v16-summary">
+                선택한 조건식을 {result.searchDate.replace(/-/g, '/')} {result.searchTime} 에 적용하여 검색된 종목을 {result.holdLabel} 간 보유시, 검색된종목 기간수익률은{' '}
+                <b className={(result.avgReturn || 0) < 0 ? 'negative' : 'positive'}>{pct(result.avgReturn)}</b> 입니다. 코스피·코스닥 대비 수익률은 지수 REST가 없어 표시하지 않습니다.
+              </p>
+              <table className="v16-table">
+                <thead><tr><th>시장별 종목비율</th><th>전체</th><th>상승</th><th>보합</th><th>하락</th><th>상승종목비율</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>전체({result.matched}종목)</td>
+                    <td>{result.matched}</td>
+                    <td>{result.upCount}</td>
+                    <td>{result.flatCount}</td>
+                    <td>{result.downCount}</td>
+                    <td>{result.upRatio == null ? '—' : `${result.upRatio.toFixed(0)}%`}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <table className="v16-table">
+                <thead><tr><th>기간 수익률</th><th>검색된종목</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>{result.holdLabel}</td>
+                    <td className={(result.avgReturn || 0) < 0 ? 'negative' : 'positive'}>{pct(result.avgReturn)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          ) : <p className="empty">성과 검증하기를 실행하세요.</p>}
         </div>
-      )}
+        <div className="v16-right">
+          <h4>검증결과 상세</h4>
+          <p className="v16-detail-head">
+            {result ? `${result.searchDate.replace(/-/g, '/')} ${result.searchTime} 시점에 해당조건으로 총 ${result.matched} 개의 종목이 검색되었습니다.` : '아직 검증하지 않았습니다.'}
+          </p>
+          <div className="v16-list">
+            <div className="v16-list-head">
+              <span />
+              <span>종목명</span>
+              {cols.map((m) => <span key={m}>{HOLD_PRESETS.find((p) => p.id === m)?.label || `${m}분간`}</span>)}
+              <span>기간 내 최고수익률</span>
+              <span>검색시점 거래량</span>
+            </div>
+            {(result?.rows || []).map((r) => (
+              <div key={r.code} className={'v16-list-row' + (picked.includes(r.code) ? ' on' : '')}>
+                <input type="checkbox" checked={picked.includes(r.code)} onChange={() => toggle(r.code)} />
+                <button type="button" onClick={() => onCode(r.code)}>{r.name}</button>
+                {cols.map((m) => {
+                  const v = r.returns?.[String(m)] ?? (m === (result?.holdMinutes || 0) ? r.returnPct : null);
+                  return <span key={m} className={(v || 0) < 0 ? 'negative' : (v || 0) > 0 ? 'positive' : ''}>{pct(v)}</span>;
+                })}
+                <span className={(r.maxReturnPct || 0) > 0 ? 'positive' : ''}>{pct(r.maxReturnPct)}</span>
+                <span>{r.volume ? fmt(r.volume) : '—'}</span>
+              </div>
+            ))}
+          </div>
+          <h4>차트 분석</h4>
+          <p className="editor-hint">체크 종목 {picked.length}/4. 코스피·코스닥 지수 라인은 미제공.</p>
+          {picked.length > 0 && result && (
+            <div className="v16-picked">{picked.map((code) => { const r = result.rows.find((x) => x.code === code); return r ? <span key={code}>{r.name} {pct(r.returnPct)}</span> : null; })}</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

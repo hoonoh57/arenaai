@@ -73,7 +73,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   captures: '조건검색 포착',
   tr: '키움 REST TR',
   events: '모의 이벤트',
-  verify: '1516 성과검증',
+  verify: '[1516] 성과검증',
   book: '주문 대시보드',
 };
 
