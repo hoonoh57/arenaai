@@ -15,7 +15,7 @@ export type BridgeBroker = BrokerLike & {
   strengthSnapshot?: (code: string) => Promise<StrengthSnapshot>;
 };
 
-export type BridgeConfig = {seq: string; count: number; weights: Weights};
+export type BridgeConfig = {seq: string; count: number; weights: Weights; chartCodes?: readonly string[]};
 
 export type BridgeOptions = {
   hub: RealtimeHub;
@@ -233,8 +233,11 @@ export class DemandBridge {
       });
     }
     if (!items.length) return {ranking: [], selected: [], warnings};
-    const ranking = rank(items, config.weights);
-    return {ranking, selected: ranking.slice(0, config.count), warnings};
+    const ranking = rank(items, config.weights, config.count);
+    const wanted = (config.chartCodes ?? []).filter((code) => /^\d{6}$/.test(code));
+    const byCode = new Map(ranking.map((stock) => [stock.code, stock]));
+    const selected = wanted.map((code) => byCode.get(code)).filter((stock): stock is Stock => Boolean(stock));
+    return {ranking, selected, warnings};
   }
 
   /** A quote is only usable while it is fresh; stale data is reported, never ranked. */

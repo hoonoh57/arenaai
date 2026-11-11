@@ -118,7 +118,40 @@ const bridge = new DemandBridge({
   maxSubscriptions: caps.limits.maxSubscriptions,
 });
 
-let config = {condition: '', count: 4, weights: {change: 40, strength: 35, value: 25} as Weights, running: false};
+const REFRESH_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
+type AppConfig = {
+  condition: string;
+  count: number;
+  weights: Weights;
+  running: boolean;
+  refreshMs: number;
+  chartCodes: string[];
+};
+let config: AppConfig = {
+  condition: '',
+  count: 10,
+  weights: {change: 40, strength: 35, value: 25},
+  running: false,
+  refreshMs: 60_000,
+  chartCodes: [],
+};
+
+function bridgeCfg() {
+  return {seq: config.condition, count: config.count, weights: config.weights, chartCodes: config.chartCodes};
+}
+
+function normalizeChartCodes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw new Error('차트 종목 목록이 올바르지 않습니다.');
+  const codes: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== 'string' || !/^\d{6}$/.test(value) || seen.has(value)) continue;
+    seen.add(value);
+    codes.push(value);
+  }
+  if (codes.length > 10) throw new Error('멀티차트는 최대 10종목입니다.');
+  return codes;
+}
 let conditions: {seq: string; name: string}[] = [];
 let formulas = loadFormulas();
 let ranking: Stock[] = [];
@@ -141,7 +174,7 @@ function currentEvaluator() {
 }
 
 function syncSignals(): void {
-  hub.setSignalEvaluator(config.running ? currentEvaluator() : null);
+  hub.setSignalEvaluator(config.running && config.chartCodes.length ? currentEvaluator() : null);
 }
 
 function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>}): void {
@@ -151,7 +184,7 @@ function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Re
 }
 
 async function refreshRanking(): Promise<void> {
-  const result = await bridge.computeRanking({seq: config.condition, count: config.count, weights: config.weights});
+  const result = await bridge.computeRanking(bridgeCfg());
   applyRanking(result);
 }
 
@@ -176,7 +209,7 @@ async function applyConfig(next: typeof config): Promise<void> {
     config = next;
     revision += 1;
     syncSignals();
-    const result = await bridge.apply({seq: config.condition, count: config.count, weights: config.weights});
+    const result = await bridge.apply(bridgeCfg());
     applyRanking(result);
     error = '';
   } catch (e) {
@@ -195,7 +228,7 @@ app.get('/api/state', (_req, res) =>
     config,
     conditions,
     ranking,
-    candles: bridge.candlesByCode(ranking.slice(0, config.count).map((s) => s.code)),
+    candles: bridge.candlesByCode(config.chartCodes),
     updatedAt,
     error,
     busy,
@@ -225,7 +258,7 @@ app.put('/api/formulas', (req, res) => {
     formulas = updated;
     revision += 1;
     syncSignals();
-    bridge.reevaluate(ranking.slice(0, config.count).map((s) => s.code));
+    bridge.reevaluate(config.chartCodes);
     res.json({formulas});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '수식 저장 실패'});
@@ -262,28 +295,70 @@ app.post('/api/conditions', async (_req, res) => {
     res.status(502).json({error: e instanceof Error ? e.message : '조회 실패'});
   }
 });
+app.post('/api/charts', async (req, res) => {
+  try {
+    const chartCodes = normalizeChartCodes(req.body?.codes);
+    if (config.running && chartCodes.length === 0) {
+      res.status(400).json({error: '모의 매매 중에는 차트 종목을 모두 해제할 수 없습니다. 먼저 전략을 중지하세요.'});
+      return;
+    }
+    config = {...config, chartCodes, running: config.running && chartCodes.length > 0};
+    syncSignals();
+    if (config.condition) {
+      const result = await bridge.syncSubscriptions(bridgeCfg());
+      applyRanking(result);
+    } else {
+      hub.setActiveCodes(chartCodes);
+    }
+    res.json({ok: true, config, ranking});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '차트 종목 설정 실패'});
+  }
+});
 app.post('/api/config', async (req, res) => {
-  const {condition, count, weights, running} = req.body;
+  const {condition, count, weights, running, refreshMs} = req.body;
+  let chartCodes: string[];
+  try {
+    chartCodes = req.body.chartCodes === undefined ? config.chartCodes : normalizeChartCodes(req.body.chartCodes);
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '차트 종목 설정 실패'});
+    return;
+  }
   if (
     typeof condition !== 'string' ||
     !conditions.some((c) => c.seq === condition) ||
-    !Number.isInteger(count) || count < 1 || count > 10 ||
+    !Number.isInteger(count) || count < 1 || count > 40 ||
     typeof running !== 'boolean' ||
     !weights ||
     !['change', 'strength', 'value'].every((k) => typeof weights[k] === 'number' && Number.isFinite(weights[k]) && weights[k] >= 0 && weights[k] <= 100) ||
-    weights.change + weights.strength + weights.value <= 0
+    weights.change + weights.strength + weights.value <= 0 ||
+    !(REFRESH_MS as readonly number[]).includes(refreshMs)
   ) {
-    res.status(400).json({error: '설정값을 확인하세요.'});
+    res.status(400).json({error: '설정값을 확인하세요. 표시 종목 1~40, 갱신 주기 15/30/60/120/300초, 가중치 합 > 0.'});
+    return;
+  }
+  if (running && chartCodes.length === 0) {
+    res.status(400).json({error: '멀티차트에 체크한 종목이 있어야 모의 매매를 시작할 수 있습니다.'});
     return;
   }
   if (condition !== config.condition) {
     ranking = [];
     updatedAt = null;
     error = '';
+    chartCodes = [];
   }
   try {
-    await applyConfig({condition, count, weights: {change: weights.change, strength: weights.strength, value: weights.value}, running});
-    res.json({ok: true, realtime: bridge.status().hub});
+    const next: AppConfig = {
+      condition,
+      count,
+      weights: {change: weights.change, strength: weights.strength, value: weights.value},
+      running,
+      refreshMs,
+      chartCodes,
+    };
+    await applyConfig(next);
+    restartRefreshTimer();
+    res.json({ok: true, config, realtime: bridge.status().hub});
   } catch (e) {
     res.status(502).json({error: e instanceof Error ? e.message : '설정 적용 실패'});
   }
@@ -291,7 +366,7 @@ app.post('/api/config', async (req, res) => {
 app.post('/api/refresh', (_req, res) => {
   void (async () => {
     try {
-      const result = await bridge.syncSubscriptions({seq: config.condition, count: config.count, weights: config.weights});
+      const result = await bridge.syncSubscriptions(bridgeCfg());
       applyRanking(result);
       error = '';
     } catch (e) {
@@ -321,7 +396,7 @@ void (async () => {
   hub.onReady(async () => {
     try {
       if (!config.condition) return;
-      const result = await bridge.syncSubscriptions({seq: config.condition, count: config.count, weights: config.weights});
+      const result = await bridge.syncSubscriptions(bridgeCfg());
       applyRanking(result);
     } catch (e) {
       error = e instanceof Error ? e.message : '재연결 복구 실패';
@@ -329,23 +404,20 @@ void (async () => {
   });
 })();
 
-const candleSyncMs = positiveInt('CANDLE_SYNC_MS', 60000);
-
 /**
- * Slow maintenance tick. It does NOT re-poll the whole condition list: it only aligns
- * subscriptions with the current selection and refreshes the ≤10 selected codes'
- * candles (the one data set that is REST-only), all through the governed lane.
+ * User-configured refresh. Re-ranks the condition list from the live cache, keeps
+ * subscriptions aligned, and refreshes candles only for checkbox-selected chart codes.
  */
 async function maintenanceTick(): Promise<void> {
   if (!config.condition || !hub.isReady) return;
   try {
-    const result = await bridge.syncSubscriptions({seq: config.condition, count: config.count, weights: config.weights});
+    const result = await bridge.syncSubscriptions(bridgeCfg());
     applyRanking(result);
-    for (const stock of result.selected) {
+    for (const code of config.chartCodes) {
       try {
-        await bridge.refreshChart(stock.code);
+        await bridge.refreshChart(code);
       } catch (e) {
-        cache.setWarning(stock.code, e instanceof Error ? e.message : '분봉 갱신 실패');
+        cache.setWarning(code, e instanceof Error ? e.message : '분봉 갱신 실패');
       }
     }
     error = '';
@@ -354,8 +426,13 @@ async function maintenanceTick(): Promise<void> {
   }
 }
 
-const candleTimer = setInterval(() => void maintenanceTick(), candleSyncMs);
-candleTimer.unref?.();
+let candleTimer: NodeJS.Timeout | null = null;
+function restartRefreshTimer(): void {
+  if (candleTimer) clearInterval(candleTimer);
+  candleTimer = setInterval(() => void maintenanceTick(), config.refreshMs);
+  candleTimer.unref?.();
+}
+restartRefreshTimer();
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

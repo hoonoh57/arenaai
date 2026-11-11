@@ -90,14 +90,19 @@ test('순위는 실시간 체결값으로 계산하고 선택 종목만 구독�
   await bridge.apply(config);
   cache.setQuote(quote('005930', 100, 1, 100, 1000));
   cache.setQuote(quote('000660', 200, 2, 200, 2000));
-  const result = await bridge.computeRanking(config);
-  assert.equal(result.ranking.length, 2);
-  assert.equal(result.ranking[0].code, '000660');
-  assert.equal(result.selected.length, 2);
+  const listed = await bridge.computeRanking(config);
+  assert.equal(listed.ranking.length, 2);
+  assert.equal(listed.ranking[0].code, '000660');
+  assert.equal(listed.selected.length, 0, '체크하지 않으면 차트 종목이 없다');
 
-  await bridge.syncSubscriptions(config);
+  const withCharts = {...config, chartCodes: ['005930']};
+  const result = await bridge.computeRanking(withCharts);
+  assert.equal(result.selected.length, 1);
+  assert.equal(result.selected[0].code, '005930');
+
+  await bridge.syncSubscriptions(withCharts);
   assert.ok(calls.subscribed.some((call) => call.types.includes('0B') && call.items.includes('005930')));
-  assert.deepEqual(calls.active.at(-1), result.selected.map((stock) => stock.code));
+  assert.deepEqual(calls.active.at(-1), ['005930']);
 });
 
 test('가중치에 따라 순위가 결정되고 결측 종목은 제외', async () => {

@@ -12,12 +12,13 @@ export class RateQueue {
   this.tail=result.then(()=>{},()=>{}); return result;
  }
 }
-export function rank(items: Omit<Stock,'score'>[], weights:Weights):Stock[] {
+export function rank(items: Omit<Stock,'score'>[], weights:Weights, limit=10):Stock[] {
  const sum=weights.change+weights.strength+weights.value;
  if(!Number.isFinite(sum)||sum<=0||Object.values(weights).some(x=>!Number.isFinite(x)||x<0)) throw new Error('가중치는 0 이상이며 합계는 0보다 커야 합니다.');
+ if(!Number.isInteger(limit)||limit<1) throw new Error('표시 종목 수는 1 이상이어야 합니다.');
  // Percentile ranks avoid mixing incompatible units. Ties receive the same percentile.
  const percentile=(value:number, values:number[])=>values.length<=1?1:values.filter(x=>x<value).length/(values.length-1);
- return items.map(s=>({...s,score:100*(weights.change*percentile(s.change,items.map(x=>x.change))+weights.strength*percentile(s.strength,items.map(x=>x.strength))+weights.value*percentile(s.value,items.map(x=>x.value)))/sum})).sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code)).slice(0,10);
+ return items.map(s=>({...s,score:100*(weights.change*percentile(s.change,items.map(x=>x.change))+weights.strength*percentile(s.strength,items.map(x=>x.strength))+weights.value*percentile(s.value,items.map(x=>x.value)))/sum})).sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code)).slice(0,limit);
 }
 export function sma(candles:Candle[], period:number):{time:number;value:number}[] {
  const out:{time:number;value:number}[]=[]; let sum=0;
