@@ -1,0 +1,275 @@
+import {rank, type Candle, type Stock, type Weights} from '../core';
+import {AuditLog} from './audit';
+import {SharedCache} from './cache';
+import {RealtimeHub} from './hub';
+import type {BrokerLike} from './hub';
+import {kstDate} from './protocol';
+import {parseConditionRow} from '../kiwoom';
+
+export type StrengthSnapshot = {strength: number | null; value: number | null; change?: number | null};
+
+export type BridgeBroker = BrokerLike & {
+  conditions?: never;
+  /** ka10046 fallback when a captured code has no realtime quote yet. */
+  strengthSnapshot?: (code: string) => Promise<StrengthSnapshot>;
+};
+
+export type BridgeConfig = {seq: string; count: number; weights: Weights};
+
+export type BridgeOptions = {
+  hub: RealtimeHub;
+  cache: SharedCache;
+  audit: AuditLog;
+  broker: BridgeBroker;
+  now?: () => number;
+  /** How long a REST fallback snapshot stays valid. */
+  fallbackTtlMs?: number;
+  /** Extra captured codes that get a realtime 0B subscription for ranking. */
+  quoteBudget?: number;
+  /** Max ka10046 fallback calls per ranking pass (each one is a governed REST call). */
+  fallbackBudget?: number;
+};
+
+export type RankingResult = {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>};
+
+/**
+ * The only surface demand logic (dashboard routes, charts, strategy) may use.
+ *
+ * A chart never touches the Kiwoom client or the WebSocket directly: it asks the bridge,
+ * which asks the central hub, which owns connection, subscription, limit and audit state.
+ */
+export class DemandBridge {
+  private readonly hub: RealtimeHub;
+  private readonly cache: SharedCache;
+  private readonly audit: AuditLog;
+  private readonly broker: BridgeBroker;
+  private readonly now: () => number;
+  private readonly fallbackTtlMs: number;
+  private readonly quoteBudget: number;
+  private readonly fallbackBudget: number;
+  private readonly fallback = new Map<string, {at: number; snapshot: StrengthSnapshot}>();
+  private readonly captureSnapshot = new Map<string, {price: number; change: number}>();
+  private readonly names = new Map<string, string>();
+  private config: BridgeConfig | null = null;
+  private watched: string[] = [];
+  private conditionsCache: {seq: string; name: string}[] = [];
+
+  constructor(options: BridgeOptions) {
+    this.hub = options.hub;
+    this.cache = options.cache;
+    this.audit = options.audit;
+    this.broker = options.broker;
+    this.now = options.now ?? Date.now;
+    this.fallbackTtlMs = options.fallbackTtlMs ?? 10000;
+    this.quoteBudget = options.quoteBudget ?? 40;
+    this.fallbackBudget = options.fallbackBudget ?? 20;
+    if (!Number.isFinite(this.fallbackTtlMs) || this.fallbackTtlMs < 0) throw new Error('REST 대체 데이터 TTL이 올바르지 않습니다.');
+  }
+
+  /** Condition list via the central session (CNSRLST). */
+  async loadConditions(): Promise<{seq: string; name: string}[]> {
+    const frame = await this.hub.request({trnm: 'CNSRLST'}, 'CNSRLST');
+    const rows = Array.isArray(frame.data) ? frame.data : [];
+    const list: {seq: string; name: string}[] = [];
+    for (const row of rows) {
+      if (Array.isArray(row)) {
+        const seq = String(row[0] ?? '').trim();
+        const name = String(row[1] ?? '').trim();
+        if (seq && name) list.push({seq, name});
+      } else if (row && typeof row === 'object') {
+        const record = row as Record<string, unknown>;
+        const seq = String(record.seq ?? '').trim();
+        const name = String(record.name ?? '').trim();
+        if (seq && name) list.push({seq, name});
+      }
+    }
+    if (!list.length) throw new Error('조건식 목록 응답이 비어 있습니다.');
+    this.conditionsCache = list;
+    this.audit.record('state', '조건식 목록을 조회했습니다.', {count: list.length});
+    return list;
+  }
+
+  conditions(): {seq: string; name: string}[] {
+    return [...this.conditionsCache];
+  }
+
+  /**
+   * Apply a configuration: capture the condition (initial list + realtime insert/delete),
+   * then prime candles for the selected codes through the governed REST lane.
+   */
+  async apply(config: BridgeConfig): Promise<RankingResult> {
+    if (!this.hub.isReady) throw new Error('실시간 세션이 준비되지 않았습니다.');
+    if (!config.seq) throw new Error('조건식을 선택하세요.');
+    this.config = config;
+    this.cache.clearCaptures(config.seq);
+    this.cache.clearCandles();
+    this.fallback.clear();
+    this.audit.record('state', '조건검색을 다시 시작합니다.', {seq: config.seq, count: config.count});
+
+    const frame = await this.hub.request(
+      {trnm: 'CNSRREQ', seq: config.seq, search_type: '1', stex_tp: 'K'},
+      'CNSRREQ',
+    );
+    const rows = Array.isArray(frame.data) ? frame.data : [];
+    this.captureSnapshot.clear();
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const record = row as Record<string, unknown>;
+      const code = String(record['9001'] ?? '').trim().replace(/^A(?=\d{6}$)/, '');
+      if (!/^\d{6}$/.test(code)) continue;
+      // 조건검색 응답은 등락률(고정소수점)·현재가를 함께 주므로 초기 표시에 사용한다.
+      // 실시간 체결이 도착하면 0B 값이 우선한다.
+      try {
+        const parsed = parseConditionRow(record);
+        if (parsed) {
+          this.names.set(parsed.code, parsed.name);
+          this.captureSnapshot.set(parsed.code, {price: parsed.price, change: parsed.change});
+        }
+      } catch {
+        /* 값을 해석할 수 없으면 순위에서 제외하고 경고로 남긴다 */
+      }
+      this.cache.applyCondition({seq: config.seq, code, action: 'insert', time: null});
+    }
+    this.audit.record('state', '조건검색 초기 목록을 수신했습니다.', {codes: this.cache.capturedCodes(config.seq).length});
+    return this.syncSubscriptions(config);
+  }
+
+  /**
+   * Re-align realtime subscriptions with the current selection and re-prime missing
+   * candles. Safe to call repeatedly (after every tick, reconnect or config change).
+   */
+  async syncSubscriptions(config: BridgeConfig = this.requireConfig()): Promise<RankingResult> {
+    const ranking = await this.computeRanking(config);
+    const selectedCodes = ranking.selected.map((stock) => stock.code);
+    const desired = [...new Set([...selectedCodes, ...this.cache.capturedCodes(config.seq).slice(0, this.quoteBudget)])];
+
+    const added = desired.filter((code) => !this.watched.includes(code));
+    const removed = this.watched.filter((code) => !desired.includes(code));
+    if (added.length) await this.hub.subscribe('bridge:quotes', added, ['0B']);
+    if (removed.length) await this.hub.unsubscribe('bridge:quotes', removed, ['0B']);
+    this.watched = desired;
+
+    const today = kstDate(this.now());
+    for (const code of selectedCodes) {
+      if (this.cache.lastCandleTime(code) !== null) continue;
+      try {
+        await this.hub.refreshCandles(code, {baseDate: today});
+      } catch (error) {
+        this.cache.setWarning(code, error instanceof Error ? error.message : '분봉 조회 실패');
+        this.audit.record('error', '분봉 초기 조회에 실패했습니다.', {code, error: error instanceof Error ? error.message : '오류'});
+      }
+    }
+    this.hub.setActiveCodes(selectedCodes);
+    return this.computeRanking(config);
+  }
+
+  private requireConfig(): BridgeConfig {
+    if (!this.config) throw new Error('조건검색 설정이 없습니다.');
+    return this.config;
+  }
+
+  /**
+   * Weighted ranking from shared cache values. A captured code participates only when
+   * 등락률·체결강도·누적거래대금 are all known; otherwise it is reported as a warning
+   * instead of being ranked with a guessed value.
+   */
+  async computeRanking(config: BridgeConfig = this.requireConfig()): Promise<RankingResult> {
+    const warnings: Record<string, string> = {};
+    const codes = this.cache.capturedCodes(config.seq);
+    const items: Omit<Stock, 'score'>[] = [];
+    let fallbackCalls = 0;
+    for (const code of codes) {
+      const quote = this.cache.getQuote(code);
+      const captured = this.captureSnapshot.get(code);
+      let change = quote?.changePct ?? captured?.change ?? null;
+      let strength = quote?.strength ?? null;
+      let value = quote?.cumValue ?? null;
+      if ((strength === null || value === null) && this.broker.strengthSnapshot) {
+        // 실시간 체결이 아직 도착하지 않은 종목만, 한 번의 계산에서 정해진 횟수까지만 조회한다.
+        const cached = this.fallback.get(code);
+        const fresh = cached !== undefined && this.now() - cached.at <= this.fallbackTtlMs;
+        if (fresh) {
+          strength = strength ?? cached.snapshot.strength;
+          value = value ?? cached.snapshot.value;
+        } else if (fallbackCalls < this.fallbackBudget) {
+          fallbackCalls += 1;
+          const snapshot = await this.snapshotFallback(code);
+          strength = strength ?? snapshot.strength;
+          value = value ?? snapshot.value;
+        }
+      }
+      if (change === null || strength === null || value === null) {
+        warnings[code] = '실시간 시세·체결강도·누적거래대금 대기';
+        continue;
+      }
+      items.push({
+        code,
+        name: this.names.get(code) ?? code,
+        price: quote?.price ?? captured?.price ?? 0,
+        change,
+        strength,
+        value,
+      });
+    }
+    if (!items.length) return {ranking: [], selected: [], warnings};
+    const ranking = rank(items, config.weights);
+    return {ranking, selected: ranking.slice(0, config.count), warnings};
+  }
+
+  private async snapshotFallback(code: string): Promise<StrengthSnapshot> {
+    const cached = this.fallback.get(code);
+    if (cached && this.now() - cached.at <= this.fallbackTtlMs) return cached.snapshot;
+    if (!this.broker.strengthSnapshot) return {strength: null, value: null};
+    const snapshot = await this.broker.strengthSnapshot(code);
+    this.fallback.set(code, {at: this.now(), snapshot});
+    return snapshot;
+  }
+
+  candles(code: string): Candle[] {
+    return this.cache.candles(code);
+  }
+
+  candlesByCode(codes: readonly string[]): Record<string, Candle[]> {
+    const result: Record<string, Candle[]> = {};
+    for (const code of codes) {
+      const candles = this.cache.candles(code);
+      if (candles.length) result[code] = candles;
+    }
+    return result;
+  }
+
+  warnings(): Record<string, string> {
+    return this.cache.warnings();
+  }
+
+  /** Simulated positions/events owned by the central manager. */
+  positions(): Record<string, number> {
+    return this.hub.positionsSnapshot();
+  }
+
+  events(limit = 50) {
+    return this.hub.eventsSnapshot(limit);
+  }
+
+  /** Refresh one chart's candles on demand (still governed by the central REST lane). */
+  async refreshChart(code: string): Promise<Candle[]> {
+    const today = kstDate(this.now());
+    return this.hub.refreshCandles(code, {baseDate: today});
+  }
+
+  /** Re-run simulated signal evaluation for the active codes (e.g. after a formula save). */
+  reevaluate(codes: readonly string[]): void {
+    for (const code of codes) this.hub.evaluateSignals(code);
+  }
+
+  status() {
+    return {
+      hub: this.hub.status(),
+      cache: this.cache.stats(),
+      watched: this.watched.length,
+      captured: this.config ? this.cache.capturedCodes(this.config.seq).length : 0,
+      fallbackTtlMs: this.fallbackTtlMs,
+      capabilities: this.cache.capabilities(),
+    };
+  }
+}
