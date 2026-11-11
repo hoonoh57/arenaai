@@ -38,6 +38,7 @@ export type ChildWindow = {
   overlayCode?: string;
   /** 멀티차트 열 수 (1~4). */
   gridCols?: number;
+  syncCharts?: boolean;
 };
 
 export type VirtualDesk = {
@@ -236,6 +237,7 @@ function validateWindow(win: ChildWindow): ChildWindow {
     compareMode: win.compareMode === 'overlay' ? 'overlay' : win.compareMode === 'replace' ? 'replace' : undefined,
     overlayCode: typeof win.overlayCode === 'string' && CODE.test(win.overlayCode) ? win.overlayCode : undefined,
     gridCols: Number.isInteger(win.gridCols) ? Math.min(4, Math.max(1, win.gridCols as number)) : undefined,
+    syncCharts: win.syncCharts === undefined ? undefined : Boolean(win.syncCharts),
   };
 }
 

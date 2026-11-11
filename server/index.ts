@@ -135,6 +135,7 @@ type AppConfig = {
   /** Default system formula for checked codes without an override. */
   strategyId: string;
   strategyByCode: Record<string, string>;
+  tradeByCode: Record<string, 'wait' | 'run' | 'stop'>;
 };
 let config: AppConfig = {
   condition: '',
@@ -145,6 +146,7 @@ let config: AppConfig = {
   chartCodes: [],
   strategyId: '',
   strategyByCode: {},
+  tradeByCode: {},
 };
 
 function bridgeCfg() {
@@ -186,6 +188,7 @@ function strategyFor(code: string) {
 function currentEvaluator() {
   return (code: string, closed: Candle[]) => {
     if (!closed.length) return null;
+    if ((config.tradeByCode[code] ?? 'wait') !== 'run') return null;
     const system = strategyFor(code);
     if (!system) return null;
     const buy = evaluate(system.expression, closed, system.variables, formulas).at(-1);
@@ -202,7 +205,8 @@ function normalizeStrategyId(id: unknown): string {
 }
 
 function syncSignals(): void {
-  hub.setSignalEvaluator(config.running && config.chartCodes.length ? currentEvaluator() : null);
+  const anyRun = config.chartCodes.some((code) => (config.tradeByCode[code] ?? 'wait') === 'run');
+  hub.setSignalEvaluator(anyRun ? currentEvaluator() : null);
 }
 
 function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>}): void {
@@ -455,6 +459,21 @@ app.post('/api/strategy', async (req, res) => {
     res.status(400).json({error: e instanceof Error ? e.message : '전략 설정 실패'});
   }
 });
+app.post('/api/trade', async (req, res) => {
+  try {
+    const code = req.body?.code;
+    const status = req.body?.status;
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+    if (status !== 'wait' && status !== 'run' && status !== 'stop') throw new Error('상태는 대기/모의/중지입니다.');
+    if (!config.chartCodes.includes(code)) throw new Error('멀티차트에 없는 종목입니다.');
+    config = {...config, tradeByCode: {...config.tradeByCode, [code]: status}, running: status === 'run' || config.chartCodes.some((c) => (c === code ? status : config.tradeByCode[c]) === 'run')};
+    syncSignals();
+    if (status === 'run') bridge.reevaluate([code]);
+    res.json({ok: true, config});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '종목 전략 상태 변경 실패'});
+  }
+});
 app.post('/api/charts', async (req, res) => {
   try {
     const chartCodes = normalizeChartCodes(req.body?.codes);
@@ -467,7 +486,14 @@ app.post('/api/charts', async (req, res) => {
     for (const code of previous) {
       if (!chartCodes.includes(code)) delete strategyByCode[code];
     }
-    config = {...config, chartCodes, strategyByCode, running: config.running && chartCodes.length > 0};
+    const tradeByCode = {...config.tradeByCode};
+    for (const code of previous) {
+      if (!chartCodes.includes(code)) delete tradeByCode[code];
+    }
+    for (const code of chartCodes) {
+      if (!tradeByCode[code]) tradeByCode[code] = 'wait';
+    }
+    config = {...config, chartCodes, strategyByCode, tradeByCode, running: config.running && chartCodes.length > 0};
     syncSignals();
     if (config.condition) {
       const result = await bridge.syncSubscriptions(bridgeCfg());
@@ -531,6 +557,11 @@ app.post('/api/config', async (req, res) => {
       res.status(400).json({error: e instanceof Error ? e.message : '전략 설정 실패'});
       return;
     }
+    const tradeByCode = {...(condition !== config.condition ? {} : config.tradeByCode)};
+    for (const code of chartCodes) {
+      if (running) tradeByCode[code] = 'run';
+      else if (!tradeByCode[code]) tradeByCode[code] = 'wait';
+    }
     const next: AppConfig = {
       condition,
       count,
@@ -540,6 +571,7 @@ app.post('/api/config', async (req, res) => {
       chartCodes,
       strategyId,
       strategyByCode,
+      tradeByCode,
     };
     await applyConfig(next);
     restartRefreshTimer();

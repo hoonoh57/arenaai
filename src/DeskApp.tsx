@@ -27,7 +27,7 @@ import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
   mode: string;
   config: Config;
@@ -106,7 +106,7 @@ export function DeskApp() {
       setDraft((d) =>
         d
           ? {...d, chartCodes: s.config.chartCodes || [], running: s.config.running, refreshMs: s.config.refreshMs || d.refreshMs || 60000, strategyId: s.config.strategyId || d.strategyId || '', strategyByCode: s.config.strategyByCode || {}}
-          : s.config,
+          : {...s.config, tradeByCode: s.config.tradeByCode || {}},
       );
     } catch {
       setNotice('서버에 연결할 수 없습니다.');
@@ -231,6 +231,14 @@ export function DeskApp() {
     }
   };
   const systems = state.formulas.filter((f) => f.kind === 'system');
+  const setTrade = async (code: string, status: 'wait' | 'run' | 'stop') => {
+    try {
+      await post('/api/trade', {code, status});
+      await load();
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  };
   const setStrategy = async (formulaId: string, code?: string) => {
     try {
       await post('/api/strategy', {formulaId, code});
@@ -338,6 +346,7 @@ export function DeskApp() {
                 setNotice={setNotice}
                 setShowFormulas={setShowFormulas}
                 setStrategy={setStrategy}
+                setTrade={setTrade}
                 formulasFor={formulasFor}
                 systems={systems}
                 patchWin={(id, patch) => updateDesk(patchWindow(desk, id, patch))}
@@ -447,6 +456,7 @@ function Pane(props: {
   setNotice: (v: string) => void;
   setShowFormulas: (v: boolean) => void;
   setStrategy: (formulaId: string, code?: string) => Promise<void>;
+  setTrade: (code: string, status: 'wait' | 'run' | 'stop') => Promise<void>;
   formulasFor: (code: string) => Formula[];
   systems: Formula[];
   patchWin: (id: string, patch: Partial<ChildWindow>) => void;
@@ -540,6 +550,13 @@ function Pane(props: {
           <button className="hts-tool" onClick={() => props.setShowFormulas(true)}>
             수식
           </button>
+          <button
+            className={'hts-tool' + (win.syncCharts !== false ? ' on' : '')}
+            title="주기·봉수·수식을 모든 칸에 맞춤"
+            onClick={() => props.patchWin(win.id, {syncCharts: win.syncCharts === false})}
+          >
+            {win.syncCharts === false ? '동기화꺼짐' : '동기화'}
+          </button>
         </div>
         <div className="chart-grid multi-grid" style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}>
           {selected.map((s) => (
@@ -558,6 +575,23 @@ function Pane(props: {
                     {s.change.toFixed(2)}%
                   </em>
                 </span>
+                {(() => {
+                  const st = (state.config.tradeByCode || {})[s.code] || 'wait';
+                  const label = st === 'run' ? '모의' : st === 'stop' ? '중지' : '대기';
+                  const next = st === 'wait' ? 'run' : st === 'run' ? 'stop' : 'wait';
+                  return (
+                    <button
+                      className={'trade-pill ' + st}
+                      title="클릭: 대기→모의→중지"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void props.setTrade(s.code, next);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })()}
                 <button
                   className="cell-x"
                   title="제외"
@@ -577,6 +611,14 @@ function Pane(props: {
                 grid={props.grid}
                 logScale={props.logScale}
                 timeframe={tf}
+                visibleHint={win.visibleBars || 200}
+                onContext={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const st = (state.config.tradeByCode || {})[s.code] || 'wait';
+                  const next = st === 'wait' ? 'run' : st === 'run' ? 'stop' : 'wait';
+                  void props.setTrade(s.code, next);
+                }}
               />
             </article>
           ))}
@@ -612,6 +654,8 @@ function StockMiniChart({
   grid,
   logScale,
   timeframe = '1',
+  visibleHint,
+  onContext,
 }: {
   code: string;
   cached: Candle[];
@@ -620,6 +664,8 @@ function StockMiniChart({
   grid: boolean;
   logScale: boolean;
   timeframe?: string;
+  visibleHint?: number;
+  onContext?: (e: React.MouseEvent) => void;
 }) {
   const [bars, setBars] = useState<Candle[]>(cached);
   const [wait, setWait] = useState(!cached.length);
@@ -648,7 +694,17 @@ function StockMiniChart({
     };
   }, [code, timeframe, cached.length]);
   if (!bars.length) return <div className="empty-chart">{wait ? '분봉 조회 대기(중앙 큐)…' : '분봉 없음. 한도 해제 후 다시 포착넣기.'}</div>;
-  return <Chart data={bars} formulas={formulas} chartHeight={height} grid={grid} logScale={logScale} />;
+  return (
+    <Chart
+      data={bars}
+      formulas={formulas}
+      chartHeight={height}
+      grid={grid}
+      logScale={logScale}
+      visibleHint={visibleHint}
+      onContextMenu={onContext}
+    />
+  );
 }
 
 function CapturesPane({
