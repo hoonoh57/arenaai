@@ -5,7 +5,7 @@
 
 export const DESK_MIN = 1;
 export const DESK_MAX = 8;
-export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'tr', 'events', 'book'] as const;
+export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'captures', 'tr', 'events', 'book'] as const;
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
 
@@ -50,6 +50,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   chart: '종목 차트',
   'multi-chart': '멀티차트',
   scanner: '실시간 조건검색',
+  captures: '조건검색 포착',
   tr: '키움 REST TR',
   events: '모의 이벤트',
   book: '주문 대시보드',
@@ -100,8 +101,8 @@ export function insertWindow(desk: VirtualDesk, kind: WindowKind, offset = desk.
     title: KIND_TITLE[kind],
     x: 24 + (offset % 6) * 28,
     y: 24 + (offset % 6) * 28,
-    w: kind === 'multi-chart' ? 720 : kind === 'scanner' ? 380 : 520,
-    h: kind === 'scanner' ? 560 : kind === 'multi-chart' ? 480 : 380,
+    w: kind === 'multi-chart' ? 720 : kind === 'scanner' || kind === 'captures' ? 380 : 520,
+    h: kind === 'scanner' || kind === 'captures' ? 560 : kind === 'multi-chart' ? 480 : 380,
     z,
     state: 'normal',
     locked: false,

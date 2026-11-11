@@ -256,6 +256,7 @@ app.get('/api/state', (_req, res) =>
     config,
     conditions,
     ranking,
+    captured: bridge.capturedList(),
     candles: bridge.candlesByCode(config.chartCodes),
     updatedAt,
     error,
@@ -503,7 +504,6 @@ app.post('/api/config', async (req, res) => {
     return;
   }
   if (condition !== config.condition) {
-    ranking = [];
     updatedAt = null;
     error = '';
     chartCodes = [];

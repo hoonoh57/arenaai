@@ -122,7 +122,12 @@ export class DemandBridge {
       {trnm: 'CNSRREQ', seq: config.seq, search_type: '1', stex_tp: 'K'},
       'CNSRREQ',
     );
-    const rows = Array.isArray(frame.data) ? frame.data : [];
+    const raw = frame.data;
+    const rows = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object' && Array.isArray((raw as {data?: unknown}).data)
+        ? ((raw as {data: unknown[]}).data)
+        : [];
     this.captureSnapshot.clear();
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
@@ -287,6 +292,11 @@ export class DemandBridge {
 
   warnings(): Record<string, string> {
     return this.cache.warnings();
+  }
+
+  capturedList(): {code: string; name: string}[] {
+    if (!this.config) return [];
+    return this.cache.capturedCodes(this.config.seq).map((code) => ({code, name: this.names.get(code) ?? code}));
   }
 
   /** Simulated positions/events owned by the central manager. */

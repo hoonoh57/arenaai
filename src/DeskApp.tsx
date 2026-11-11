@@ -32,6 +32,7 @@ type State = {
   config: Config;
   conditions: {seq: string; name: string}[];
   ranking: Stock[];
+  captured: {code: string; name: string}[];
   candles: Record<string, Candle[]>;
   updatedAt: number | null;
   error: string;
@@ -496,6 +497,7 @@ function Pane(props: {
     );
   }
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
+  if (win.kind === 'captures') return <CapturesPane state={state} onCode={props.onCommonCode} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   return (
@@ -513,6 +515,31 @@ function Pane(props: {
   );
 }
 
+function CapturesPane({state, onCode}: {state: State; onCode: (code: string) => void}) {
+  const rows = state.captured?.length ? state.captured : state.ranking.map((s) => ({code: s.code, name: s.name}));
+  return (
+    <div className="scanner-pane">
+      <p className="panel-desc">
+        조건검색 포착 원본 · 실시간 {state.realtime?.hub.state || '없음'} · {rows.length}종목
+      </p>
+      {rows.map((row) => (
+        <button key={row.code} className="rank-row" type="button" onClick={() => onCode(row.code)}>
+          <span className="rank">·</span>
+          <div className="rank-name">
+            <b>{row.name}</b>
+            <small>{row.code}</small>
+          </div>
+        </button>
+      ))}
+      {!rows.length && (
+        <div className="empty-activity">
+          {state.error || (state.realtime?.hub.state !== 'ready' ? '실시간 연결이 필요합니다.' : '아직 포착된 종목이 없습니다.')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScannerPane(props: {
   state: State;
   draft: Config;
@@ -523,12 +550,15 @@ function ScannerPane(props: {
   load: () => Promise<void>;
   setNotice: (v: string) => void;
   setShowFormulas: (v: boolean) => void;
+  onCommonCode: (code: string) => void;
 }) {
   const {state, draft, chartCodes} = props;
   return (
     <div className="scanner-pane">
       <p className="panel-desc">
         가중 점수 상위 {state.config.count}종목 <span>● 체크 시 차트·매매</span>
+        <br />
+        실시간 {state.realtime?.hub.state || '없음'} · 포착 {state.captured?.length ?? state.realtime?.captured ?? 0}종목
       </p>
       <div className="table-head rank-head">
         <span></span>
@@ -537,12 +567,17 @@ function ScannerPane(props: {
         <span>점수</span>
       </div>
       {state.ranking.map((s, i) => (
-        <div className={'rank-row' + (chartCodes.includes(s.code) ? ' on-chart' : '')} key={s.code}>
+        <div
+          className={'rank-row' + (chartCodes.includes(s.code) ? ' on-chart' : '')}
+          key={s.code}
+          onClick={() => props.onCommonCode(s.code)}
+        >
           <label className="chart-check">
             <input
               type="checkbox"
               checked={chartCodes.includes(s.code)}
               disabled={!chartCodes.includes(s.code) && chartCodes.length >= 10}
+              onClick={(e) => e.stopPropagation()}
               onChange={() => void props.toggleChart(s.code)}
             />
           </label>
@@ -560,7 +595,15 @@ function ScannerPane(props: {
           <strong>{s.score < 0 ? '대기' : s.score.toFixed(1)}</strong>
         </div>
       ))}
-      {!state.ranking.length && <div className="empty-activity">조건식을 적용하면 점수 상위 종목이 표시됩니다.</div>}
+      {!state.ranking.length && (
+        <div className="empty-activity">
+          {(state.captured || []).length
+            ? `포착 ${state.captured.length}종목 · 시세 대기 중이거나 점수 계산 전입니다.`
+            : state.realtime?.hub.state !== 'ready'
+              ? '실시간 세션이 끊겨 조건검색을 받을 수 없습니다. 서버 연결을 확인하세요.'
+              : '조건식을 적용하면 포착 종목이 표시됩니다.'}
+        </div>
+      )}
       <div className="panel settings">
         <label>
           조건검색식{' '}

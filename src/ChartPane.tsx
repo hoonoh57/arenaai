@@ -140,7 +140,7 @@ export function ChartPane({
           <div key={g.kind} className="dock-group">
             <b>{g.label}</b>
             {formulas.filter((f) => f.kind === g.kind).map((f) => (
-              <label key={f.id} className="dock-item">
+              <label key={f.id} className={'dock-item' + (editId === f.id ? ' on' : '')} onClick={() => setEditId(f.id)}>
                 <input
                   type="checkbox"
                   checked={enabled.has(f.id)}
@@ -214,7 +214,12 @@ export function ChartPane({
             grid={grid}
             logScale={logScale}
             visibleHint={visibleBars}
-            onVisibleCount={setViewCount}
+            onVisibleCount={(n) => {
+              if (Math.abs(n - viewCount) >= 1) setViewCount(n);
+            }}
+            onPick={(id) => {
+              if (id && formulas.some((f) => f.id === id)) setEditId(id);
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenu({x: e.clientX, y: e.clientY});

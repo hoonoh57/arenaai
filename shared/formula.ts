@@ -12,7 +12,15 @@ export const kinds:Record<Kind,string>={indicator:'지표',signal:'신호',highl
 export const defaults:Formula[]=[
  {id:'ma5',name:'이동평균 5',kind:'indicator',expression:'SMA(CLOSE, 5)',exitExpression:'',enabled:true,color:'#e8bd64'},
  {id:'ma20',name:'이동평균 20',kind:'indicator',expression:'SMA(CLOSE, 20)',exitExpression:'',enabled:true,color:'#8c83ec'},
- {id:'cross',name:'이동평균 교차',kind:'system',expression:'CROSSUP(SMA(CLOSE, 5), SMA(CLOSE, 20))',enabled:true,color:'#a8ec6a',exitExpression:'CROSSDOWN(SMA(CLOSE, 5), SMA(CLOSE, 20))'}
+ {id:'cross',name:'이동평균 교차',kind:'system',expression:'CROSSUP(SMA(CLOSE, 5), SMA(CLOSE, 20))',enabled:true,color:'#a8ec6a',exitExpression:'CROSSDOWN(SMA(CLOSE, 5), SMA(CLOSE, 20))'},
+ {id:'ma60',name:'이동평균 60',kind:'indicator',expression:'SMA(CLOSE, 60)',exitExpression:'',enabled:false,color:'#6ab0c8'},
+ {id:'rsi14',name:'RSI 14',kind:'indicator',expression:'100 - 100 / (1 + SMA(MAX(CLOSE - REF(CLOSE, 1), 0), 14) / SMA(MAX(REF(CLOSE, 1) - CLOSE, 0), 14))',exitExpression:'',enabled:false,color:'#d48ad4',pane:'separate',baselines:[{value:70,color:'#ed6b72',style:'dashed'},{value:30,color:'#5d96e8',style:'dashed'}]},
+ {id:'vol',name:'거래량',kind:'indicator',expression:'VOLUME',exitExpression:'',enabled:false,color:'#718395',pane:'separate',primaryLine:{type:'histogram'}},
+ {id:'disparity',name:'이격도 20',kind:'indicator',expression:'CLOSE / SMA(CLOSE, 20) * 100',exitExpression:'',enabled:false,color:'#e8bd64',pane:'separate'},
+ {id:'golden',name:'골든크로스',kind:'signal',expression:'CROSSUP(SMA(CLOSE, 5), SMA(CLOSE, 20))',exitExpression:'',enabled:false,color:'#a8ec6a'},
+ {id:'dead',name:'데드크로스',kind:'signal',expression:'CROSSDOWN(SMA(CLOSE, 5), SMA(CLOSE, 20))',exitExpression:'',enabled:false,color:'#ed6b72'},
+ {id:'upbar',name:'양봉',kind:'highlight',expression:'CLOSE > OPEN',exitExpression:'',enabled:false,color:'#ed6b72'},
+ {id:'dnbar',name:'음봉',kind:'highlight',expression:'CLOSE < OPEN',exitExpression:'',enabled:false,color:'#5d96e8'}
 ];
 type Val=number|null;
 const aliases:Record<string,string>=Object.assign(Object.create(null),{O:'open',OPEN:'open','시가':'open',H:'high',HIGH:'high','고가':'high',L:'low',LOW:'low','저가':'low',C:'close',CLOSE:'close','종가':'close',V:'volume',VOLUME:'volume','거래량':'volume',DATE:'date','일자':'date',TIME:'clock','시간':'clock',ACCOUNT:'turnover','거래대금':'turnover'});
