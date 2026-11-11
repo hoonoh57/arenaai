@@ -259,6 +259,11 @@ export class SimulationBook {
     return n;
   }
 
+  async buy(code: string, type: BookType = 'market', limitPrice?: number, qty?: number): Promise<SimOrder> {
+    const size = qty ?? 1;
+    return this.submit({code, side: 'buy', type, qty: size, limitPrice, source: 'manual'});
+  }
+
   async sell(code: string, type: BookType = 'market', limitPrice?: number, qty?: number): Promise<SimOrder> {
     const holding = this.holdings.get(code);
     const size = qty ?? holding?.qty ?? 1;

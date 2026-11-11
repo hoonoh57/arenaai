@@ -151,10 +151,13 @@ type AppConfig = {
   strategyByCode: Record<string, string>;
   tradeByCode: Record<string, 'wait' | 'run' | 'stop'>;
   autoTopCharts: boolean;
+  tradeMode: 'auto' | 'semi';
+  orderQty: number;
+  tradeSlots: number;
 };
 let config: AppConfig = {
   condition: '',
-  count: 9,
+  count: 10,
   weights: {change: 40, strength: 35, value: 25},
   running: false,
   refreshMs: 60_000,
@@ -163,6 +166,9 @@ let config: AppConfig = {
   strategyByCode: {},
   tradeByCode: {},
   autoTopCharts: true,
+  tradeMode: 'auto',
+  orderQty: 1,
+  tradeSlots: 4,
 };
 
 function bridgeCfg() {
@@ -205,6 +211,7 @@ function strategyFor(code: string) {
 function currentEvaluator() {
   return (code: string, closed: Candle[]) => {
     if (!closed.length) return null;
+    if (config.tradeMode !== 'auto') return null;
     if ((config.tradeByCode[code] ?? 'wait') !== 'run') return null;
     const system = strategyFor(code);
     if (!system) return null;
@@ -236,29 +243,36 @@ function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Re
 let followBusy = false;
 async function followTopCharts(): Promise<void> {
   if (!config.autoTopCharts || followBusy) return;
-  const top = ranking.filter((s) => Number.isFinite(s.score) && s.score >= 0).slice(0, 9).map((s) => s.code);
+  const slots = Math.min(8, Math.max(1, config.tradeSlots));
+  const snap = hub.book.snapshot();
+  const held = new Set([...snap.holdings.map((h) => h.code), ...snap.working.map((o) => o.code)]);
+  const keep = config.chartCodes.filter((c) => held.has(c));
+  const ranked = ranking.filter((s) => Number.isFinite(s.score) && s.score >= 0 && !held.has(s.code)).map((s) => s.code);
+  const fill = ranked.slice(0, Math.max(0, slots - keep.length));
+  const top = [...keep, ...fill];
   if (!top.length) return;
   if (top.join(',') === config.chartCodes.join(',')) return;
   followBusy = true;
   try {
     const tradeByCode = {...config.tradeByCode};
-    for (const code of top) {
-      if (config.running) tradeByCode[code] = 'run';
+    for (const code of fill) {
+      if (config.running && config.tradeMode === 'auto') tradeByCode[code] = 'run';
       else if (!tradeByCode[code]) tradeByCode[code] = 'wait';
     }
-    config = {...config, chartCodes: top, tradeByCode, count: Math.min(40, Math.max(config.count, 9))};
+    config = {...config, chartCodes: top, tradeByCode};
+    hub.orderQty = config.orderQty;
     syncSignals();
     const result = await bridge.syncSubscriptions(bridgeCfg());
     ranking = result.ranking;
     updatedAt = Date.now();
-    for (const code of top) {
+    for (const code of fill) {
       try {
         await bridge.refreshChart(code);
       } catch (e) {
         cache.setWarning(code, e instanceof Error ? e.message : '분봉 갱신 실패');
       }
     }
-    bridge.reevaluate(top);
+    if (config.tradeMode === 'auto') bridge.reevaluate(top);
   } catch (e) {
     error = e instanceof Error ? e.message : '상위 종목 차트 갱신 실패';
   } finally {
@@ -394,6 +408,17 @@ app.post('/api/book/mode', (req, res) => {
     res.json({ok: true, fillMode: next, book: hub.book.snapshot()});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '체결 모드 변경 실패'});
+  }
+});
+app.post('/api/book/buy', async (req, res) => {
+  try {
+    const {code, type, limitPrice, qty} = req.body ?? {};
+    if (typeof code !== 'string') throw new Error('종목코드를 확인하세요.');
+    const order = await hub.book.buy(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? config.orderQty : Number(qty));
+    hub.noteBookOrder(order);
+    res.json({ok: true, order, book: hub.book.snapshot()});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '모의 매수 실패'});
   }
 });
 app.post('/api/book/sell', async (req, res) => {
@@ -776,11 +801,15 @@ app.post('/api/config', async (req, res) => {
       res.status(400).json({error: e instanceof Error ? e.message : '전략 설정 실패'});
       return;
     }
+    const tradeMode = req.body.tradeMode === 'semi' ? 'semi' : req.body.tradeMode === 'auto' ? 'auto' : config.tradeMode;
+    const orderQty = Number.isInteger(req.body.orderQty) && req.body.orderQty >= 1 && req.body.orderQty <= 1000 ? req.body.orderQty : config.orderQty;
+    const tradeSlots = Number.isInteger(req.body.tradeSlots) && req.body.tradeSlots >= 1 && req.body.tradeSlots <= 8 ? req.body.tradeSlots : config.tradeSlots;
     const tradeByCode = {...(condition !== config.condition ? {} : config.tradeByCode)};
     for (const code of chartCodes) {
-      if (running) tradeByCode[code] = 'run';
+      if (running && tradeMode === 'auto') tradeByCode[code] = 'run';
       else if (!tradeByCode[code]) tradeByCode[code] = 'wait';
     }
+    hub.orderQty = orderQty;
     const next: AppConfig = {
       condition,
       count,
@@ -792,6 +821,9 @@ app.post('/api/config', async (req, res) => {
       strategyByCode,
       tradeByCode,
       autoTopCharts,
+      tradeMode,
+      orderQty,
+      tradeSlots,
     };
     await applyConfig(next);
     restartRefreshTimer();

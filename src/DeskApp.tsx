@@ -32,7 +32,7 @@ import {Search150Pane} from './Search150Pane';
 import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number};
 type State = {
   mode: string;
   config: Config;
@@ -96,6 +96,7 @@ export function DeskApp() {
   const [draft, setDraft] = useState<Config | null>(null);
   const [notice, setNotice] = useState('');
   const [showFormulas, setShowFormulas] = useState(false);
+  const [showSysTrade, setShowSysTrade] = useState(false);
   const [showPine, setShowPine] = useState(false);
   const [workspace, setWorkspace] = useState<DeskWorkspace>(defaultWorkspace);
   const [grid, setGrid] = useState(true);
@@ -111,7 +112,7 @@ export function DeskApp() {
       setState(s);
       setDraft((d) =>
         d
-          ? {...d, chartCodes: s.config.chartCodes || [], running: s.config.running, refreshMs: s.config.refreshMs || d.refreshMs || 60000, strategyId: s.config.strategyId || d.strategyId || '', strategyByCode: s.config.strategyByCode || {}}
+          ? {...d, chartCodes: s.config.chartCodes || [], running: s.config.running, refreshMs: s.config.refreshMs || d.refreshMs || 60000, strategyId: s.config.strategyId || d.strategyId || '', strategyByCode: s.config.strategyByCode || {}, tradeSlots: s.config.tradeSlots ?? d.tradeSlots ?? 4, tradeMode: s.config.tradeMode || d.tradeMode || 'auto', orderQty: s.config.orderQty ?? d.orderQty ?? 1, autoTopCharts: s.config.autoTopCharts !== false}
           : {...s.config, tradeByCode: s.config.tradeByCode || {}},
       );
     } catch {
@@ -359,6 +360,7 @@ export function DeskApp() {
                 load={load}
                 setNotice={setNotice}
                 setShowFormulas={setShowFormulas}
+                setShowSysTrade={setShowSysTrade}
                 setStrategy={setStrategy}
                 setTrade={setTrade}
                 formulasFor={formulasFor}
@@ -387,6 +389,16 @@ export function DeskApp() {
         <div className="notice" onClick={() => setNotice('')}>
           {notice || state.error} ×
         </div>
+      )}
+      {showSysTrade && draft && (
+        <SystemTradePanel
+          state={state}
+          draft={draft}
+          setDraft={setDraft}
+          systems={systems}
+          update={update}
+          onClose={() => setShowSysTrade(false)}
+        />
       )}
       {showFormulas && (
         <FormulaManager
@@ -470,6 +482,7 @@ function Pane(props: {
   load: () => Promise<void>;
   setNotice: (v: string) => void;
   setShowFormulas: (v: boolean) => void;
+  setShowSysTrade: (v: boolean) => void;
   setStrategy: (formulaId: string, code?: string) => Promise<void>;
   setTrade: (code: string, status: 'wait' | 'run' | 'stop') => Promise<void>;
   formulasFor: (code: string) => Formula[];
@@ -531,8 +544,11 @@ function Pane(props: {
           </select>
           <select
             value={state.config.strategyId || ''}
-            onChange={(e) => void props.setStrategy(e.target.value)}
-            title="공통 전략"
+            onChange={(e) => {
+              void props.setStrategy(e.target.value);
+              props.setShowSysTrade(true);
+            }}
+            title="공통 전략 · 시스템트레이딩 설정"
           >
             <option value="">전략 없음</option>
             {props.systems.map((f) => (
@@ -541,6 +557,7 @@ function Pane(props: {
               </option>
             ))}
           </select>
+          <button className="hts-tool" onClick={() => props.setShowSysTrade(true)}>시스템트레이딩</button>
           <select value={draft?.condition || ''} onChange={(e) => props.setDraft({...draft, condition: e.target.value})} title="조건식">
             <option value="">조건식</option>
             {state.conditions.map((c) => (
@@ -592,12 +609,13 @@ function Pane(props: {
                 </span>
                 {(() => {
                   const st = (state.config.tradeByCode || {})[s.code] || 'wait';
-                  const label = st === 'run' ? '모의' : st === 'stop' ? '중지' : '대기';
+                  const inPos = (state.book?.holdings || []).some((h) => h.code === s.code);
+                  const label = inPos ? '매매중' : st === 'run' ? '자동' : st === 'stop' ? '중지' : '반자동';
                   const next = st === 'wait' ? 'run' : st === 'run' ? 'stop' : 'wait';
                   return (
                     <button
-                      className={'trade-pill ' + st}
-                      title="클릭: 대기→모의→중지"
+                      className={'trade-pill ' + (inPos ? 'run' : st)}
+                      title="자동(신호 주문) / 반자동(버튼) / 중지. 매매 중이면 순위에서 빼지 않습니다."
                       onClick={(e) => {
                         e.stopPropagation();
                         void props.setTrade(s.code, next);
@@ -607,6 +625,26 @@ function Pane(props: {
                     </button>
                   );
                 })()}
+                <button
+                  className="hts-tool"
+                  title="시장 매수"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void post('/api/book/buy', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
+                  }}
+                >
+                  매수
+                </button>
+                <button
+                  className="hts-tool"
+                  title="시장 매도"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void post('/api/book/sell', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
+                  }}
+                >
+                  매도
+                </button>
                 <button
                   className="cell-x"
                   title="제외"
@@ -1179,12 +1217,23 @@ function ScannerPane(props: {
         </label>
         <input type="range" min={1} max={40} value={draft.count} onChange={(e) => props.setDraft({...draft, count: Number(e.target.value)})} />
         <label>목록 갱신 주기</label>
+        <label>
+          자동매매 종목 수 <b>{draft.tradeSlots ?? 4}개</b>
+        </label>
+        <input
+          type="range"
+          min={1}
+          max={8}
+          value={draft.tradeSlots ?? 4}
+          onChange={(e) => props.setDraft({...draft, tradeSlots: Number(e.target.value)})}
+        />
+        {(draft.tradeSlots ?? 4) >= 6 && <p className="editor-hint">종목이 많으면 분봉 조회가 밀려 순위와 차트가 어긋날 수 있습니다.</p>}
         <button
           className={state.config.running ? 'stop' : 'start'}
           disabled={!draft.condition || state.busy}
-          onClick={() => void props.update({condition: draft.condition, running: !state.config.running, refreshMs: 60000, count: 9, autoTopCharts: true})}
+          onClick={() => void props.update({condition: draft.condition, running: !state.config.running, refreshMs: draft.refreshMs || 60000, tradeSlots: draft.tradeSlots ?? 4, autoTopCharts: true, tradeMode: draft.tradeMode || 'auto'})}
         >
-          {state.config.running ? '모의매매 정지' : '모의매매 시작 (1분·상위9)'}
+          {state.config.running ? '모의매매 정지' : '모의매매 시작'}
         </button>
         <select value={draft.refreshMs || 60000} onChange={(e) => props.setDraft({...draft, refreshMs: Number(e.target.value)})}>
           <option value={15000}>15초</option>
@@ -1279,6 +1328,92 @@ function TrPane({code}: {code: string}) {
         조회
       </button>
       <pre>{out || '결과가 여기에 표시됩니다.'}</pre>
+    </div>
+  );
+}
+
+function SystemTradePanel({
+  state,
+  draft,
+  setDraft,
+  systems,
+  update,
+  onClose,
+}: {
+  state: State;
+  draft: Config;
+  setDraft: React.Dispatch<React.SetStateAction<Config | null>>;
+  systems: Formula[];
+  update: (patch?: Partial<Config>) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="formula-modal sys-trade" onClick={(e) => e.stopPropagation()}>
+        <div className="formula-header">
+          <div><h2>시스템트레이딩 설정</h2></div>
+          <button className="icon-button" type="button" onClick={onClose}>×</button>
+        </div>
+        <p className="editor-hint">키움 HTS 시스템트레이딩과 같이 공통 설정을 멀티차트 전 종목에 적용합니다. 이미 매매 중인 종목은 순위에서 빼지 않습니다.</p>
+        <label>
+          시스템 수식
+          <select value={draft.strategyId || ''} onChange={(e) => setDraft({...draft, strategyId: e.target.value})}>
+            <option value="">선택</option>
+            {systems.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          매매 방식
+          <select value={draft.tradeMode || 'auto'} onChange={(e) => setDraft({...draft, tradeMode: e.target.value as 'auto' | 'semi'})}>
+            <option value="auto">자동 (신호 시 주문)</option>
+            <option value="semi">반자동 (차트 매수/매도 버튼)</option>
+          </select>
+        </label>
+        <label>
+          자동매매 종목 수 {draft.tradeSlots ?? 4} (1~8)
+          <input type="range" min={1} max={8} value={draft.tradeSlots ?? 4} onChange={(e) => setDraft({...draft, tradeSlots: Number(e.target.value)})} />
+        </label>
+        {(draft.tradeSlots ?? 4) >= 6 && <p className="editor-hint">6개 이상이면 분봉 조회가 순위 갱신보다 늦을 수 있습니다.</p>}
+        <label>
+          1회 수량
+          <input type="number" min={1} max={1000} value={draft.orderQty ?? 1} onChange={(e) => setDraft({...draft, orderQty: Number(e.target.value)})} />
+        </label>
+        <label>
+          목록 갱신
+          <select value={draft.refreshMs || 60000} onChange={(e) => setDraft({...draft, refreshMs: Number(e.target.value)})}>
+            <option value={15000}>15초</option>
+            <option value={30000}>30초</option>
+            <option value={60000}>1분</option>
+            <option value={120000}>2분</option>
+            <option value={300000}>5분</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" checked={draft.autoTopCharts !== false} onChange={(e) => setDraft({...draft, autoTopCharts: e.target.checked})} />
+          진입 전 종목만 점수 순으로 교체 (매매 중 유지)
+        </label>
+        <div className="book-actions">
+          <button
+            className="apply"
+            onClick={() => void update({
+              strategyId: draft.strategyId,
+              tradeMode: draft.tradeMode || 'auto',
+              tradeSlots: draft.tradeSlots ?? 4,
+              orderQty: draft.orderQty ?? 1,
+              refreshMs: draft.refreshMs || 60000,
+              autoTopCharts: draft.autoTopCharts !== false,
+              condition: draft.condition || state.config.condition,
+              count: draft.count,
+              weights: draft.weights,
+              running: state.config.running,
+            }).then(onClose)}
+          >
+            멀티차트에 적용
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

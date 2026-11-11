@@ -135,6 +135,7 @@ export class RealtimeHub {
   private duplicatesDropped = 0;
   private activeCodes = new Set<string>();
   private evaluator: SignalEvaluator | null = null;
+  orderQty = 1;
   private readonly readyHandlers = new Set<() => void | Promise<void>>();
   private hooks: PositionHooks = {};
 
@@ -542,7 +543,7 @@ export class RealtimeHub {
       code,
       side,
       type: 'market' as const,
-      qty: side === 'sell' ? this.book.qty(code) || 1 : 1,
+      qty: side === 'sell' ? this.book.qty(code) || this.orderQty : this.orderQty,
       source: 'signal' as const,
       priceHint: bar.close,
     };
