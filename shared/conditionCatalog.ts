@@ -27,7 +27,7 @@ export const CONDITION_CATALOG: ConditionItem[] = [
   yes('range-px', '범위지정', '주가범위', 'INRANGE(CLOSE, 1000, 500000)', '종가 원 단위.', 'INRANGE(CLOSE, 5000, 100000)'),
   yes('range-vol', '범위지정', '거래량', 'VOLUME >= 2000000', '당봉 거래량.', 'VOLUME >= 1000000'),
   yes('range-val', '범위지정', '거래대금(추정)', 'ACCOUNT >= 5000000000', '거래량×종가. 키움 백만원 단위와 다름.', 'ACCOUNT >= 1e10'),
-  no('range-mkt', '범위지정', '시가총액', '상장주식수·시총 필드 없음. 일봉 parquet의 market_cap은 CSV에 안 넣음.'),
+  yes('range-mkt', '범위지정', '시가총액(원)', 'INRANGE(MARKETCAP, 300000000000, 5000000000000)', '일봉 CSV 7열 market_cap. 30십억~5000십억 예.', 'INRANGE(MARKETCAP, 1e11, 5e12)'),
   no('range-kospi', '범위지정', '코스피/코스닥 구분', '시장 코드가 봉 CSV에 없음.'),
   no('range-cap', '범위지정', '자본금·상장주식수·액면가', '종목 마스터 없음.'),
   no('range-list', '범위지정', '상장일·증거금·신용', '종목 마스터 없음.'),

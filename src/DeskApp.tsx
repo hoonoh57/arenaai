@@ -643,7 +643,7 @@ function Pane(props: {
   if (win.kind === 'captures') return <CapturesPane state={state} draft={draft} setDraft={props.setDraft} update={props.update} onCode={props.onCommonCode} toggleChart={props.toggleChart} chartCodes={chartCodes} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
   if (win.kind === 'verify') {
-    return <VerifyPane state={state} chartCodes={chartCodes} selected={selected} setNotice={props.setNotice} onCode={props.onCommonCode} />;
+    return <VerifyPane state={state} draft={draft} update={props.update} load={props.load} chartCodes={chartCodes} selected={selected} setNotice={props.setNotice} onCode={props.onCommonCode} />;
   }
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   return (
@@ -730,12 +730,18 @@ function pct(v: number | null | undefined) {
 
 function VerifyPane({
   state,
+  draft,
+  update,
+  load,
   chartCodes,
   selected,
   setNotice,
   onCode,
 }: {
   state: State;
+  draft: Config;
+  update: (patch?: Partial<Config>) => Promise<void>;
+  load: () => Promise<void>;
   chartCodes: string[];
   selected: Stock[];
   setNotice: (v: string) => void;
@@ -759,6 +765,10 @@ function VerifyPane({
   const [minute, setMinute] = useState(false);
   const [holdMinutes, setHoldMinutes] = useState(5);
   const [customMin, setCustomMin] = useState(10);
+  const [minVolume, setMinVolume] = useState(0);
+  const [minEok, setMinEok] = useState(0);
+  const [maxEok, setMaxEok] = useState(0);
+  const [listedOnly, setListedOnly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<'code' | 'name' | 'max' | 'vol' | string>('max');
@@ -802,6 +812,10 @@ function VerifyPane({
         minute,
         holdMinutes: holdMinutes === 0 ? customMin : holdMinutes,
         codes: localConditionId ? [] : codes,
+        minVolume,
+        minMarketCap: minEok > 0 ? minEok * 1e8 : 0,
+        maxMarketCap: maxEok > 0 ? maxEok * 1e8 : 0,
+        listedOnly,
       });
       setResult(d);
       setPicked([]);
@@ -856,10 +870,21 @@ function VerifyPane({
                 <option key={c.seq} value={c.seq}>{c.name}</option>
               ))}
             </select>
-            <select value={localConditionId} onChange={(e) => { setLocalConditionId(e.target.value); setFormulaId(''); }}>
+            <button type="button" onClick={async () => { try { await post('/api/conditions'); await load(); setNotice('서버 조건식 목록을 불러왔습니다.'); } catch (e) { setNotice((e as Error).message); } }}>목록</button>
+            <button type="button" disabled={!conditionSeq || state.busy} onClick={() => void update({condition: conditionSeq})}>포착</button>
+            <select value={localConditionId} onChange={(e) => {
+              const id = e.target.value;
+              setLocalConditionId(id);
+              setFormulaId('');
+              const s = localConds.find((c) => c.id === id);
+              if (s?.timeframe) {
+                setMinute(s.timeframe === '1');
+                setHoldMinutes(s.timeframe === '1' ? 420 : 5);
+              }
+            }}>
               <option value="">로컬 0150</option>
               {localConds.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>{c.name}{c.timeframe === '1' ? ' (분)' : ' (일)'}</option>
               ))}
             </select>
             <select value={formulaId} onChange={(e) => { setFormulaId(e.target.value); if (e.target.value) setLocalConditionId(''); }}>
@@ -890,6 +915,18 @@ function VerifyPane({
             ))}
             <button className={holdMinutes === 0 ? 'on' : ''} onClick={() => setHoldMinutes(0)}>기타</button>
             {holdMinutes === 0 && <input type="number" min={1} max={minute ? 2000 : 400} value={customMin} onChange={(e) => setCustomMin(Number(e.target.value) || 1)} />}
+          </div>
+          <div className="v16-row">
+            <span>거르기</span>
+            <label className="v16-check"><input type="checkbox" checked={listedOnly} onChange={(e) => setListedOnly(e.target.checked)} /> 검색일 봉 없는 종목 제외(상폐·정지 근사)</label>
+          </div>
+          <div className="v16-row">
+            <span>거래량≥</span>
+            <input type="number" min={0} value={minVolume} onChange={(e) => setMinVolume(Number(e.target.value) || 0)} />
+            <span>시총억≥</span>
+            <input type="number" min={0} value={minEok} onChange={(e) => setMinEok(Number(e.target.value) || 0)} />
+            <span>≤</span>
+            <input type="number" min={0} value={maxEok} onChange={(e) => setMaxEok(Number(e.target.value) || 0)} />
           </div>
           <button className="v16-run" disabled={busy} onClick={() => void run()}>{busy ? '검증 중…' : '성과 검증하기'}</button>
           <h4>성과 검증 결과</h4>

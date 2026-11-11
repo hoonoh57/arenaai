@@ -23,12 +23,18 @@ def ingest_daily(src: Path, dest: Path) -> int:
     dest.mkdir(parents=True, exist_ok=True)
     by: dict[str, list[tuple]] = defaultdict(list)
     for f in src.rglob("*.parquet"):
-        t = pq.read_table(f, columns=["code", "date", "open", "high", "low", "close", "volume"])
+        cols = ["code", "date", "open", "high", "low", "close", "volume"]
+        names = pq.read_schema(f).names
+        if "market_cap" in names:
+            cols.append("market_cap")
+        t = pq.read_table(f, columns=cols)
         d = t.to_pydict()
+        mcaps = d.get("market_cap")
         for i in range(len(d["code"])):
             c = code6(d["code"][i])
             if not c:
                 continue
+            cap = int(mcaps[i] or 0) if mcaps else 0
             by[c].append(
                 (
                     int(d["date"][i]),
@@ -37,15 +43,16 @@ def ingest_daily(src: Path, dest: Path) -> int:
                     int(d["low"][i]),
                     int(d["close"][i]),
                     int(d["volume"][i] or 0),
+                    cap,
                 )
             )
     for code, rows in by.items():
         uniq = {r[0]: r for r in rows}
         ordered = [uniq[k] for k in sorted(uniq)]
         with open(dest / f"{code}.csv", "w") as w:
-            w.write("time,open,high,low,close,volume\n")
+            w.write("time,open,high,low,close,volume,market_cap\n")
             for r in ordered:
-                w.write(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]},{r[5]}\n")
+                w.write(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]},{r[5]},{r[6]}\n")
     return len(by)
 
 

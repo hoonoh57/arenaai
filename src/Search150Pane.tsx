@@ -79,6 +79,7 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
     setName(s.name);
     setRows(s.rows);
     setCombo(s.combo);
+    if (s.timeframe) setTimeframe(s.timeframe);
   };
 
   const persist = async (list: SavedCondition[]) => {
@@ -94,7 +95,7 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
   const saveCurrent = async () => {
     try {
       const id = savedId && saved.some((s) => s.id === savedId) ? savedId : `c${Date.now()}`;
-      const rec: SavedCondition = {id, name: name.trim() || '내조건식', rows, combo};
+      const rec: SavedCondition = {id, name: name.trim() || '내조건식', rows, combo, timeframe: timeframe === '1' ? '1' : 'D'};
       const rest = saved.filter((s) => s.id !== id);
       await persist([...rest, rec]);
       setSavedId(id);
@@ -106,7 +107,7 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
 
   const saveAsNew = async () => {
     try {
-      const rec: SavedCondition = {id: `c${Date.now()}`, name: (name.trim() || '내조건식') + '_복사', rows, combo};
+      const rec: SavedCondition = {id: `c${Date.now()}`, name: (name.trim() || '내조건식') + '_복사', rows, combo, timeframe: timeframe === '1' ? '1' : 'D'};
       await persist([...saved, rec]);
       setSavedId(rec.id);
       setName(rec.name);

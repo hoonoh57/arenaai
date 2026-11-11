@@ -506,7 +506,9 @@ app.post('/api/verify', async (req, res) => {
     const conditionName = typeof req.body?.conditionName === 'string' ? req.body.conditionName.slice(0, 80) : '';
     const searchDate = typeof req.body?.searchDate === 'string' ? req.body.searchDate : '';
     const searchTime = typeof req.body?.searchTime === 'string' ? req.body.searchTime : '09:00';
-    const minute = Boolean(req.body?.minute);
+    const minuteReq = Boolean(req.body?.minute);
+    const tf = savedCond?.timeframe === '1' || savedCond?.timeframe === 'D' ? savedCond.timeframe : (minuteReq ? '1' : 'D');
+    const minute = tf !== 'D';
     const holdMinutes = Number(req.body?.holdMinutes);
     const holdMax = minute ? 60 * 24 * 20 : 400;
     if (!Number.isInteger(holdMinutes) || holdMinutes < 1 || holdMinutes > holdMax) throw new Error('수익률기간을 확인하세요.');
@@ -514,9 +516,12 @@ app.post('/api/verify', async (req, res) => {
     const extraCols = minute
       ? [10, 30, holdMinutes].filter((v, i, a) => a.indexOf(v) === i)
       : [1, 5, holdMinutes].filter((v, i, a) => a.indexOf(v) === i);
+    const minVolume = Number(req.body?.minVolume) || 0;
+    const minMarketCap = Number(req.body?.minMarketCap) || 0;
+    const maxMarketCap = Number(req.body?.maxMarketCap) || 0;
+    const listedOnly = req.body?.listedOnly !== false;
     const raw = Array.isArray(req.body?.codes) ? req.body.codes : [];
     let codes = [...new Set(raw.filter((c: unknown) => typeof c === 'string' && /^\d{6}$/.test(c)))] as string[];
-    const tf = minute ? '1' : 'D';
     if (localExpr) {
       if (!codes.length) codes = listLocalCodes(tf === 'D' ? 'D' : '1');
       codes = codes.slice(0, 5000);
@@ -537,9 +542,21 @@ app.post('/api/verify', async (req, res) => {
       const times = candles.map((c) => c.time);
       const closes = candles.map((c) => c.close);
       const searchIdx = indexAtOrBefore(times, searchAt);
-      const endIdx = minute
+      const bar = searchIdx >= 0 ? candles[searchIdx] : undefined;
+      if (listedOnly && bar) {
+        const day = (t: number) => new Date((t + 9 * 3600) * 1000).toISOString().slice(0, 10);
+        if (day(bar.time) !== searchDate) {
+          if (!localExpr) rows.push(empty);
+          continue;
+        }
+      }
+      if (minVolume > 0 && (bar?.volume || 0) < minVolume) continue;
+      if (minMarketCap > 0 && (bar?.marketCap || 0) < minMarketCap) continue;
+      if (maxMarketCap > 0 && (bar?.marketCap || 0) > maxMarketCap) continue;
+      const holdEnd = minute
         ? indexAtOrBefore(times, searchAt + holdMinutes * 60)
-        : searchIdx >= 0 ? Math.min(searchIdx + holdMinutes, closes.length - 1) : -1;
+        : searchIdx >= 0 ? searchIdx + holdMinutes : -1;
+      const maxEnd = minute ? holdEnd : searchIdx >= 0 ? Math.min(Math.max(holdEnd, searchIdx), closes.length - 1) : -1;
       const matched = formula
         ? searchIdx >= 0 && Boolean(evaluate(formula.expression, candles, formula.variables, formulas)[searchIdx])
         : localExpr
@@ -547,7 +564,6 @@ app.post('/api/verify', async (req, res) => {
           : searchIdx >= 0;
       if (localExpr && !matched) continue;
       const searchPrice = searchIdx >= 0 ? closes[searchIdx] : null;
-      const endPrice = endIdx >= 0 ? closes[endIdx] : null;
       const returns: Record<string, number | null> = {};
       for (const m of extraCols) {
         returns[String(m)] = matched && searchIdx >= 0
@@ -559,10 +575,12 @@ app.post('/api/verify', async (req, res) => {
         name,
         matched,
         searchPrice,
-        endPrice,
-        volume: searchIdx >= 0 ? candles[searchIdx].volume : undefined,
-        returnPct: matched ? barReturn(searchPrice || 0, endPrice || 0) : null,
-        maxReturnPct: matched ? maxReturnFrom(closes, searchIdx, endIdx) : null,
+        endPrice: holdEnd >= 0 && holdEnd < closes.length ? closes[holdEnd] : null,
+        volume: bar?.volume,
+        returnPct: matched && searchIdx >= 0
+          ? (minute ? barReturn(searchPrice || 0, holdEnd >= 0 ? closes[holdEnd] : 0) : returnAfterBars(closes, searchIdx, holdMinutes))
+          : null,
+        maxReturnPct: matched ? maxReturnFrom(closes, searchIdx, maxEnd) : null,
         returns,
       });
       if (localExpr && rows.length >= 300) break;

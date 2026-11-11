@@ -23,7 +23,8 @@ function validate(value: unknown): SavedCondition[] {
       expression: String(r.expression || '').slice(0, 500),
       enabled: Boolean(r.enabled),
     }));
-    out.push({id: v.id, name: v.name.trim(), combo: v.combo, rows});
+    const timeframe = v.timeframe === '1' ? '1' : 'D';
+    out.push({id: v.id, name: v.name.trim(), combo: v.combo, rows, timeframe});
   }
   return out;
 }

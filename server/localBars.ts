@@ -61,10 +61,21 @@ export function parseBarFile(text: string): Candle[] {
     const time = parseTime(parts[0]);
     const open = Number(parts[1]), high = Number(parts[2]), low = Number(parts[3]), close = Number(parts[4]);
     const volume = parts[5] !== undefined ? Number(parts[5]) : undefined;
+    const marketCap = parts[6] !== undefined ? Number(parts[6]) : undefined;
     if (!Number.isFinite(time) || !(open > 0) || !(close > 0) || high < low) continue;
-    out.push({time, open, high, low, close, ...(Number.isFinite(volume) ? {volume} : {})});
+    out.push({
+      time, open, high, low, close,
+      ...(Number.isFinite(volume) ? {volume} : {}),
+      ...(Number.isFinite(marketCap) && marketCap > 0 ? {marketCap} : {}),
+    });
   }
-  return out.sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
+  const sorted = out.sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
+  let cap: number | undefined;
+  for (const c of sorted) {
+    if (typeof c.marketCap === 'number' && c.marketCap > 0) cap = c.marketCap;
+    else if (cap) c.marketCap = cap;
+  }
+  return sorted;
 }
 
 export function listLocalCodes(tf: 'D' | '1' = 'D'): string[] {

@@ -85,7 +85,8 @@ export function returnAfterMinutes(closes: number[], times: number[], searchIdx:
 
 export function returnAfterBars(closes: number[], searchIdx: number, bars: number): number | null {
   if (searchIdx < 0 || searchIdx >= closes.length || !Number.isInteger(bars) || bars < 1) return null;
-  const endIdx = Math.min(searchIdx + bars, closes.length - 1);
+  const endIdx = searchIdx + bars;
+  if (endIdx >= closes.length) return null;
   return barReturn(closes[searchIdx], closes[endIdx]);
 }
 

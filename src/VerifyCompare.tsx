@@ -43,7 +43,12 @@ export function VerifyCompare({
         const code = codes[i];
         const bars = await loadBars(code, timeframe).catch(() => []);
         if (cancelled) return;
-        const from = bars.filter((c) => c.time >= searchAt);
+        const dayKey = (t: number) => {
+          const d = new Date((t + 9 * 3600) * 1000);
+          return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+        };
+        const startDay = dayKey(searchAt);
+        const from = bars.filter((c) => (timeframe === 'D' ? dayKey(c.time) >= startDay : c.time >= searchAt));
         const base = from[0]?.close;
         if (!(base > 0)) continue;
         const line = chart.addSeries(LineSeries, {color: COLORS[i % COLORS.length], lineWidth: 2, title: names[code] || code});

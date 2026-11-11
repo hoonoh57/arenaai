@@ -10,6 +10,7 @@ export type SavedCondition = {
   name: string;
   rows: ConditionRow[];
   combo: string;
+  timeframe?: 'D' | '1';
 };
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRST';
@@ -41,6 +42,7 @@ export function defaultCombo(rows: ConditionRow[]): string {
 export const SAMPLE_SAVED: SavedCondition = {
   id: 'sample-5pct',
   name: '5%_기준버전(로컬)',
+  timeframe: 'D',
   combo: '(A and B and (C or D) and E and F) or ((G or H) and I)',
   rows: [
     {letter: 'A', label: '거래대금 추정 50억↑', expression: 'ACCOUNT >= 5000000000', enabled: true},
