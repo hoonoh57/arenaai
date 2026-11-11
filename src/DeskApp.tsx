@@ -924,6 +924,7 @@ function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => void; onC
   }, []);
   const apply = (item: ConditionItem, mode: 'replace' | 'and' | 'or') => {
     setPicked(item);
+    if (item.available === false || !item.expression) return;
     setExpression((cur) => {
       const next = item.expression;
       const t = cur.trim();
@@ -954,8 +955,8 @@ function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => void; onC
           <div key={g} className="s150-group">
             <div className="s150-group-title">{g}</div>
             {tree.filter((c) => c.group === g).map((c) => (
-              <button key={c.id} type="button" className={picked?.id === c.id ? 'on' : ''} onClick={() => apply(c, 'replace')} title={c.hint}>
-                {c.name}
+              <button key={c.id} type="button" className={`${picked?.id === c.id ? 'on' : ''} ${c.available === false ? 'off' : ''}`} onClick={() => apply(c, 'replace')} title={c.hint}>
+                {c.name}{c.available === false ? ' (불가)' : ''}
               </button>
             ))}
           </div>

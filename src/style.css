@@ -133,6 +133,7 @@
 .s150-tree input{width:100%;margin-bottom:8px;background:#0e151e;border:1px solid #30404b;color:#d3dde2;padding:6px;border-radius:4px}
 .s150-tree button{display:block;width:100%;text-align:left;background:none;border:0;color:#c5d4de;padding:6px 4px;font-size:12px}
 .s150-tree button.on{background:#1a2a3a;color:#e8f0ff}
+.s150-tree button.off{color:#5d6d76}
 .s150-group{margin-bottom:8px}
 .s150-group-title{color:#8aa0b0;font-size:10px;padding:4px 2px}
 .s150-fn{display:flex;flex-direction:column;gap:2px;padding:4px 2px;font-size:10px;color:#9bb0bc}
