@@ -1,7 +1,7 @@
-# 원본 CYBOS parquet → data/bars/*.bar (없는 파티션만 증분)
-# 사용:  .\scripts\Convert-CybosToBars.ps1
-#        .\scripts\Convert-CybosToBars.ps1 -SkipMinute
-#        .\scripts\Convert-CybosToBars.ps1 -RemoveCsvCache
+# Convert Drive CYBOS parquet -> data/bars/*.bar (incremental)
+# Usage:  .\scripts\Convert-CybosToBars.ps1
+#         .\scripts\Convert-CybosToBars.ps1 -Src "G:\My Drive\db\raw\cybos"
+#         .\scripts\Convert-CybosToBars.ps1 -SkipMinute -RemoveCsvCache
 param(
   [string]$Src = $env:CYBOS_SRC,
   [string]$Dest = "data\bars",
@@ -13,37 +13,54 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-if (-not $Src) {
-  foreach ($c in @(
-      "G:\내 드라이브\db\raw\cybos",
-      "G:\My Drive\db\raw\cybos"
-    )) {
-    if (Test-Path $c) { $Src = $c; break }
+function Find-CybosOrigin {
+  param([string]$Given)
+  if ($Given -and (Test-Path -LiteralPath $Given)) { return $Given }
+  $names = @(
+    "G:\My Drive\db\raw\cybos",
+    "G:\Google Drive\db\raw\cybos"
+  )
+  $driveLetter = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -match '^[A-Z]$' }
+  foreach ($d in $driveLetter) {
+    $root = $d.Root
+    foreach ($leaf in @("My Drive", "Google Drive")) {
+      $names += (Join-Path $root (Join-Path $leaf "db\raw\cybos"))
+    }
+    Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      $try = Join-Path $_.FullName "db\raw\cybos"
+      if (Test-Path -LiteralPath (Join-Path $try "cybos_1d_A")) { $names += $try }
+    }
   }
+  foreach ($c in $names) {
+    if ($c -and (Test-Path -LiteralPath (Join-Path $c "cybos_1d_A"))) { return $c }
+    if ($c -and (Test-Path -LiteralPath (Join-Path $c "1d"))) { return $c }
+  }
+  return $null
 }
-if (-not $Src -or -not (Test-Path $Src)) {
-  Write-Error "원본 parquet 폴더를 찾지 못했습니다. -Src 또는 CYBOS_SRC 를 지정하세요."
+
+$Src = Find-CybosOrigin $Src
+if (-not $Src) {
+  Write-Host "Origin parquet not found. Pass -Src or set CYBOS_SRC."
+  Write-Host "Example: .\scripts\Convert-CybosToBars.ps1 -Src `"G:\My Drive\db\raw\cybos`""
+  exit 1
 }
 
 $py = Join-Path $PWD ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 
-$args = @("scripts\ingest_cybos.py", "--src", $Src, "--dest", $Dest)
-if ($SkipDaily) { $args += "--skip-daily" }
-if ($SkipMinute) { $args += "--skip-minute" }
+$pyArgs = @("scripts\ingest_cybos.py", "--src", $Src, "--dest", $Dest)
+if ($SkipDaily) { $pyArgs += "--skip-daily" }
+if ($SkipMinute) { $pyArgs += "--skip-minute" }
 
 Write-Host "origin $Src"
 Write-Host "dest   $Dest"
-& $py @args
+& $py @pyArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($RemoveCsvCache) {
-  $csvRoots = @("data\cybos", (Join-Path $Dest "D"), (Join-Path $Dest "1"))
-  foreach ($root in @("data\cybos")) {
-    if (Test-Path $root) {
-      Write-Host "remove parquet cache $root"
-      Remove-Item -Recurse -Force $root
-    }
+  if (Test-Path "data\cybos") {
+    Write-Host "remove parquet cache data\cybos"
+    Remove-Item -Recurse -Force "data\cybos"
   }
   foreach ($dir in @((Join-Path $Dest "D"), (Join-Path $Dest "1"))) {
     if (Test-Path $dir) {
@@ -53,4 +70,4 @@ if ($RemoveCsvCache) {
   }
 }
 
-Write-Host "done. git pull 후 npm run dev 하면 시작 시 같은 증분이 다시 돕니다."
+Write-Host "done."
