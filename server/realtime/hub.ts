@@ -22,7 +22,7 @@ import {SharedCache} from './cache';
 import {classifyMessage, LimitGovernor, RealtimeCaps, type RealtimeLimits} from './limits';
 import {KeyedDedup, SignalDedup} from './ring';
 import {signalDataStatus} from '../data-quality';
-import {SimulationBook, type BookHooks} from './book';
+import {SimulationBook, type BookHooks, type MockOrderBroker} from './book';
 
 export type HubState = 'idle' | 'connecting' | 'logging-in' | 'ready' | 'reconnecting' | 'closed';
 
@@ -69,6 +69,8 @@ export type HubDeps = {
   staleMs?: number;
   candleRefreshDebounceMs?: number;
   signalDedupSize?: number;
+  orderBroker?: MockOrderBroker;
+  allowBrokerOrders?: boolean;
 };
 
 type Subscription = {item: string; type: string; owners: Set<string>};
@@ -151,7 +153,14 @@ export class RealtimeHub {
     this.debounceMs = deps.candleRefreshDebounceMs ?? 2000;
     this.dedup = new KeyedDedup({ttlMs: 5000, max: 20000});
     this.signalDedup = new SignalDedup(deps.signalDedupSize ?? 20000);
-    this.book = new SimulationBook({cache: this.cache, audit: this.audit, now: this.now, hooks: () => this.hooks});
+    this.book = new SimulationBook({
+      cache: this.cache,
+      audit: this.audit,
+      now: this.now,
+      hooks: () => this.hooks,
+      broker: deps.orderBroker,
+      allowBroker: deps.allowBrokerOrders,
+    });
     if (!Number.isFinite(this.reconnectBaseMs) || this.reconnectBaseMs < 10) throw new Error('재연결 기본 지연 시간이 올바르지 않습니다.');
     if (!Number.isFinite(this.staleMs) || this.staleMs < 1000) throw new Error('무응답 판정 시간이 올바르지 않습니다.');
   }
@@ -531,23 +540,22 @@ export class RealtimeHub {
   private applySignal(code: string, bar: Candle, side: 'buy' | 'sell'): void {
     const key = `${code}|${bar.time}|${side}`;
     if (!this.signalDedup.claim(key)) return;
+    const input = {
+      code,
+      side,
+      type: 'market' as const,
+      qty: side === 'sell' ? this.book.qty(code) || 1 : 1,
+      source: 'signal' as const,
+      priceHint: bar.close,
+    };
+    const onPlaced = (order: {status: string; fillPrice: number | null; fillAt: number | null; code: string; side: 'buy' | 'sell'}) => {
+      this.noteBookOrder(order);
+    };
     try {
-      const order = this.book.place({
-        code,
-        side,
-        type: 'market',
-        qty: side === 'sell' ? this.book.qty(code) || 1 : 1,
-        source: 'signal',
-        priceHint: bar.close,
+      if (this.book.mode === 'assumed') onPlaced(this.book.place(input));
+      else void this.book.submit(input).then(onPlaced).catch((error) => {
+        this.audit.record('order', error instanceof Error ? error.message : '모의 주문 실패', {code, side, barTime: bar.time});
       });
-      if (order.status === 'filled' && order.fillPrice) {
-        this.pushEvent({
-          time: order.fillAt ?? this.now(),
-          code,
-          side: side === 'buy' ? '모의 매수 체결' : '모의 매도 체결',
-          price: order.fillPrice,
-        });
-      }
     } catch (error) {
       this.audit.record('order', error instanceof Error ? error.message : '모의 주문 실패', {code, side, barTime: bar.time});
     }

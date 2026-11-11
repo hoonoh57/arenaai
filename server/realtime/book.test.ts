@@ -60,7 +60,7 @@ test('지정가 매수는 가격이 한도에 닿을 때만 체결한다', () =>
   assert.equal(book.qty('005930'), 1);
 });
 
-test('개별·일괄 매도와 미체결 취소', () => {
+test('개별·일괄 매도와 미체결 취소', async () => {
   const cache = new SharedCache();
   cache.setQuote(quote('005930', 100));
   cache.setQuote(quote('000660', 200));
@@ -69,18 +69,49 @@ test('개별·일괄 매도와 미체결 취소', () => {
   book.place({code: '000660', side: 'buy', type: 'market'});
   const waiting = book.place({code: '005930', side: 'buy', type: 'limit', limitPrice: 50, qty: 1});
   assert.equal(waiting.status, 'working');
-  assert.equal(book.cancel(waiting.id).status, 'cancelled');
+  assert.equal((await book.cancel(waiting.id)).status, 'cancelled');
   book.place({code: '000660', side: 'buy', type: 'limit', limitPrice: 10, qty: 1});
-  assert.equal(book.cancelAll(), 1);
-  book.sell('005930', 'market');
+  assert.equal(await book.cancelAll(), 1);
+  await book.sell('005930', 'market');
   assert.equal(book.qty('005930'), 0);
-  const rest = book.flatten();
+  const rest = await book.flatten();
   assert.equal(rest.length, 1);
   assert.equal(book.snapshot().holdings.length, 0);
 });
 
-test('없는 가격으로 체결을 만들지 않고 보유 없이 매도하지 않는다', () => {
+test('없는 가격으로 체결을 만들지 않고 보유 없이 매도하지 않는다', async () => {
   const book = new SimulationBook({cache: new SharedCache(), audit: new AuditLog()});
-  assert.throws(() => book.sell('005930', 'market'));
+  await assert.rejects(() => book.sell('005930', 'market'));
   assert.throws(() => book.place({code: 'ABC', side: 'buy', type: 'market'}));
+});
+
+test('모의 주문 모드에서는 가정 체결하지 않고 브로커 주문번호만 남긴다', async () => {
+  const calls: string[] = [];
+  const book = new SimulationBook({
+    cache: new SharedCache(),
+    audit: new AuditLog(),
+    allowBroker: true,
+    broker: {
+      async stockOrder(input) {
+        calls.push(`${input.side}:${input.code}`);
+        return {ordNo: '0000140'};
+      },
+      async cancelStock() {
+        calls.push('cancel');
+        return {ordNo: '0000141'};
+      },
+    },
+  });
+  book.setFillMode('kiwoom-mock');
+  const order = await book.submit({code: '005930', side: 'buy', type: 'market', qty: 1});
+  assert.equal(order.status, 'working');
+  assert.equal(order.brokerOrdNo, '0000140');
+  assert.equal(book.onQuote('005930', 70000).length, 0, '모의 모드에서 시세로 가정 체결하지 않음');
+  await book.cancel(order.id);
+  assert.deepEqual(calls, ['buy:005930', 'cancel']);
+});
+
+test('실전 호스트에서는 모의 주문 모드를 켤 수 없다', () => {
+  const book = new SimulationBook({cache: new SharedCache(), audit: new AuditLog(), allowBroker: false});
+  assert.throws(() => book.setFillMode('kiwoom-mock'), /KIWOOM_MODE=mock/);
 });

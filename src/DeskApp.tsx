@@ -52,6 +52,7 @@ type State = {
     recent: {id: string; code: string; side: string; status: string; fillPrice: number | null; reason: string; updatedAt: number}[];
     assumedFill: boolean;
     brokerOrders: boolean;
+    fillMode?: 'assumed' | 'kiwoom-mock';
   };
 };
 
@@ -682,7 +683,21 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
   };
   return (
     <div className="book-pane">
-      <p className="panel-desc">키움 주문 없음 · 관측 가격으로만 가정 체결 · 시세가 없으면 미체결</p>
+      <p className="panel-desc">
+        {book?.fillMode === 'kiwoom-mock'
+          ? '키움 모의계좌 주문(kt10000/01/03). 실전 주문 없음. 체결은 계좌 응답 기준.'
+          : '가정 체결 · 키움 주문 없음 · 관측 가격만 사용'}
+      </p>
+      <label className="hts-var">
+        체결 모드
+        <select
+          value={book?.fillMode || 'assumed'}
+          onChange={(e) => void run('/api/book/mode', {mode: e.target.value})}
+        >
+          <option value="assumed">가정 체결</option>
+          <option value="kiwoom-mock">키움 모의계좌 주문</option>
+        </select>
+      </label>
       <div className="book-actions">
         <button className="stop" onClick={() => void run('/api/book/flatten', {})}>일괄 청산(시장가 가정)</button>
         <button className="apply" onClick={() => void run('/api/book/cancel', {})}>미체결 일괄 취소</button>

@@ -121,6 +121,7 @@ export class Kiwoom {
   private token = '';
   private expires = 0;
   private readonly base: string;
+  readonly hostMode: 'mock' | 'real';
   private readonly governor: LimitGovernor;
   private readonly options: KiwoomOptions;
   private readonly timeoutMs: number;
@@ -129,6 +130,7 @@ export class Kiwoom {
     this.governor = governor;
     this.options = options;
     this.timeoutMs = options.timeoutMs ?? 15000;
+    this.hostMode = mode;
     this.base = mode === 'real' ? 'https://api.kiwoom.com' : 'https://mockapi.kiwoom.com';
   }
 
@@ -186,6 +188,46 @@ export class Kiwoom {
    * governed retry — never an unbounded retry loop, because an unverified quota must not
    * be hammered.
    */
+  /**
+   * Order-lane REST. Only the mock host is allowed to send kt1000x. Real host always throws.
+   */
+  async restOrder(path: string, id: string, body: object): Promise<any> {
+    if (this.hostMode !== 'mock') throw new Error('실전 호스트에서는 주문을 전송하지 않습니다.');
+    await this.governor.acquire(id, 'order');
+    return this.send(path, id, body);
+  }
+
+  /**
+   * kt10000 매수 / kt10001 매도. trde_tp 3=시장가, 0=보통(지정가).
+   */
+  async stockOrder(input: {side: 'buy' | 'sell'; code: string; qty: number; type: 'market' | 'limit'; limitPrice?: number | null; exchange?: string}): Promise<{ordNo: string}> {
+    const id = input.side === 'buy' ? 'kt10000' : 'kt10001';
+    const trde_tp = input.type === 'market' ? '3' : '0';
+    const ord_uv = input.type === 'limit' && input.limitPrice ? String(Math.round(input.limitPrice)) : '';
+    const d = await this.restOrder('/api/dostk/ordr', id, {
+      dmst_stex_tp: input.exchange || 'KRX',
+      stk_cd: input.code,
+      ord_qty: String(input.qty),
+      trde_tp,
+      ord_uv,
+      cond_uv: '',
+    });
+    const ordNo = String(d.ord_no ?? '').trim();
+    if (!ordNo) throw new Error('키움 모의 주문번호가 없습니다.');
+    return {ordNo};
+  }
+
+  /** kt10003 취소. cncl_qty '0' = 잔량 전부. */
+  async cancelStock(input: {code: string; origOrdNo: string; qty?: number; exchange?: string}): Promise<{ordNo: string}> {
+    const d = await this.restOrder('/api/dostk/ordr', 'kt10003', {
+      dmst_stex_tp: input.exchange || 'KRX',
+      orig_ord_no: input.origOrdNo,
+      stk_cd: input.code,
+      cncl_qty: input.qty ? String(input.qty) : '0',
+    });
+    return {ordNo: String(d.ord_no ?? input.origOrdNo)};
+  }
+
   async rest(path: string, id: string, body: object): Promise<any> {
     let retriedRateLimit = false;
     let retriedAuth = false;

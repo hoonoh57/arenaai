@@ -76,6 +76,11 @@ const hub = new RealtimeHub({
   audit,
   caps,
   broker: api,
+  orderBroker: {
+    stockOrder: (input) => api.stockOrder(input),
+    cancelStock: (input) => api.cancelStock(input),
+  },
+  allowBrokerOrders: mode === 'mock',
   createSocket: (url) => new WebSocket(url) as unknown as WsLike,
   logger: (level, message) => (level === 'error' ? console.error(message) : console.log(message)),
 });
@@ -262,7 +267,7 @@ app.get('/api/state', (_req, res) =>
     realtime: bridge.status(),
     risk: risk.snapshot(),
     audit: audit.list(20),
-    orderMode: 'simulation-only',
+    orderMode: hub.book.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed-fill',
     book: hub.book.snapshot(),
   }),
 );
@@ -271,35 +276,43 @@ app.get('/api/audit', (req, res) => {
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({error: 'limit은 1~500이어야 합니다.'});
   res.json({entries: audit.list(limit), counts: audit.counts()});
 });
-app.post('/api/book/sell', (req, res) => {
+app.post('/api/book/mode', (req, res) => {
+  try {
+    const next = hub.book.setFillMode(req.body?.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed');
+    res.json({ok: true, fillMode: next, book: hub.book.snapshot()});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '체결 모드 변경 실패'});
+  }
+});
+app.post('/api/book/sell', async (req, res) => {
   try {
     const {code, type, limitPrice, qty} = req.body ?? {};
     if (typeof code !== 'string') throw new Error('종목코드를 확인하세요.');
-    const order = hub.book.sell(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? undefined : Number(qty));
+    const order = await hub.book.sell(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? undefined : Number(qty));
     hub.noteBookOrder(order);
     res.json({ok: true, order, book: hub.book.snapshot()});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '모의 매도 실패'});
   }
 });
-app.post('/api/book/flatten', (req, res) => {
+app.post('/api/book/flatten', async (req, res) => {
   try {
-    const orders = hub.book.flatten(req.body?.type === 'limit' ? 'limit' : 'market');
+    const orders = await hub.book.flatten(req.body?.type === 'limit' ? 'limit' : 'market');
     for (const order of orders) hub.noteBookOrder(order);
     res.json({ok: true, orders, book: hub.book.snapshot()});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '일괄 청산 실패'});
   }
 });
-app.post('/api/book/cancel', (req, res) => {
+app.post('/api/book/cancel', async (req, res) => {
   try {
     const id = req.body?.id;
     const code = req.body?.code;
     if (typeof id === 'string' && id) {
-      res.json({ok: true, order: hub.book.cancel(id), book: hub.book.snapshot()});
+      res.json({ok: true, order: await hub.book.cancel(id), book: hub.book.snapshot()});
       return;
     }
-    const n = hub.book.cancelAll(typeof code === 'string' ? code : undefined);
+    const n = await hub.book.cancelAll(typeof code === 'string' ? code : undefined);
     res.json({ok: true, cancelled: n, book: hub.book.snapshot()});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '미체결 취소 실패'});

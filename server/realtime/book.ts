@@ -17,6 +17,12 @@ export type BookSide = 'buy' | 'sell';
 export type BookType = 'market' | 'limit';
 export type BookStatus = 'working' | 'filled' | 'cancelled';
 export type BookSource = 'signal' | 'manual';
+export type FillMode = 'assumed' | 'kiwoom-mock';
+
+export type MockOrderBroker = {
+  stockOrder(input: {side: BookSide; code: string; qty: number; type: BookType; limitPrice?: number | null}): Promise<{ordNo: string}>;
+  cancelStock(input: {code: string; origOrdNo: string; qty?: number}): Promise<{ordNo: string}>;
+};
 
 export type SimOrder = {
   id: string;
@@ -32,6 +38,7 @@ export type SimOrder = {
   fillPrice: number | null;
   fillAt: number | null;
   reason: string;
+  brokerOrdNo?: string;
 };
 
 export type SimHolding = {
@@ -45,8 +52,9 @@ export type BookSnapshot = {
   holdings: SimHolding[];
   working: SimOrder[];
   recent: SimOrder[];
-  assumedFill: true;
-  brokerOrders: false;
+  assumedFill: boolean;
+  brokerOrders: boolean;
+  fillMode: FillMode;
 };
 
 export type BookDeps = {
@@ -54,6 +62,9 @@ export type BookDeps = {
   audit: AuditLog;
   now?: () => number;
   hooks?: () => BookHooks;
+  broker?: MockOrderBroker;
+  fillMode?: FillMode;
+  allowBroker?: boolean;
 };
 
 const CODE = /^\d{6}$/;
@@ -63,6 +74,9 @@ export class SimulationBook {
   private readonly audit: AuditLog;
   private readonly now: () => number;
   private readonly hooks: () => BookHooks;
+  private broker?: MockOrderBroker;
+  private readonly allowBroker: boolean;
+  private fillMode: FillMode;
   private readonly holdings = new Map<string, SimHolding>();
   private readonly orders = new Map<string, SimOrder>();
   private seq = 1;
@@ -72,6 +86,26 @@ export class SimulationBook {
     this.audit = deps.audit;
     this.now = deps.now ?? Date.now;
     this.hooks = deps.hooks ?? (() => ({}));
+    this.broker = deps.broker;
+    this.allowBroker = deps.allowBroker ?? false;
+    this.fillMode = deps.fillMode ?? 'assumed';
+  }
+
+  get mode(): FillMode {
+    return this.fillMode;
+  }
+
+  setBroker(broker: MockOrderBroker | undefined): void {
+    this.broker = broker;
+  }
+
+  setFillMode(mode: FillMode): FillMode {
+    if (mode !== 'assumed' && mode !== 'kiwoom-mock') throw new Error('체결 모드는 assumed 또는 kiwoom-mock 입니다.');
+    if (mode === 'kiwoom-mock' && !this.allowBroker) throw new Error('키움 모의계좌 주문은 KIWOOM_MODE=mock 일 때만 켤 수 있습니다. 실전 주문은 전송하지 않습니다.');
+    if (mode === 'kiwoom-mock' && !this.broker) throw new Error('모의 주문 브로커가 없습니다.');
+    this.fillMode = mode;
+    this.audit.record('state', mode === 'assumed' ? '가정 체결 모드입니다. 키움 주문을 보내지 않습니다.' : '키움 모의계좌 주문 모드입니다. mockapi 주문 TR만 사용합니다.', {fillMode: mode});
+    return this.fillMode;
   }
 
   /** Last observed price. Never synthesised. */
@@ -112,7 +146,7 @@ export class SimulationBook {
     if (!CODE.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const qty = input.qty ?? 1;
     if (!Number.isInteger(qty) || qty < 1) throw new Error('수량은 1 이상 정수여야 합니다.');
-    if (input.side === 'sell' && this.qty(input.code) < qty) throw new Error('모의 보유 수량이 부족합니다.');
+    if (this.fillMode === 'assumed' && input.side === 'sell' && this.qty(input.code) < qty) throw new Error('모의 보유 수량이 부족합니다.');
     if (input.side === 'buy' && this.has(input.code) && input.source === 'signal') {
       throw new Error('이미 모의 보유 중인 종목입니다.');
     }
@@ -137,22 +171,55 @@ export class SimulationBook {
       fillPrice: null,
       fillAt: null,
       reason: '미체결',
+      brokerOrdNo: undefined,
     };
     this.orders.set(order.id, order);
-    this.audit.record('order', '모의 주문을 접수했습니다. 키움으로 전송하지 않았습니다.', {
+    this.audit.record('order', this.fillMode === 'assumed' ? '가정 체결 주문을 접수했습니다. 키움으로 전송하지 않았습니다.' : '키움 모의 주문을 준비했습니다.', {
       id: order.id,
       code: order.code,
       side: order.side,
       type: order.type,
+      fillMode: this.fillMode,
     });
-    const hint = input.priceHint && input.priceHint > 0 ? input.priceHint : this.lastPrice(input.code);
-    if (order.type === 'market' && hint) this.fill(order, hint, '시장가 가정 체결');
-    else if (order.type === 'limit' && hint && this.crosses(order, hint)) this.fill(order, hint, '지정가 즉시 가정 체결');
-    return {...order};
+    if (this.fillMode === 'assumed') {
+      const hint = input.priceHint && input.priceHint > 0 ? input.priceHint : this.lastPrice(input.code);
+      if (order.type === 'market' && hint) this.fill(order, hint, '시장가 가정 체결');
+      else if (order.type === 'limit' && hint && this.crosses(order, hint)) this.fill(order, hint, '지정가 즉시 가정 체결');
+    }
+    return {...this.orders.get(order.id)!};
+  }
+
+  async submit(input: Parameters<SimulationBook['place']>[0]): Promise<SimOrder> {
+    const order = this.place(input);
+    if (this.fillMode !== 'kiwoom-mock') return order;
+    if (!this.broker) throw new Error('모의 주문 브로커가 없습니다.');
+    const live = this.orders.get(order.id);
+    if (!live) return order;
+    try {
+      const {ordNo} = await this.broker.stockOrder({
+        side: live.side,
+        code: live.code,
+        qty: live.qty,
+        type: live.type,
+        limitPrice: live.limitPrice,
+      });
+      live.brokerOrdNo = ordNo;
+      live.reason = '키움 모의계좌 접수 (체결은 계좌 미체결/체결 조회)';
+      live.updatedAt = this.now();
+      this.audit.record('order', '키움 모의 주문을 전송했습니다.', {id: live.id, ordNo, code: live.code, side: live.side});
+    } catch (error) {
+      live.status = 'cancelled';
+      live.reason = error instanceof Error ? error.message : '모의 주문 실패';
+      live.updatedAt = this.now();
+      this.audit.record('error', '키움 모의 주문 전송 실패', {id: live.id, error: live.reason});
+      throw error;
+    }
+    return {...live};
   }
 
   /** Called on every realtime quote. Fills working orders that the quote satisfies. */
   onQuote(code: string, price: number): SimOrder[] {
+    if (this.fillMode !== 'assumed') return [];
     if (!Number.isFinite(price) || price <= 0) return [];
     const filled: SimOrder[] = [];
     for (const order of this.orders.values()) {
@@ -165,38 +232,44 @@ export class SimulationBook {
     return filled;
   }
 
-  cancel(id: string): SimOrder {
+  async cancel(id: string): Promise<SimOrder> {
     const order = this.orders.get(id);
     if (!order) throw new Error('주문을 찾을 수 없습니다.');
     if (order.status !== 'working') throw new Error('미체결 주문만 취소할 수 있습니다.');
+    if (this.fillMode === 'kiwoom-mock') {
+      if (!order.brokerOrdNo) throw new Error('키움 주문번호가 없어 취소할 수 없습니다.');
+      if (!this.broker) throw new Error('모의 주문 브로커가 없습니다.');
+      await this.broker.cancelStock({code: order.code, origOrdNo: order.brokerOrdNo});
+    }
     order.status = 'cancelled';
     order.updatedAt = this.now();
     order.reason = '사용자 취소';
-    this.audit.record('order', '모의 미체결을 취소했습니다.', {id, code: order.code});
+    this.audit.record('order', this.fillMode === 'kiwoom-mock' ? '키움 모의 취소를 전송했습니다.' : '가정 체결 미체결을 취소했습니다.', {id, code: order.code});
     return {...order};
   }
 
-  cancelAll(code?: string): number {
+  async cancelAll(code?: string): Promise<number> {
     let n = 0;
     for (const order of [...this.orders.values()]) {
       if (order.status !== 'working') continue;
       if (code && order.code !== code) continue;
-      this.cancel(order.id);
+      await this.cancel(order.id);
       n += 1;
     }
     return n;
   }
 
-  sell(code: string, type: BookType = 'market', limitPrice?: number, qty?: number): SimOrder {
+  async sell(code: string, type: BookType = 'market', limitPrice?: number, qty?: number): Promise<SimOrder> {
     const holding = this.holdings.get(code);
-    if (!holding) throw new Error('모의 보유 종목이 아닙니다.');
-    return this.place({code, side: 'sell', type, qty: qty ?? holding.qty, limitPrice, source: 'manual'});
+    const size = qty ?? holding?.qty ?? 1;
+    if (this.fillMode === 'assumed' && !holding) throw new Error('모의 보유 종목이 아닙니다.');
+    return this.submit({code, side: 'sell', type, qty: size, limitPrice, source: 'manual'});
   }
 
-  flatten(type: BookType = 'market'): SimOrder[] {
+  async flatten(type: BookType = 'market'): Promise<SimOrder[]> {
     const out: SimOrder[] = [];
     for (const holding of [...this.holdings.values()]) {
-      out.push(this.sell(holding.code, type, undefined, holding.qty));
+      out.push(await this.sell(holding.code, type, undefined, holding.qty));
     }
     return out;
   }
@@ -208,8 +281,9 @@ export class SimulationBook {
       holdings: [...this.holdings.values()].map((row) => ({...row})),
       working,
       recent,
-      assumedFill: true,
-      brokerOrders: false,
+      assumedFill: this.fillMode === 'assumed',
+      brokerOrders: this.fillMode === 'kiwoom-mock',
+      fillMode: this.fillMode,
     };
   }
 
