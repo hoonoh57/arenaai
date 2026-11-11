@@ -7,6 +7,7 @@ import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {listLocalCodes, loadLocalBars} from './localBars';
+import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
 import {compileCombo} from '../shared/localConditions';
 import {loadLocalConditions, saveLocalConditions} from './localConditions';
@@ -769,7 +770,10 @@ app.post('/api/refresh', (_req, res) => {
 const server = createServer(app);
 const vite = await createViteServer({server: {middlewareMode: true, allowedHosts: true}, appType: 'spa'});
 app.use(vite.middlewares);
-server.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log(`Dashboard listening on ${process.env.PORT || 3000} (${mode})`));
+server.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => {
+  console.log(`Dashboard listening on ${process.env.PORT || 3000} (${mode})`);
+  syncCybosOnStart();
+});
 
 /**
  * Startup: bring up the single realtime session. A configured condition is then restored.

@@ -4,6 +4,10 @@ import type {Candle} from './core';
 import {aggregateTickBars} from '../shared/ticks';
 
 const barCache = new Map<string, {mtimeMs: number; bars: Candle[]}>();
+
+export function clearBarCache() {
+  barCache.clear();
+}
 const CACHE_MAX = 400;
 const MINUTE_TAIL_BYTES = 96 * 1024;
 const MINUTE_MAX_BARS = 800;
