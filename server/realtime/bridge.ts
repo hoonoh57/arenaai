@@ -3,7 +3,8 @@ import {AuditLog} from './audit';
 import {SharedCache} from './cache';
 import {RealtimeHub} from './hub';
 import type {BrokerLike} from './hub';
-import {kstDate} from './protocol';
+import {kstDate, type Quote} from './protocol';
+import {planSubscriptions} from './plan';
 import {parseConditionRow} from '../kiwoom';
 
 export type StrengthSnapshot = {strength: number | null; value: number | null; change?: number | null};
@@ -28,6 +29,10 @@ export type BridgeOptions = {
   quoteBudget?: number;
   /** Max ka10046 fallback calls per ranking pass (each one is a governed REST call). */
   fallbackBudget?: number;
+  /** Quotes older than this are treated as missing (never ranked as if live). */
+  quoteTtlMs?: number;
+  /** Hard subscription cap; defaults to the hub's reported cap. */
+  maxSubscriptions?: number;
 };
 
 export type RankingResult = {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>};
@@ -47,6 +52,10 @@ export class DemandBridge {
   private readonly fallbackTtlMs: number;
   private readonly quoteBudget: number;
   private readonly fallbackBudget: number;
+  private readonly quoteTtlMs: number;
+  private readonly maxSubscriptions?: number;
+  private rotationCursor = 0;
+  private lastPlan = {watched: 0, skipped: 0};
   private readonly fallback = new Map<string, {at: number; snapshot: StrengthSnapshot}>();
   private readonly captureSnapshot = new Map<string, {price: number; change: number}>();
   private readonly names = new Map<string, string>();
@@ -63,6 +72,9 @@ export class DemandBridge {
     this.fallbackTtlMs = options.fallbackTtlMs ?? 10000;
     this.quoteBudget = options.quoteBudget ?? 40;
     this.fallbackBudget = options.fallbackBudget ?? 20;
+    this.quoteTtlMs = options.quoteTtlMs ?? 30000;
+    this.maxSubscriptions = options.maxSubscriptions;
+    if (!Number.isFinite(this.quoteTtlMs) || this.quoteTtlMs < 0) throw new Error('시세 신선도 한도가 올바르지 않습니다.');
     if (!Number.isFinite(this.fallbackTtlMs) || this.fallbackTtlMs < 0) throw new Error('REST 대체 데이터 TTL이 올바르지 않습니다.');
   }
 
@@ -141,7 +153,16 @@ export class DemandBridge {
   async syncSubscriptions(config: BridgeConfig = this.requireConfig()): Promise<RankingResult> {
     const ranking = await this.computeRanking(config);
     const selectedCodes = ranking.selected.map((stock) => stock.code);
-    const desired = [...new Set([...selectedCodes, ...this.cache.capturedCodes(config.seq).slice(0, this.quoteBudget)])];
+    const plan = planSubscriptions({
+      selected: selectedCodes,
+      captured: this.cache.capturedCodes(config.seq),
+      maxSubscriptions: this.maxSubscriptions ?? this.hub.status().caps?.maxSubscriptions ?? 100,
+      budget: this.quoteBudget,
+      cursor: this.rotationCursor,
+    });
+    this.rotationCursor = plan.cursor;
+    this.lastPlan = {watched: plan.watch.length, skipped: plan.skipped};
+    const desired = plan.watch;
 
     const added = desired.filter((code) => !this.watched.includes(code));
     const removed = this.watched.filter((code) => !desired.includes(code));
@@ -179,7 +200,7 @@ export class DemandBridge {
     const items: Omit<Stock, 'score'>[] = [];
     let fallbackCalls = 0;
     for (const code of codes) {
-      const quote = this.cache.getQuote(code);
+      const quote = this.freshQuote(code);
       const captured = this.captureSnapshot.get(code);
       let change = quote?.changePct ?? captured?.change ?? null;
       let strength = quote?.strength ?? null;
@@ -216,7 +237,15 @@ export class DemandBridge {
     return {ranking, selected: ranking.slice(0, config.count), warnings};
   }
 
-  private async snapshotFallback(code: string): Promise<StrengthSnapshot> {
+  /** A quote is only usable while it is fresh; stale data is reported, never ranked. */
+  private freshQuote(code: string): Quote | undefined {
+    const quote = this.cache.getQuote(code);
+    if (!quote) return undefined;
+    if (this.now() - quote.receivedAt > this.quoteTtlMs) return undefined;
+    return quote;
+  }
+
+  async snapshotFallback(code: string): Promise<StrengthSnapshot> {
     const cached = this.fallback.get(code);
     if (cached && this.now() - cached.at <= this.fallbackTtlMs) return cached.snapshot;
     if (!this.broker.strengthSnapshot) return {strength: null, value: null};
@@ -267,6 +296,8 @@ export class DemandBridge {
       hub: this.hub.status(),
       cache: this.cache.stats(),
       watched: this.watched.length,
+      rotation: {cursor: this.rotationCursor, watched: this.lastPlan.watched, skipped: this.lastPlan.skipped},
+      quoteTtlMs: this.quoteTtlMs,
       captured: this.config ? this.cache.capturedCodes(this.config.seq).length : 0,
       fallbackTtlMs: this.fallbackTtlMs,
       capabilities: this.cache.capabilities(),

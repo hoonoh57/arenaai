@@ -66,7 +66,7 @@ const quote = (code: string, price: number, changePct: number, strength: number,
   buyVolume: null,
   sellVolume: null,
   source: '0B',
-  receivedAt: 0,
+  receivedAt: Date.now(),
 });
 
 const config = {seq: '4', count: 2, weights: {change: 40, strength: 35, value: 25}};
@@ -140,6 +140,28 @@ test('REST 대체 조회는 한 번의 계산에서 예산만큼만 호출한다
   calls = 0;
   await bridge.computeRanking({seq: '4', count: 3, weights: {change: 0, strength: 50, value: 50}});
   assert.equal(calls, 0, 'TTL 안에서는 REST를 다시 호출하지 않는다');
+});
+
+test('오래된 실시간 시세는 순위에서 제외한다', async () => {
+  const {hub} = fakeHub({data: [{'9001': '005930', '302': '삼성전자'}]});
+  const cache = new SharedCache();
+  const now = {t: 1_000_000};
+  const bridge = new DemandBridge({
+    hub,
+    cache,
+    audit: new AuditLog(),
+    broker: {candles: async () => [], daily: async () => []},
+    now: () => now.t,
+    quoteTtlMs: 1000,
+  });
+  await bridge.apply({seq: '4', count: 1, weights: {change: 100, strength: 0, value: 0}});
+  cache.setQuote({...quote('005930', 100, 1, 100, 1000), receivedAt: now.t - 500});
+  const fresh = await bridge.computeRanking({seq: '4', count: 1, weights: {change: 100, strength: 0, value: 0}});
+  assert.equal(fresh.ranking.length, 1);
+  now.t += 2000;
+  const stale = await bridge.computeRanking({seq: '4', count: 1, weights: {change: 100, strength: 0, value: 0}});
+  assert.equal(stale.ranking.length, 0);
+  assert.ok(stale.warnings['005930']);
 });
 
 test('세션이 준비되지 않으면 조건검색을 시작하지 않는다', async () => {

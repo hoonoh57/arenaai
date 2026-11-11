@@ -42,6 +42,16 @@ export type BrokerLike = {
 
 export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean} | null;
 
+/**
+ * Optional guards around the simulated position. `canEnter` may only *block*; exits are
+ * never gated because a risk system must not trap a position.
+ */
+export type PositionHooks = {
+  canEnter?: (intent: {code: string; price: number; at: number}) => {allowed: boolean; reason?: string};
+  onOpen?: (intent: {code: string; price: number; at: number}) => void;
+  onClose?: (result: {code: string; entryPrice: number; exitPrice: number; at: number}) => void;
+};
+
 export type HubDeps = {
   url: string;
   getToken: (force?: boolean) => Promise<string>;
@@ -127,6 +137,7 @@ export class RealtimeHub {
   private activeCodes = new Set<string>();
   private evaluator: SignalEvaluator | null = null;
   private readonly readyHandlers = new Set<() => void | Promise<void>>();
+  private hooks: PositionHooks = {};
 
   constructor(private readonly deps: HubDeps) {
     this.now = deps.now ?? Date.now;
@@ -167,6 +178,10 @@ export class RealtimeHub {
   onReady(handler: () => void | Promise<void>): () => void {
     this.readyHandlers.add(handler);
     return () => this.readyHandlers.delete(handler);
+  }
+
+  setPositionHooks(hooks: PositionHooks): void {
+    this.hooks = hooks;
   }
 
   /** Only these codes are evaluated for simulated signals. */
@@ -507,14 +522,22 @@ export class RealtimeHub {
     if (!this.signalDedup.claim(key)) return;
     if (side === 'buy') {
       if (this.positions.has(code)) return;
+      const at = this.now();
+      const decision = this.hooks.canEnter?.({code, price: bar.close, at});
+      if (decision && !decision.allowed) {
+        this.audit.record('risk', '위험 한도로 모의 진입을 차단했습니다.', {code, barTime: bar.time, reason: decision.reason ?? ''});
+        return;
+      }
       this.positions.set(code, {side: 'long', entryPrice: bar.close, entryTime: bar.time});
+      this.hooks.onOpen?.({code, price: bar.close, at});
       this.audit.record('position', '모의 매수 포지션을 열었습니다.', {code, price: bar.close, barTime: bar.time});
-      this.pushEvent({time: this.now(), code, side: '모의 매수', price: bar.close});
+      this.pushEvent({time: at, code, side: '모의 매수', price: bar.close});
       return;
     }
     const position = this.positions.get(code);
     if (!position) return;
     this.positions.delete(code);
+    this.hooks.onClose?.({code, entryPrice: position.entryPrice, exitPrice: bar.close, at: this.now()});
     this.audit.record('position', '모의 매도로 포지션을 청산했습니다.', {
       code,
       entryPrice: position.entryPrice,

@@ -13,12 +13,21 @@ import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
+import {RiskManager} from './realtime/risk';
 import {wsUrl} from './realtime/protocol';
 
 const mode = process.env.KIWOOM_MODE || 'real';
 if (!['mock', 'real'].includes(mode)) throw new Error('Invalid KIWOOM_MODE');
 const interval = Number(process.env.KIWOOM_REQUEST_INTERVAL_MS || 300);
 if (!Number.isFinite(interval) || interval < 200) throw new Error('KIWOOM_REQUEST_INTERVAL_MS must be >= 200');
+
+function positiveNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+  return value;
+}
 
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -70,6 +79,30 @@ const hub = new RealtimeHub({
   logger: (level, message) => (level === 'error' ? console.error(message) : console.log(message)),
 });
 
+/**
+ * Risk guard rails for the in-app simulation. These limits are local policy: Kiwoom
+ * publishes no verified order-count or loss-limit rules for this project.
+ */
+const risk = new RiskManager({
+  maxPositions: positiveInt('RISK_MAX_POSITIONS', 4),
+  maxEntriesPerCode: positiveInt('RISK_MAX_ENTRIES_PER_CODE', 3),
+  maxEntriesPerDay: positiveInt('RISK_MAX_ENTRIES_PER_DAY', 20),
+  maxConsecutiveLosses: positiveInt('RISK_MAX_CONSECUTIVE_LOSSES', 3),
+  cooldownMs: positiveNumber('RISK_COOLDOWN_MS', 5 * 60_000),
+  maxDailyLossPct: positiveNumber('RISK_MAX_DAILY_LOSS_PCT', 3),
+  startEquity: positiveNumber('RISK_START_EQUITY', 10_000_000),
+  maxEntriesPerMinute: positiveInt('RISK_MAX_ENTRIES_PER_MINUTE', 10),
+});
+
+hub.setPositionHooks({
+  canEnter: ({code, price, at}) => {
+    const decision = risk.canEnter({code, price, at});
+    return {allowed: decision.ok, reason: decision.reason};
+  },
+  onOpen: ({code, price, at}) => risk.onEntry(code, price, at),
+  onClose: ({code, entryPrice, exitPrice, at}) => risk.onExit(code, exitPrice - entryPrice, at),
+});
+
 const bridge = new DemandBridge({
   hub,
   cache,
@@ -81,6 +114,8 @@ const bridge = new DemandBridge({
     strengthSnapshot: (code: string) => api.strengthSnapshot(code),
   },
   quoteBudget: positiveInt('KIWOOM_QUOTE_BUDGET', 40),
+  quoteTtlMs: positiveNumber('QUOTE_TTL_MS', 30000),
+  maxSubscriptions: caps.limits.maxSubscriptions,
 });
 
 let config = {condition: '', count: 4, weights: {change: 40, strength: 35, value: 25} as Weights, running: false};
@@ -169,6 +204,7 @@ app.get('/api/state', (_req, res) =>
     formulas,
     dataWarnings: bridge.warnings(),
     realtime: bridge.status(),
+    risk: risk.snapshot(),
     audit: audit.list(20),
     orderMode: 'simulation-only',
   }),
@@ -177,6 +213,11 @@ app.get('/api/audit', (req, res) => {
   const limit = Number(req.query.limit ?? 100);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({error: 'limit은 1~500이어야 합니다.'});
   res.json({entries: audit.list(limit), counts: audit.counts()});
+});
+app.post('/api/risk/reset', (_req, res) => {
+  risk.resetDay();
+  audit.record('risk', '운영자가 당일 위험 카운터를 초기화했습니다.');
+  res.json({ok: true, risk: risk.snapshot()});
 });
 app.put('/api/formulas', (req, res) => {
   try {
