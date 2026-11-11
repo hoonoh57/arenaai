@@ -768,7 +768,14 @@ app.post('/api/refresh', (_req, res) => {
 });
 
 const server = createServer(app);
-const vite = await createViteServer({server: {middlewareMode: true, allowedHosts: true}, appType: 'spa'});
+const vite = await createViteServer({
+  server: {
+    middlewareMode: true,
+    allowedHosts: true,
+    watch: {ignored: ['**/data/**', '**/.venv/**', '**/google_drive/**']},
+  },
+  appType: 'spa',
+});
 app.use(vite.middlewares);
 server.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => {
   console.log(`Dashboard listening on ${process.env.PORT || 3000} (${mode})`);
