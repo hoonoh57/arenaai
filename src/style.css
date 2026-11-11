@@ -93,5 +93,9 @@
 .trade-pill.wait{background:#2a3a33;color:#9db0a4}
 .trade-pill.run{background:#b9ef78;color:#152018}
 .trade-pill.stop{background:#633b40;color:#ffe1e1}
+.pine-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px 12px;min-height:360px}
+.pine-src{min-height:280px;font-family:ui-monospace,monospace;font-size:12px}
+.pine-notes{max-height:140px;overflow:auto;font-size:10px;color:#8fa79a;line-height:1.5;margin-top:8px}
+@media(max-width:800px){.pine-grid{grid-template-columns:1fr}}
 .rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}

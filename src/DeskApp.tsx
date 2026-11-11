@@ -26,6 +26,7 @@ import {
 import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
+import {PineImport} from './PineImport';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
@@ -91,6 +92,7 @@ export function DeskApp() {
   const [draft, setDraft] = useState<Config | null>(null);
   const [notice, setNotice] = useState('');
   const [showFormulas, setShowFormulas] = useState(false);
+  const [showPine, setShowPine] = useState(false);
   const [workspace, setWorkspace] = useState<DeskWorkspace>(defaultWorkspace);
   const [grid, setGrid] = useState(true);
   const [logScale, setLogScale] = useState(false);
@@ -287,6 +289,9 @@ export function DeskApp() {
         <button className="hts-tool" onClick={() => setShowFormulas(true)}>
           수식 관리자
         </button>
+        <button className="hts-tool" onClick={() => setShowPine(true)}>
+          파인 이식
+        </button>
         <span className="hts-sep" />
         <label className="hts-var">
           공통 종목
@@ -382,6 +387,7 @@ export function DeskApp() {
           onSaved={load}
         />
       )}
+      {showPine && <PineImport formulas={state.formulas} onClose={() => setShowPine(false)} onSaved={load} />}
     </div>
   );
 }
