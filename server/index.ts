@@ -16,6 +16,7 @@ import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
 import {barReturn, DAY_HOLD_PRESETS, HOLD_PRESETS, indexAtOrBefore, maxReturnFrom, parseSearchAt, returnAfterBars, returnAfterMinutes, summarizeVerify, type VerifyRow} from '../shared/verify';
 import {AuditLog} from './realtime/audit';
+import {appendAuditFile, loadAppConfig, readAuditFiles, saveAppConfig, listAuditDays} from './appState';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
 import {RealtimeHub, type WsLike} from './realtime/hub';
@@ -57,7 +58,7 @@ const governor = new LimitGovernor({
   maxWaitMs: positiveInt('KIWOOM_MAX_WAIT_MS', 15000),
 });
 
-const audit = new AuditLog({capacity: positiveInt('AUDIT_CAPACITY', 2000)});
+const audit = new AuditLog({capacity: positiveInt('AUDIT_CAPACITY', 2000), sink: appendAuditFile});
 const cache = new SharedCache({
   maxCodes: positiveInt('CACHE_MAX_CODES', 200),
   candleCapacity: positiveInt('CANDLE_CAPACITY', 1200),
@@ -154,21 +155,24 @@ type AppConfig = {
   tradeMode: 'auto' | 'semi';
   orderQty: number;
   tradeSlots: number;
+  lockedCodes: string[];
 };
+const savedCfg = loadAppConfig<AppConfig>();
 let config: AppConfig = {
-  condition: '',
-  count: 10,
-  weights: {change: 40, strength: 35, value: 25},
-  running: false,
-  refreshMs: 60_000,
-  chartCodes: [],
-  strategyId: '',
-  strategyByCode: {},
-  tradeByCode: {},
-  autoTopCharts: true,
-  tradeMode: 'auto',
-  orderQty: 1,
-  tradeSlots: 4,
+  condition: typeof savedCfg.condition === 'string' ? savedCfg.condition : '',
+  count: Number.isInteger(savedCfg.count) ? savedCfg.count as number : 10,
+  weights: savedCfg.weights && typeof savedCfg.weights === 'object' ? savedCfg.weights as AppConfig['weights'] : {change: 40, strength: 35, value: 25},
+  running: Boolean(savedCfg.running),
+  refreshMs: Number.isInteger(savedCfg.refreshMs) ? savedCfg.refreshMs as number : 60_000,
+  chartCodes: Array.isArray(savedCfg.chartCodes) ? savedCfg.chartCodes.filter((c): c is string => typeof c === 'string') : [],
+  strategyId: typeof savedCfg.strategyId === 'string' ? savedCfg.strategyId : '',
+  strategyByCode: savedCfg.strategyByCode && typeof savedCfg.strategyByCode === 'object' ? savedCfg.strategyByCode as AppConfig['strategyByCode'] : {},
+  tradeByCode: savedCfg.tradeByCode && typeof savedCfg.tradeByCode === 'object' ? savedCfg.tradeByCode as AppConfig['tradeByCode'] : {},
+  autoTopCharts: savedCfg.autoTopCharts !== false,
+  tradeMode: savedCfg.tradeMode === 'semi' ? 'semi' : 'auto',
+  orderQty: Number.isInteger(savedCfg.orderQty) ? savedCfg.orderQty as number : 1,
+  tradeSlots: Number.isInteger(savedCfg.tradeSlots) ? savedCfg.tradeSlots as number : 4,
+  lockedCodes: Array.isArray(savedCfg.lockedCodes) ? savedCfg.lockedCodes.filter((c): c is string => typeof c === 'string' && /^\d{6}$/.test(c)) : [],
 };
 
 function bridgeCfg() {
@@ -245,7 +249,7 @@ async function followTopCharts(): Promise<void> {
   if (!config.autoTopCharts || followBusy) return;
   const slots = Math.min(8, Math.max(1, config.tradeSlots));
   const snap = hub.book.snapshot();
-  const held = new Set([...snap.holdings.map((h) => h.code), ...snap.working.map((o) => o.code)]);
+  const held = new Set([...snap.holdings.map((h) => h.code), ...snap.working.map((o) => o.code), ...config.lockedCodes]);
   const keep = config.chartCodes.filter((c) => held.has(c));
   const ranked = ranking.filter((s) => Number.isFinite(s.score) && s.score >= 0 && !held.has(s.code)).map((s) => s.code);
   const fill = ranked.slice(0, Math.max(0, slots - keep.length));
@@ -261,6 +265,7 @@ async function followTopCharts(): Promise<void> {
     }
     config = {...config, chartCodes: top, tradeByCode};
     hub.orderQty = config.orderQty;
+    saveAppConfig(config);
     syncSignals();
     const result = await bridge.syncSubscriptions(bridgeCfg());
     ranking = result.ranking;
@@ -305,7 +310,9 @@ async function applyConfig(next: typeof config): Promise<void> {
   try {
     config = next;
     revision += 1;
+    hub.orderQty = config.orderQty;
     syncSignals();
+    saveAppConfig(config);
     const result = await bridge.apply(bridgeCfg());
     applyRanking(result);
     error = '';
@@ -682,6 +689,36 @@ app.post('/api/conditions', async (_req, res) => {
     res.status(502).json({error: e instanceof Error ? e.message : '조회 실패'});
   }
 });
+let lastRecapture = 0;
+app.post('/api/recapture', async (_req, res) => {
+  try {
+    if (!config.condition) throw new Error('조건식을 선택하세요.');
+    if (Date.now() - lastRecapture < 60_000) throw new Error('재포착은 1분에 한 번입니다.');
+    lastRecapture = Date.now();
+    await applyConfig({...config});
+    res.json({ok: true, captured: bridge.capturedList(), ranking});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '재포착 실패'});
+  }
+});
+app.post('/api/lock', (req, res) => {
+  try {
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    if (!/^\d{6}$/.test(code)) throw new Error('종목코드가 올바르지 않습니다.');
+    const on = req.body?.locked !== false;
+    const lockedCodes = on ? [...new Set([...config.lockedCodes, code])] : config.lockedCodes.filter((c) => c !== code);
+    config = {...config, lockedCodes};
+    saveAppConfig(config);
+    res.json({ok: true, lockedCodes});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '잠금 실패'});
+  }
+});
+app.get('/api/logs', (req, res) => {
+  const tab = req.query.tab === 'trade' ? 'trade' : 'system';
+  const day = typeof req.query.day === 'string' && /^\d{8}$/.test(req.query.day) ? req.query.day : undefined;
+  res.json({tab, days: listAuditDays(), entries: readAuditFiles(tab, day).slice(0, 500)});
+});
 app.post('/api/strategy', async (req, res) => {
   try {
     const formulaId = normalizeStrategyId(req.body?.formulaId);
@@ -824,6 +861,7 @@ app.post('/api/config', async (req, res) => {
       tradeMode,
       orderQty,
       tradeSlots,
+      lockedCodes: config.lockedCodes,
     };
     await applyConfig(next);
     restartRefreshTimer();
@@ -874,11 +912,12 @@ void (async () => {
   }
   hub.onReady(async () => {
     try {
-      if (!config.condition) return;
-      const result = await bridge.syncSubscriptions(bridgeCfg());
-      applyRanking(result);
+      conditions = await bridge.loadConditions();
+      audit.record('state', '조건식 목록을 자동 조회했습니다.', {count: conditions.length});
+      if (!config.condition || !conditions.some((c) => c.seq === config.condition)) return;
+      await applyConfig({...config});
     } catch (e) {
-      error = e instanceof Error ? e.message : '재연결 복구 실패';
+      error = e instanceof Error ? e.message : '조건식 복원 실패';
     }
   });
 })();

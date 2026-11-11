@@ -20,7 +20,7 @@ test('빈 3번 화면에 모의매매 세 창을 넣는다', () => {
   });
   const d3 = ws.desks.find((d) => d.number === 3);
   assert.ok(d3);
-  assert.deepEqual(d3!.windows.map((w) => w.kind), ['scanner', 'multi-chart', 'book']);
+  assert.deepEqual(d3!.windows.map((w) => w.kind), ['scanner', 'multi-chart', 'book', 'logs']);
 });
 
 test('가상화면은 1~8번만 만들고 번호가 비지 않게 채운다', () => {

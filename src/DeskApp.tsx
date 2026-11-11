@@ -5,6 +5,8 @@ import {
   KIND_TITLE,
   MULTI_CHART_MAX,
   WINDOW_KINDS,
+  placeGlobalLog,
+  moveWindow,
   activeDesk,
   createDesk,
   defaultWorkspace,
@@ -32,7 +34,7 @@ import {Search150Pane} from './Search150Pane';
 import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]};
 type State = {
   mode: string;
   config: Config;
@@ -157,7 +159,17 @@ export function DeskApp() {
   const desk = activeDesk(workspace);
   const updateDesk = (next: VirtualDesk) => persist(replaceDesk({...workspace, active: next.number}, next));
 
-  const addWindow = (kind: WindowKind) => updateDesk(insertWindow(desk, kind));
+  const addWindow = (kind: WindowKind) => {
+    if (kind === 'logs') {
+      try {
+        persist(placeGlobalLog(workspace, desk.number));
+      } catch (e) {
+        setNotice((e as Error).message);
+      }
+      return;
+    }
+    updateDesk(insertWindow(desk, kind));
+  };
   const addDesk = () => {
     try {
       const created = createDesk(workspace.desks);
@@ -332,6 +344,15 @@ export function DeskApp() {
             <ChildFrame
               key={win.id}
               win={win}
+              desks={workspace.desks}
+              deskNumber={desk.number}
+              onMove={(n) => {
+                try {
+                  persist(moveWindow(workspace, win.id, n));
+                } catch (e) {
+                  setNotice((e as Error).message);
+                }
+              }}
               onFocus={() => updateDesk(focusWindow(desk, win.id))}
               onClose={() => updateDesk(removeWindow(desk, win.id))}
               onLock={() => updateDesk(toggleLock(desk, win.id))}
@@ -416,6 +437,9 @@ export function DeskApp() {
 function ChildFrame({
   win,
   children,
+  desks,
+  deskNumber,
+  onMove,
   onFocus,
   onClose,
   onLock,
@@ -424,6 +448,9 @@ function ChildFrame({
 }: {
   win: ChildWindow;
   children: React.ReactNode;
+  desks: {number: number; name: string}[];
+  deskNumber: number;
+  onMove: (n: number) => void;
   onFocus: () => void;
   onClose: () => void;
   onLock: () => void;
@@ -443,6 +470,16 @@ function ChildFrame({
           {win.code ? ` · ${win.code}` : ''}
         </b>
         <span>
+          <select
+            title="다른 가상화면으로 이동"
+            value={deskNumber}
+            onMouseDown={(e) => e.stopPropagation()}
+            onChange={(e) => onMove(Number(e.target.value))}
+          >
+            {desks.map((d) => (
+              <option key={d.number} value={d.number}>{d.number}</option>
+            ))}
+          </select>
           <button title={win.locked ? '잠금 해제' : '공통변수 잠금'} onClick={onLock}>
             {win.locked ? '잠김' : '풀림'}
           </button>
@@ -626,6 +663,17 @@ function Pane(props: {
                   );
                 })()}
                 <button
+                  className={'hts-tool' + ((state.config.lockedCodes || []).includes(s.code) || (state.book?.holdings || []).some((h) => h.code === s.code) ? ' on' : '')}
+                  title="종목 잠금. 매매·미체결 중이면 순위에서 바뀌지 않습니다."
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const on = !((state.config.lockedCodes || []).includes(s.code));
+                    void post('/api/lock', {code: s.code, locked: on}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
+                  }}
+                >
+                  {(state.config.lockedCodes || []).includes(s.code) || (state.book?.holdings || []).some((h) => h.code === s.code) ? '잠김' : '풀림'}
+                </button>
+                <button
                   className="hts-tool"
                   title="시장 매수"
                   onClick={(e) => {
@@ -689,6 +737,7 @@ function Pane(props: {
     return <VerifyPane state={state} draft={draft} update={props.update} load={props.load} chartCodes={chartCodes} selected={selected} setNotice={props.setNotice} onCode={props.onCommonCode} />;
   }
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
+  if (win.kind === 'logs') return <LogsPane />;
   return (
     <div className="activity">
       {state.events.length ? (
@@ -1235,6 +1284,13 @@ function ScannerPane(props: {
         >
           {state.config.running ? '모의매매 정지' : '모의매매 시작'}
         </button>
+        <button
+          className="apply"
+          disabled={!draft.condition || state.busy}
+          onClick={() => void post('/api/recapture', {}).then(() => props.load()).catch((e) => props.setNotice((e as Error).message))}
+        >
+          재포착 (1분)
+        </button>
         <select value={draft.refreshMs || 60000} onChange={(e) => props.setDraft({...draft, refreshMs: Number(e.target.value)})}>
           <option value={15000}>15초</option>
           <option value={30000}>30초</option>
@@ -1328,6 +1384,45 @@ function TrPane({code}: {code: string}) {
         조회
       </button>
       <pre>{out || '결과가 여기에 표시됩니다.'}</pre>
+    </div>
+  );
+}
+
+function LogsPane() {
+  const [tab, setTab] = useState<'system' | 'trade'>('trade');
+  const [entries, setEntries] = useState<{at: number; category: string; message: string}[]>([]);
+  const loadLogs = async () => {
+    const r = await fetch(`/api/logs?tab=${tab}`);
+    const d = await r.json();
+    setEntries(d.entries || []);
+  };
+  useEffect(() => {
+    void loadLogs();
+    const t = setInterval(() => void loadLogs(), 4000);
+    return () => clearInterval(t);
+  }, [tab]);
+  const saveFile = () => {
+    const blob = new Blob([entries.map((e) => JSON.stringify(e)).join('\n')], {type: 'application/jsonl'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${tab}-${new Date().toISOString().slice(0, 10)}.jsonl`;
+    a.click();
+  };
+  return (
+    <div className="book-pane">
+      <div className="formula-tabs">
+        <button className={tab === 'system' ? 'selected' : ''} onClick={() => setTab('system')}>시스템 로그</button>
+        <button className={tab === 'trade' ? 'selected' : ''} onClick={() => setTab('trade')}>매매 로그</button>
+      </div>
+      <button className="hts-tool" onClick={saveFile}>파일 저장</button>
+      <div className="log-list">
+        {entries.map((e, i) => (
+          <div key={i} className="log-row">
+            <small>{new Date(e.at).toLocaleTimeString('ko-KR')}</small> [{e.category}] {e.message}
+          </div>
+        ))}
+        {!entries.length && <div className="empty-activity">오늘 기록이 없습니다.</div>}
+      </div>
     </div>
   );
 }

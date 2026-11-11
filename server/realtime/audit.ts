@@ -29,10 +29,12 @@ export class AuditLog {
   private readonly capacity: number;
   private readonly now: () => number;
   private nextId = 1;
+  private readonly sink?: (entry: AuditEntry) => void;
 
-  constructor(options: {capacity?: number; now?: () => number} = {}) {
+  constructor(options: {capacity?: number; now?: () => number; sink?: (entry: AuditEntry) => void} = {}) {
     this.capacity = options.capacity ?? 2000;
     this.now = options.now ?? Date.now;
+    this.sink = options.sink;
     if (!Number.isInteger(this.capacity) || this.capacity < 1) throw new Error('감사 로그 크기가 올바르지 않습니다.');
   }
 
@@ -41,7 +43,17 @@ export class AuditLog {
     const entry: AuditEntry = {id: this.nextId++, at: this.now(), category, message, ...(detail ? {detail} : {})};
     this.entries.push(entry);
     if (this.entries.length > this.capacity) this.entries.splice(0, this.entries.length - this.capacity);
+    try {
+      this.sink?.(entry);
+    } catch {
+      /* 파일 기록 실패는 메모리 로그를 막지 않는다 */
+    }
     return entry;
+  }
+
+  today(tab: 'system' | 'trade'): AuditEntry[] {
+    const trade = new Set<AuditCategory>(['order', 'signal', 'position']);
+    return this.entries.filter((e) => (tab === 'trade' ? trade.has(e.category) : !trade.has(e.category))).reverse();
   }
 
   /** Newest first, bounded. */

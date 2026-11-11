@@ -7,7 +7,8 @@ export const DESK_MIN = 1;
 export const DESK_MAX = 8;
 /** 멀티차트 칸 수. 3×n 등 분할과 무관하게 한 화면에 16종목까지. */
 export const MULTI_CHART_MAX = 16;
-export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book'] as const;
+export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book', 'logs'] as const;
+export const GLOBAL_LOG_ID = 'win-global-logs';
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
 
@@ -76,6 +77,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   events: '모의 이벤트',
   verify: '[1516] 성과검증',
   book: '주문 대시보드',
+  logs: '전역 로그',
 };
 
 const CODE = /^\d{6}$/;
@@ -92,8 +94,9 @@ export function mockTradeDesk(): VirtualDesk {
     vars: emptyVars(),
     windows: [
       {id: 'win-trade-scanner', kind: 'scanner', title: '실시간 점수', x: 8, y: 8, w: 360, h: 620, z: 1, state: 'normal', locked: false},
-      {id: 'win-trade-multi', kind: 'multi-chart', title: '상위9 멀티차트', x: 376, y: 8, w: 780, h: 620, z: 2, state: 'normal', locked: false, gridCols: 3, timeframe: '1', syncCharts: true},
-      {id: 'win-trade-book', kind: 'book', title: '보유·미체결', x: 1164, y: 8, w: 400, h: 620, z: 3, state: 'normal', locked: false},
+      {id: 'win-trade-multi', kind: 'multi-chart', title: '멀티차트', x: 376, y: 8, w: 780, h: 620, z: 2, state: 'normal', locked: false, gridCols: 3, timeframe: '1', syncCharts: true},
+      {id: 'win-trade-book', kind: 'book', title: '보유·미체결', x: 1164, y: 8, w: 400, h: 420, z: 3, state: 'normal', locked: false},
+      {id: GLOBAL_LOG_ID, kind: 'logs', title: '전역 로그', x: 1164, y: 436, w: 400, h: 280, z: 4, state: 'normal', locked: false},
     ],
   };
 }
@@ -145,10 +148,11 @@ export function renameDesk(desk: VirtualDesk, name: string): VirtualDesk {
 
 export function insertWindow(desk: VirtualDesk, kind: WindowKind, offset = desk.windows.length): VirtualDesk {
   if (!WINDOW_KINDS.includes(kind)) throw new Error('등록되지 않은 자식창입니다.');
+  if (kind === 'logs' && desk.windows.some((w) => w.id === GLOBAL_LOG_ID || w.kind === 'logs')) return desk;
   if (desk.windows.length >= 16) throw new Error('한 화면에 자식창은 16개까지입니다.');
   const z = desk.windows.reduce((max, win) => Math.max(max, win.z), 0) + 1;
   const window: ChildWindow = {
-    id: `win-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: kind === 'logs' ? GLOBAL_LOG_ID : `win-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     kind,
     title: KIND_TITLE[kind],
     x: 24 + (offset % 6) * 28,
@@ -294,6 +298,32 @@ function validateWindow(win: ChildWindow): ChildWindow {
           .slice(0, 80)
       : undefined,
   };
+}
+
+export function moveWindow(workspace: DeskWorkspace, winId: string, toNumber: number): DeskWorkspace {
+  let found: ChildWindow | undefined;
+  const stripped = workspace.desks.map((desk) => {
+    const hit = desk.windows.find((w) => w.id === winId);
+    if (hit) found = hit;
+    return {...desk, windows: desk.windows.filter((w) => w.id !== winId)};
+  });
+  if (!found) throw new Error('옮길 창을 찾지 못했습니다.');
+  const target = stripped.find((d) => d.number === toNumber);
+  if (!target) throw new Error('대상 가상화면이 없습니다.');
+  if (target.windows.length >= 16) throw new Error('한 화면에 자식창은 16개까지입니다.');
+  const z = target.windows.reduce((max, win) => Math.max(max, win.z), 0) + 1;
+  const moved = {...found, z, x: 24, y: 24};
+  const desks = stripped.map((d) => (d.number === toNumber ? {...d, windows: [...d.windows, moved]} : d));
+  return {active: toNumber, desks};
+}
+
+/** 전역 로그는 한 개만. 다른 화면에 있으면 이 화면으로 옮긴다. */
+export function placeGlobalLog(workspace: DeskWorkspace, toNumber: number): DeskWorkspace {
+  const existing = workspace.desks.flatMap((d) => d.windows).find((w) => w.id === GLOBAL_LOG_ID || w.kind === 'logs');
+  if (existing) return moveWindow(workspace, existing.id, toNumber);
+  const target = workspace.desks.find((d) => d.number === toNumber);
+  if (!target) throw new Error('대상 가상화면이 없습니다.');
+  return replaceDesk({...workspace, active: toNumber}, insertWindow(target, 'logs'));
 }
 
 export function replaceDesk(workspace: DeskWorkspace, desk: VirtualDesk): DeskWorkspace {
