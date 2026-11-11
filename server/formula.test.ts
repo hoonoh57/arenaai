@@ -25,6 +25,11 @@ test('JMA는 kiwoom-desk 워밍업·재귀 값과 같다',()=>{
  const up=seriesColors([10,15,20,37.2569],'#AB47BC',{colorMode:'previous',alternateColor:'#00C853'});
  assert.ok(up.every(c=>c==='#AB47BC'));
 });
+test('체결강도 0은 직전 값을 쓰고 이평에 넣는다',()=>{
+ const bars=[80,0,90,0,100].map((strength,i)=>({time:i*60,open:1,high:1,low:1,close:1,strength}));
+ assert.deepEqual(evaluate('STRENGTH',bars),[80,80,90,90,100]);
+ assert.equal(evaluate('SMA(STRENGTH, 3)',bars)[4], (90+90+100)/3);
+});
 test('RSI·ATR 등 기본 기술적 지표',()=>{
  const up=Array.from({length:20},(_,i)=>({time:i*60,open:i+1,high:i+1.5,low:i+0.5,close:i+1,volume:10}));
  const rsi=evaluate('RSI(CLOSE, 14)',up);

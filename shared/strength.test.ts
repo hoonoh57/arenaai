@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget} from './strength';
+import {alignStrengthToCandles, carryStrength, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget} from './strength';
 
 test('소량 연속 매수 체결강도는 50으로 보정한다', () => {
   const ticks = [
@@ -40,6 +40,11 @@ test('체결강도 틱을 분봉 시각에 맞춘다', () => {
   assert.equal(aligned[0].strength, 81);
   assert.equal(aligned[1].strength, 95);
   assert.equal(aligned[2].strength, undefined);
+});
+
+test('0 체결강도는 직전 값을 이어받는다', () => {
+  assert.deepEqual(carryStrength([80, 0, null, 90, 0]), [80, 80, 80, 90, 90]);
+  assert.deepEqual(carryStrength([0, 0, 70]), [null, null, 70]);
 });
 
 test('페이지 수는 차트 봉 수에 비례하고 최대 8', () => {

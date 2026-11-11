@@ -78,7 +78,20 @@ export function alignStrengthToCandles<T extends StrengthBar>(candles: T[], tick
       k++;
     }
     if (!last) return c;
-    return {...c, strength: last.strength};
+    const raw = last.strength;
+    return {...c, strength: raw === 0 ? undefined : raw};
+  });
+}
+
+/** 0·결측은 직전 유효 강도로 채운다. 맨 앞이 비면 그대로 비운다. */
+export function carryStrength(values: Array<number | null | undefined>): Array<number | null> {
+  let last: number | null = null;
+  return values.map((v) => {
+    if (typeof v === 'number' && Number.isFinite(v) && v !== 0) {
+      last = v;
+      return v;
+    }
+    return last;
   });
 }
 

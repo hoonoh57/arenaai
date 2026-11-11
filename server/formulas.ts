@@ -15,6 +15,7 @@ export function loadFormulas():Formula[]{
   const stored=validateSet(JSON.parse(readFileSync(path,'utf8')));
   const have=new Set(stored.map(f=>f.id));
   const extra=defaults.filter(f=>!have.has(f.id)).map(f=>({...f,enabled:false}));
-  return extra.length?validateSet([...stored,...extra]):stored;
+  const merged=stored.map(f=>{if(f.id!=='cntrstr'||(f.extraLines&&f.extraLines.length))return f;const d=defaults.find(x=>x.id==='cntrstr');return d?{...f,extraLines:d.extraLines,baselines:f.baselines??d.baselines,pane:f.pane??d.pane}:f;});
+  return extra.length||merged.some((f,i)=>f!==stored[i])?validateSet([...merged,...extra]):stored;
  }catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return defaults.map(f=>({...f}));throw new Error(`저장된 수식을 불러올 수 없습니다: ${e instanceof Error?e.message:'오류'}`);}}
 export function saveFormulas(value:unknown):Formula[]{const formulas=validateSet(value);mkdirSync(dirname(path),{recursive:true});const tmp=path+'.tmp';writeFileSync(tmp,JSON.stringify(formulas,null,2),{mode:0o600});renameSync(tmp,path);return formulas;}
