@@ -47,3 +47,21 @@
 .book-pane h3{font-size:12px;margin:14px 0 6px;color:#b7e88e}
 .book-actions{display:flex;gap:8px;flex-wrap:wrap}
 .book-actions button{width:auto;margin-top:0;padding:8px 10px}
+
+.chart-work{display:flex;height:100%;min-height:0}
+.chart-work .chart-dock{display:none;width:168px;flex-shrink:0;border-right:1px solid #2a3d32;overflow:auto;background:#0d1612;padding:8px}
+.chart-work.dock-on .chart-dock{display:block}
+.dock-head{font-size:11px;font-weight:700;color:#b7e88e;margin-bottom:8px}
+.dock-group{margin-bottom:10px}
+.dock-group b{display:block;font-size:10px;color:#8fa79a;margin-bottom:4px}
+.dock-item{display:flex;gap:6px;align-items:center;font-size:11px;color:#d5e6d8;padding:3px 0}
+.dock-item input{accent-color:#b5ed72}
+.chart-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.chart-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:#15241c;border-bottom:1px solid #2a3d32}
+.chart-toolbar input,.chart-toolbar select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;border-radius:4px;padding:4px 6px}
+.chart-toolbar .code-in{width:72px}
+.chart-toolbar .vis-bars{width:64px}
+.chart-name{font-size:12px;font-weight:700;min-width:72px}
+.bar-count{font-size:10px;color:#8fa79a}
+.dock-toggle{width:24px;height:24px;background:#1b2a24;border:1px solid #355044;color:#cfe3d3;border-radius:4px}
+.hts-var input{pointer-events:auto}

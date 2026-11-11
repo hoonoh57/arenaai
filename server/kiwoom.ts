@@ -62,6 +62,17 @@ export function parseCandles(rows: unknown): Candle[] {
 
 type DailyRow = PreviousDay;
 
+export function dailyToCandles(rows: DailyRow[]): Candle[] {
+  const result: Candle[] = [];
+  for (const row of rows) {
+    if (!row.open || !row.high || !row.low || !row.close) continue;
+    const time = Date.parse(`${row.date.slice(0, 4)}-${row.date.slice(4, 6)}-${row.date.slice(6, 8)}T00:00:00+09:00`) / 1000;
+    if (!Number.isFinite(time)) continue;
+    result.push({time, open: row.open, high: row.high, low: row.low, close: row.close});
+  }
+  return result.sort((a, b) => a.time - b.time);
+}
+
 export function parseDailyRows(rows: unknown): DailyRow[] {
   if (!Array.isArray(rows)) throw new Error('일봉 응답 형식이 올바르지 않습니다.');
   const result: DailyRow[] = [];
@@ -167,17 +178,26 @@ export class Kiwoom {
     return this.token;
   }
 
-  private async send(path: string, id: string, body: object): Promise<any> {
+  lastContinuation: {contYn: string; nextKey: string} = {contYn: '', nextKey: ''};
+
+  private async send(path: string, id: string, body: object, extra: {contYn?: string; nextKey?: string} = {}): Promise<any> {
     const token = await this.auth();
+    const headers: Record<string, string> = {'Content-Type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': id};
+    if (extra.contYn) headers['cont-yn'] = extra.contYn;
+    if (extra.nextKey) headers['next-key'] = extra.nextKey;
     const r = await fetch(this.base + path, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': id},
+      headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     const d = (await r.json()) as any;
     if (!r.ok) throw new KiwoomApiError({returnCode: null, returnMsg: `HTTP ${r.status}`, httpStatus: r.status});
     if (d.return_code !== undefined && Number(d.return_code) !== 0) throw new KiwoomApiError({returnCode: Number(d.return_code), returnMsg: String(d.return_msg ?? '요청 실패')});
+    this.lastContinuation = {
+      contYn: r.headers.get('cont-yn') || r.headers.get('Cont-Yn') || '',
+      nextKey: r.headers.get('next-key') || r.headers.get('Next-Key') || '',
+    };
     return d;
   }
 
@@ -228,13 +248,13 @@ export class Kiwoom {
     return {ordNo: String(d.ord_no ?? input.origOrdNo)};
   }
 
-  async rest(path: string, id: string, body: object): Promise<any> {
+  async rest(path: string, id: string, body: object, extra: {contYn?: string; nextKey?: string} = {}): Promise<any> {
     let retriedRateLimit = false;
     let retriedAuth = false;
     for (;;) {
       await this.governor.acquire(id, 'read');
       try {
-        return await this.send(path, id, body);
+        return await this.send(path, id, body, extra);
       } catch (error) {
         const info = error instanceof KiwoomApiError ? error : null;
         if (!info) throw error;
@@ -257,10 +277,32 @@ export class Kiwoom {
   }
 
   async candles(code: string): Promise<Candle[]> {
-    const d = await this.rest('/api/dostk/chart', 'ka10080', {stk_cd: code, tic_scope: '1', upd_stkpc_tp: '1'});
+    const page = await this.chartPage({code, timeframe: '1'});
+    if (!page.candles.length) throw new Error(`${code} 유효한 분봉 데이터 없음`);
+    return page.candles;
+  }
+
+  /**
+   * Chart page for the desk toolbar. Minute bars use ka10080 tic_scope; daily uses ka10081.
+   * `nextKey` requests the previous continuation page (older bars). Does not invent bars.
+   */
+  async chartPage(input: {code: string; timeframe: string; baseDate?: string; nextKey?: string}): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
+    if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+    const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
+    if (input.timeframe === 'D') {
+      const base = (input.baseDate || '').replace(/-/g, '');
+      const body: Record<string, string> = {stk_cd: input.code, upd_stkpc_tp: '1'};
+      if (/^\d{8}$/.test(base)) body.base_dt = base;
+      const d = await this.rest('/api/dostk/chart', 'ka10081', body, extra);
+      const candles = dailyToCandles(parseDailyRows(d.stk_dt_pole_chart_qry));
+      return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
+    }
+    const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
+    if (!allowed.has(input.timeframe)) throw new Error('지원 분봉은 1/3/5/10/15/30/45/60분과 일봉입니다.');
+    const body = {stk_cd: input.code, tic_scope: input.timeframe, upd_stkpc_tp: '1'};
+    const d = await this.rest('/api/dostk/chart', 'ka10080', body, extra);
     const candles = parseCandles(d.stk_min_pole_chart_qry);
-    if (!candles.length) throw new Error(`${code} 유효한 분봉 데이터 없음`);
-    return candles;
+    return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
   }
 
   async daily(code: string, baseDate: string): Promise<DailyRow[]> {

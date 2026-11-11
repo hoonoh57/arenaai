@@ -27,6 +27,11 @@ export type ChildWindow = {
   code?: string;
   /** System formula id. Locked windows keep this when the desk strategy changes. */
   strategyId?: string;
+  timeframe?: string;
+  baseDate?: string;
+  visibleBars?: number;
+  formulaOpen?: boolean;
+  enabledFormulas?: string[];
 };
 
 export type VirtualDesk = {
@@ -216,6 +221,11 @@ function validateWindow(win: ChildWindow): ChildWindow {
     locked: Boolean(win.locked),
     code: typeof win.code === 'string' && (win.code === '' || CODE.test(win.code)) ? win.code : undefined,
     strategyId: typeof win.strategyId === 'string' ? win.strategyId.slice(0, 80) : undefined,
+    timeframe: typeof win.timeframe === 'string' ? win.timeframe.slice(0, 8) : undefined,
+    baseDate: typeof win.baseDate === 'string' ? win.baseDate.slice(0, 10) : undefined,
+    visibleBars: Number.isInteger(win.visibleBars) ? Math.min(2000, Math.max(20, win.visibleBars as number)) : undefined,
+    formulaOpen: Boolean(win.formulaOpen),
+    enabledFormulas: Array.isArray(win.enabledFormulas) ? win.enabledFormulas.filter((id): id is string => typeof id === 'string').slice(0, 50) : undefined,
   };
 }
 

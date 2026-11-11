@@ -271,6 +271,27 @@ app.get('/api/state', (_req, res) =>
     book: hub.book.snapshot(),
   }),
 );
+app.post('/api/chart', async (req, res) => {
+  try {
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
+    const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
+    const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
+    const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
+    if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
+    const listed = ranking.find((s) => s.code === code);
+    res.json({
+      code,
+      name: listed?.name || code,
+      candles: page.candles,
+      hasMore: page.hasMore,
+      nextKey: page.nextKey,
+      timeframe,
+    });
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '차트 조회 실패'});
+  }
+});
 app.get('/api/audit', (req, res) => {
   const limit = Number(req.query.limit ?? 100);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({error: 'limit은 1~500이어야 합니다.'});

@@ -23,6 +23,7 @@ import {
   type WindowKind,
 } from '../shared/desk';
 import {Chart} from './ChartView';
+import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>};
@@ -268,12 +269,7 @@ export function DeskApp() {
         <span className="hts-sep" />
         <label className="hts-var">
           공통 종목
-          <input
-            value={desk.vars.code}
-            maxLength={6}
-            placeholder="005930"
-            onChange={(e) => applyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          />
+          <CommonCode value={desk.vars.code} onCommit={(code) => applyCode(code)} />
         </label>
         <label className="hts-var">
           공통 전략
@@ -331,6 +327,8 @@ export function DeskApp() {
                 setStrategy={setStrategy}
                 formulasFor={formulasFor}
                 systems={systems}
+                patchWin={(id, patch) => updateDesk(patchWindow(desk, id, patch))}
+                onCommonCode={applyCode}
               />
             </ChildFrame>
           ))}
@@ -438,6 +436,8 @@ function Pane(props: {
   setStrategy: (formulaId: string, code?: string) => Promise<void>;
   formulasFor: (code: string) => Formula[];
   systems: Formula[];
+  patchWin: (id: string, patch: Partial<ChildWindow>) => void;
+  onCommonCode: (code: string) => void;
 }) {
   const {win, state, draft, selected, chartCodes} = props;
   const code = win.locked ? win.code || '' : props.desk.vars.code || win.code || '';
@@ -455,20 +455,19 @@ function Pane(props: {
     </select>
   );
   if (win.kind === 'chart') {
-    const stock = state.ranking.find((s) => s.code === code);
-    const data = state.candles[code] || [];
     return (
-      <div className="pane-chart">
-        <div className="pane-head">
-          {stock ? `${stock.name} ${code}` : code || '공통 종목코드를 입력하거나 창을 잠근 뒤 종목을 고정하세요.'}
-          {code ? strategySelect(code) : null}
-        </div>
-        {data.length ? (
-          <Chart data={data} formulas={props.formulasFor(code)} chartHeight={Math.max(180, win.h - 80)} grid={props.grid} logScale={props.logScale} />
-        ) : (
-          <div className="empty-chart">조건검색에서 이 종목을 체크하면 분봉을 바로 조회합니다. 가상 시세는 만들지 않습니다.</div>
-        )}
-      </div>
+      <ChartPane
+        win={win}
+        desk={props.desk}
+        formulas={state.formulas}
+        rankingName={state.ranking.find((s) => s.code === code)?.name}
+        cached={state.candles[code] || []}
+        grid={props.grid}
+        logScale={props.logScale}
+        patchWin={(patch) => props.patchWin(win.id, patch)}
+        setNotice={props.setNotice}
+        onCommonCode={props.onCommonCode}
+      />
     );
   }
   if (win.kind === 'multi-chart') {
@@ -636,6 +635,25 @@ function ScannerPane(props: {
         <div className="settings-note">체크한 종목만 멀티차트·모의매매 대상입니다. 실제 주문은 없습니다.</div>
       </div>
     </div>
+  );
+}
+
+function CommonCode({value, onCommit}: {value: string; onCommit: (code: string) => void}) {
+  const [text, setText] = useState(value || '');
+  useEffect(() => setText(value || ''), [value]);
+  return (
+    <input
+      value={text}
+      maxLength={6}
+      placeholder="005930"
+      inputMode="numeric"
+      autoComplete="off"
+      onChange={(e) => {
+        const next = e.target.value.replace(/\D/g, '').slice(0, 6);
+        setText(next);
+        if (next.length === 6 || next === '') onCommit(next);
+      }}
+    />
   );
 }
 
