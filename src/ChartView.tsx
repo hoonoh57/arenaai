@@ -106,7 +106,7 @@ export function Chart({
       const values = evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
         const paneIndex = f.pane === 'separate' ? chart.addPane().paneIndex() : 0;
-        const lines = [{name: f.name, expression: f.expression, color: f.color, ...f.primaryLine, visible: f.primaryLine?.visible !== false}, ...(f.extraLines || [])];
+        const lines = [{name: f.name, expression: f.expression, color: f.color, alternateColor: f.alternateColor, ...f.primaryLine, visible: f.primaryLine?.visible !== false}, ...(f.extraLines || [])];
         const styles = {solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted};
         let baselineAdded = false;
         for (const lineSpec of lines.filter((l) => l.visible)) {
@@ -116,7 +116,8 @@ export function Chart({
               ? chart.addSeries(HistogramSeries, common, paneIndex)
               : chart.addSeries(LineSeries, {...common, lineWidth: lineSpec.width || 1, lineStyle: styles[lineSpec.style || 'solid']}, paneIndex);
           const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
-          const colors = seriesColors(vals, lineSpec.color, lineSpec);
+          const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
+          const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
           line.setData(vals.map((value, i) => (value === null ? {time: bars[i].time as UTCTimestamp} : {time: bars[i].time as UTCTimestamp, value, color: colors[i]})));
           extras.current.push(line);
           if (!baselineAdded) {

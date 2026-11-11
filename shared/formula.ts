@@ -4,10 +4,10 @@ import type {Candle} from '../server/core';
 jsep.addBinaryOp('^', 11, true);
 export type Kind='indicator'|'signal'|'highlight'|'system'|'function';
 export type LineStyleName='solid'|'dashed'|'dotted';
-export type LineOptions={width?:1|2|3|4;style?:LineStyleName;visible?:boolean;type?:'line'|'histogram';colorMode?:'fixed'|'threshold'|'previous';threshold?:number;alternateColor?:string};
+export type LineOptions={width?:1|2|3|4;style?:LineStyleName;visible?:boolean;type?:'line'|'histogram';colorMode?:'fixed'|'threshold'|'previous'|'st';threshold?:number;alternateColor?:string};
 export type IndicatorLine=LineOptions & {name:string;expression:string;color:string;visible:boolean};
 export type Baseline={value:number;color:string;width?:1|2|3|4;style?:LineStyleName};
-export type Formula={id:string;name:string;kind:Kind;expression:string;exitExpression:string;shortEntry?:string;shortExit?:string;enabled:boolean;color:string;variables?:Record<string,number>;description?:string; extraLines?:IndicatorLine[]; primaryLine?:LineOptions; pane?:'price'|'separate'; baselines?:Baseline[]};
+export type Formula={id:string;name:string;kind:Kind;expression:string;exitExpression:string;shortEntry?:string;shortExit?:string;enabled:boolean;color:string;alternateColor?:string;variables?:Record<string,number>;description?:string; extraLines?:IndicatorLine[]; primaryLine?:LineOptions; pane?:'price'|'separate'; baselines?:Baseline[]};
 export const kinds:Record<Kind,string>={indicator:'지표',signal:'신호',highlight:'강세약세',system:'시스템트레이딩',function:'일반함수'};
 export const defaults:Formula[]=[
  {id:'ma5',name:'이동평균 5',kind:'indicator',expression:'SMA(CLOSE, 5)',exitExpression:'',enabled:true,color:'#e8bd64'},
@@ -21,8 +21,8 @@ export const defaults:Formula[]=[
  {id:'dead',name:'데드크로스',kind:'signal',expression:'CROSSDOWN(SMA(CLOSE, 5), SMA(CLOSE, 20))',exitExpression:'',enabled:false,color:'#ed6b72'},
  {id:'upbar',name:'양봉',kind:'highlight',expression:'CLOSE > OPEN',exitExpression:'',enabled:false,color:'#ed6b72'},
  {id:'dnbar',name:'음봉',kind:'highlight',expression:'CLOSE < OPEN',exitExpression:'',enabled:false,color:'#5d96e8'},
- {id:'jma',name:'JMA',kind:'indicator',expression:'JMA(기간, power, 승수)',exitExpression:'',enabled:false,color:'#7ec8e3',variables:{기간:14,power:2,승수:1},description:'JMA(기간, power, 승수). 종가 기준 Jurik 근사.'},
- {id:'st',name:'Supertrend',kind:'indicator',expression:'ST(10, 3)',exitExpression:'',enabled:false,color:'#e8bd64'},
+ {id:'jma',name:'JMA',kind:'indicator',expression:'JMA(기간, phase, power)',exitExpression:'',enabled:false,color:'#AB47BC',alternateColor:'#00C853',variables:{기간:14,phase:50,power:2},description:'키움-desk JMA. JMA(기간, phase, power). 종가. 상승 보라·하락 초록.',primaryLine:{colorMode:'previous',alternateColor:'#00C853',width:2}},
+ {id:'st',name:'Supertrend',kind:'indicator',expression:'ST(atr기간, 배수)',exitExpression:'',enabled:false,color:'#e34a4a',variables:{atr기간:14,배수:2},description:'키움-desk SuperTrend. ST(ATR기간, 배수). 상승 빨강·하락 파랑.',primaryLine:{colorMode:'st',alternateColor:'#3f7fd6',width:2}},
  {id:'adx',name:'ADX',kind:'indicator',expression:'ADX(14)',exitExpression:'',enabled:false,color:'#d48ad4',pane:'separate'},
  {id:'plusdi',name:'+DI',kind:'indicator',expression:'PLUSDI(14)',exitExpression:'',enabled:false,color:'#ed6b72',pane:'separate'},
  {id:'minusdi',name:'-DI',kind:'indicator',expression:'MINUSDI(14)',exitExpression:'',enabled:false,color:'#5d96e8',pane:'separate'},
@@ -36,7 +36,7 @@ export const defaults:Formula[]=[
 ];
 type Val=number|null;
 const aliases:Record<string,string>=Object.assign(Object.create(null),{O:'open',OPEN:'open','시가':'open',H:'high',HIGH:'high','고가':'high',L:'low',LOW:'low','저가':'low',C:'close',CLOSE:'close','종가':'close',V:'volume',VOLUME:'volume','거래량':'volume',DATE:'date','일자':'date',TIME:'clock','시간':'clock',ACCOUNT:'turnover','거래대금':'turnover'});
-const functions:Record<string,[number,number]>=Object.assign(Object.create(null),{PREDAYOPEN:[0,0],PREDAYHIGH:[0,0],PREDAYLOW:[0,0],PREDAYCLOSE:[0,0],DAYOPEN:[0,0],DAYHIGH:[0,0],DAYLOW:[0,0],SHIFT:[2,2],'이동':[2,2],MA:[3,4],SMA:[2,3],AVG:[2,3],'평균':[2,3],EMA:[2,3],EAVG:[2,3],'지수평균':[2,3],WAVG:[2,3],'가중평균':[2,3],STDEV:[2,3],'표준편차':[2,3],REF:[2,2],CROSSUP:[2,2],'상향돌파':[2,2],CROSSDOWN:[2,2],'하향돌파':[2,2],IF:[3,3],'만일':[3,3],ABS:[1,1],'절대값':[1,1],MAX:[2,2],'최대값':[2,2],MIN:[2,2],'최소값':[2,2],POW:[2,2],'누승':[2,2],LOG:[1,1],'로그':[1,1],LOG10:[1,1],'상용로그':[1,1],SQRT:[1,1],'제곱근':[1,1],SIN:[1,1],'사인':[1,1],COS:[1,1],'코사인':[1,1],TAN:[1,1],'탄젠트':[1,1],ASIN:[1,1],'아크사인':[1,1],ACOS:[1,1],'아크코사인':[1,1],ATAN:[1,1],'아크탄젠트':[1,1],HIGHEST:[2,3],'최고값':[2,3],LOWEST:[2,3],'최저값':[2,3],SUM:[1,3],'합계':[1,3],COUNT:[2,2],COUNTSINCE:[2,2],HIGHESTSINCE:[2,2],LOWESTSINCE:[2,2],BARSSINCE:[1,1],VALUEWHEN:[3,3],ROC:[2,2],RSI:[2,2],RMA:[2,2],ATR:[1,1],TR:[0,0],STOCHK:[1,1],STOCHD:[2,2],BBMID:[2,2],BBUPPER:[3,3],BBLOWER:[3,3],CCI:[1,1],MOM:[2,2],WILLR:[1,1],OBV:[0,0],JMA:[3,4],HMA:[2,2],VWMA:[2,2],ALMA:[2,4],ADX:[1,1],PLUSDI:[1,1],MINUSDI:[1,1],ST:[2,2],STDIR:[2,2],VWAP:[0,0],KCMID:[2,2],KCUPPER:[3,3],KCLOWER:[3,3],DCHIGH:[1,1],DCLOW:[1,1],TSI:[2,2],MFI:[1,1],PLOT:[1,1]});
+const functions:Record<string,[number,number]>=Object.assign(Object.create(null),{PREDAYOPEN:[0,0],PREDAYHIGH:[0,0],PREDAYLOW:[0,0],PREDAYCLOSE:[0,0],DAYOPEN:[0,0],DAYHIGH:[0,0],DAYLOW:[0,0],SHIFT:[2,2],'이동':[2,2],MA:[3,4],SMA:[2,3],AVG:[2,3],'평균':[2,3],EMA:[2,3],EAVG:[2,3],'지수평균':[2,3],WAVG:[2,3],'가중평균':[2,3],STDEV:[2,3],'표준편차':[2,3],REF:[2,2],CROSSUP:[2,2],'상향돌파':[2,2],CROSSDOWN:[2,2],'하향돌파':[2,2],IF:[3,3],'만일':[3,3],ABS:[1,1],'절대값':[1,1],MAX:[2,2],'최대값':[2,2],MIN:[2,2],'최소값':[2,2],POW:[2,2],'누승':[2,2],LOG:[1,1],'로그':[1,1],LOG10:[1,1],'상용로그':[1,1],SQRT:[1,1],'제곱근':[1,1],SIN:[1,1],'사인':[1,1],COS:[1,1],'코사인':[1,1],TAN:[1,1],'탄젠트':[1,1],ASIN:[1,1],'아크사인':[1,1],ACOS:[1,1],'아크코사인':[1,1],ATAN:[1,1],'아크탄젠트':[1,1],HIGHEST:[2,3],'최고값':[2,3],LOWEST:[2,3],'최저값':[2,3],SUM:[1,3],'합계':[1,3],COUNT:[2,2],COUNTSINCE:[2,2],HIGHESTSINCE:[2,2],LOWESTSINCE:[2,2],BARSSINCE:[1,1],VALUEWHEN:[3,3],ROC:[2,2],RSI:[2,2],RMA:[2,2],ATR:[1,1],TR:[0,0],STOCHK:[1,1],STOCHD:[2,2],BBMID:[2,2],BBUPPER:[3,3],BBLOWER:[3,3],CCI:[1,1],MOM:[2,2],WILLR:[1,1],OBV:[0,0],JMA:[3,3],HMA:[2,2],VWMA:[2,2],ALMA:[2,4],ADX:[1,1],PLUSDI:[1,1],MINUSDI:[1,1],ST:[2,2],STDIR:[2,2],VWAP:[0,0],KCMID:[2,2],KCUPPER:[3,3],KCLOWER:[3,3],DCHIGH:[1,1],DCLOW:[1,1],TSI:[2,2],MFI:[1,1],PLOT:[1,1]});
 const ops=['+','-','*','/','%','^','>','>=','<','<=','==','!=','&&','||'];
 const key=(s:string)=>s.toUpperCase();
 const functionAliases:Record<string,string>=Object.assign(Object.create(null),{'이동':'SHIFT','평균':'AVG','지수평균':'EAVG','가중평균':'WAVG','표준편차':'STDEV','최고값':'HIGHEST','최저값':'LOWEST','합계':'SUM','만일':'IF','절대값':'ABS','최대값':'MAX','최소값':'MIN','누승':'POW','로그':'LOG','상용로그':'LOG10','제곱근':'SQRT','사인':'SIN','코사인':'COS','탄젠트':'TAN','아크사인':'ASIN','아크코사인':'ACOS','아크탄젠트':'ATAN'});
@@ -67,7 +67,7 @@ function parse(text:string,variables:Record<string,number>={},catalog:Catalog=ne
  case 'CallExpression':{if(node.callee.type!=='Identifier')throw new Error('함수 이름이 올바르지 않습니다.');let n=key(node.callee.name);
  if(n==='MA'){if(node.arguments.length<3||node.arguments.length>4)throw new Error('MA는 MA(값, 기간, 단순|지수|가중[, 과거봉]) 형식입니다.');const mode=node.arguments[2];if(mode.type!=='Identifier')throw new Error('MA의 이평방법은 단순, 지수, 가중이어야 합니다.');const target:Record<string,string>={단순:'AVG',지수:'EAVG',가중:'WAVG',SIMPLE:'AVG',EXPONENTIAL:'EAVG',WEIGHTED:'WAVG'};const mapped=target[key(mode.name)];if(!mapped)throw new Error('지원하지 않는 MA 이평방법입니다.');node.callee.name=mapped;node.arguments.splice(2,1);n=mapped;}
  const spec=functions[n];if(catalog.has(n)){if(node.arguments.length!==catalog.get(n)!.params.length)throw new Error(`함수 인자 개수 오류: ${node.callee.name}`);if(called)called.set(n,(called.get(n)||0)+1);}else if(n in aliases||known.has(n)){if(node.arguments.length!==1)throw new Error('과거 봉 참조에는 인자가 하나 필요합니다.');}else if(!spec||node.arguments.length<spec[0]||node.arguments.length>spec[1])throw new Error(`지원하지 않는 함수 또는 인자 개수: ${node.callee.name}`);node.arguments.forEach((x:any)=>check(x,depth+1));
- const seriesRef=n in aliases||known.has(n);const periodIndex=seriesRef?0: canonical(n)==='JMA'? (node.arguments.length>=4?1:0) : ['SMA','AVG','EMA','EAVG','WAVG','STDEV','REF','SHIFT','HIGHEST','LOWEST','SUM','COUNT','ROC','RSI','RMA','MOM','BBMID','BBUPPER','BBLOWER','HMA','VWMA','ALMA','KCMID','KCUPPER','KCLOWER'].includes(canonical(n))&&node.arguments.length>1?1:['ATR','STOCHK','STOCHD','CCI','WILLR','ADX','PLUSDI','MINUSDI','ST','STDIR','DCHIGH','DCLOW','TSI','MFI'].includes(canonical(n))?0:n==='VALUEWHEN'?0:-1;
+ const seriesRef=n in aliases||known.has(n);const periodIndex=seriesRef?0: ['SMA','AVG','EMA','EAVG','WAVG','STDEV','REF','SHIFT','HIGHEST','LOWEST','SUM','COUNT','ROC','RSI','RMA','MOM','BBMID','BBUPPER','BBLOWER','HMA','VWMA','ALMA','KCMID','KCUPPER','KCLOWER'].includes(canonical(n))&&node.arguments.length>1?1:['ATR','STOCHK','STOCHD','CCI','WILLR','ADX','PLUSDI','MINUSDI','ST','STDIR','JMA','DCHIGH','DCLOW','TSI','MFI'].includes(canonical(n))?0:n==='VALUEWHEN'?0:-1;
  if(periodIndex>=0){const p=node.arguments[periodIndex];const min=seriesRef||n==='REF'||canonical(n)==='SHIFT'?0:1;if(p.type==='Literal'){if(!Number.isInteger(p.value)||p.value<min||p.value>500)throw new Error(`기간은 ${min}~500의 정수여야 합니다.`);}else if(p.type==='Identifier'&&variableMap(variables).has(key(p.name))){const v=variableMap(variables).get(key(p.name))!;if(!Number.isInteger(v)||v<min||v>500)throw new Error(`기간은 ${min}~500의 정수여야 합니다.`);}else throw new Error('기간은 정수 또는 지표변수여야 합니다.');}
  if(shifted.has(canonical(n))&&node.arguments.length===3){const p=node.arguments[2];const v=p.type==='Literal'?p.value:p.type==='Identifier'?variableMap(variables).get(key(p.name)):undefined;if(typeof v!=='number'||!Number.isInteger(v)||v<0||v>500)throw new Error('과거 봉은 0~500의 정수 또는 지표변수여야 합니다.');}break;}
  default:throw new Error('지원하지 않는 수식 구문입니다.');}}
@@ -77,7 +77,7 @@ function parse(text:string,variables:Record<string,number>={},catalog:Catalog=ne
 }
 export function validateFormula(f:Formula,all:Formula[]=[]){const catalog=functionCatalog(all);if(!f||typeof f.id!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(f.id)||typeof f.name!=='string'||!f.name.trim()||f.name.length>60||!Object.keys(kinds).includes(f.kind)||typeof f.enabled!=='boolean'||typeof f.color!=='string'||!/^#[0-9a-fA-F]{6}$/.test(f.color)||typeof f.expression!=='string'||typeof f.exitExpression!=='string'||(f.description!==undefined&&(typeof f.description!=='string'||f.description.length>2000)))throw new Error('수식 설정이 올바르지 않습니다.');if(f.kind==='function'){const match=functionCatalog([f]).values().next().value as Definition;parse(f.expression,Object.fromEntries(match.params.map(p=>[p,1])),catalog);}else parse(f.expression,f.variables,catalog);if(f.kind==='system'){parse(f.exitExpression,f.variables,catalog);if((f.shortEntry||f.shortExit)){if(!f.shortEntry||!f.shortExit)throw new Error('매도 진입과 매도 청산 수식을 모두 입력하세요.');parse(f.shortEntry,f.variables,catalog);parse(f.shortExit,f.variables,catalog);}}else if(f.shortEntry||f.shortExit)throw new Error('매도 포지션 수식은 시스템 전략만 지원합니다.');
  if(f.pane!==undefined&&(!['price','separate'].includes(f.pane)||f.kind!=='indicator'))throw new Error('지표 스케일 설정이 올바르지 않습니다.');
- const validStyle=(x:LineOptions)=>x&&typeof x==='object'&&!Array.isArray(x)&&(x.width===undefined||[1,2,3,4].includes(x.width))&&(x.style===undefined||['solid','dashed','dotted'].includes(x.style))&&(x.visible===undefined||typeof x.visible==='boolean')&&(x.type===undefined||['line','histogram'].includes(x.type))&&(x.colorMode===undefined||['fixed','threshold','previous'].includes(x.colorMode))&&(x.threshold===undefined||(typeof x.threshold==='number'&&Number.isFinite(x.threshold)))&&(x.alternateColor===undefined||(typeof x.alternateColor==='string'&&/^#[0-9a-fA-F]{6}$/.test(x.alternateColor)));
+ const validStyle=(x:LineOptions)=>x&&typeof x==='object'&&!Array.isArray(x)&&(x.width===undefined||[1,2,3,4].includes(x.width))&&(x.style===undefined||['solid','dashed','dotted'].includes(x.style))&&(x.visible===undefined||typeof x.visible==='boolean')&&(x.type===undefined||['line','histogram'].includes(x.type))&&(x.colorMode===undefined||['fixed','threshold','previous','st'].includes(x.colorMode))&&(x.threshold===undefined||(typeof x.threshold==='number'&&Number.isFinite(x.threshold)))&&(x.alternateColor===undefined||(typeof x.alternateColor==='string'&&/^#[0-9a-fA-F]{6}$/.test(x.alternateColor)));
  if(f.primaryLine!==undefined&&(f.kind!=='indicator'||!validStyle(f.primaryLine)))throw new Error('기본 라인 설정이 올바르지 않습니다.');
  if(f.extraLines!==undefined){if(f.kind!=='indicator'||!Array.isArray(f.extraLines)||f.extraLines.length>4)throw new Error('추가 지표 수식은 최대 4개까지 허용됩니다.');for(const line of f.extraLines){if(!line||typeof line.name!=='string'||!line.name.trim()||line.name.length>60||typeof line.expression!=='string'||typeof line.visible!=='boolean'||typeof line.color!=='string'||!/^#[0-9a-fA-F]{6}$/.test(line.color)||!validStyle(line))throw new Error('추가 지표 수식 설정을 확인하세요.');parse(line.expression,f.variables,catalog);}}
  if(f.baselines!==undefined){if(f.kind!=='indicator'||!Array.isArray(f.baselines)||f.baselines.length>8)throw new Error('기준선은 최대 8개까지 허용됩니다.');for(const line of f.baselines){if(!line||typeof line.value!=='number'||!Number.isFinite(line.value)||typeof line.color!=='string'||!/^#[0-9a-fA-F]{6}$/.test(line.color)||!validStyle(line))throw new Error('기준선 설정을 확인하세요.');}}
@@ -131,12 +131,56 @@ export function evaluate(text:string,candles:Candle[],variables:Record<string,nu
  if(name==='PLOT')return a;
  const emaOf=(src:Val[],period:Val[]):Val[]=>{let previous:Val=null,prior:Val=null;return src.map((x,i)=>{const n=period[i];if(x===null||!validPeriod(n)){previous=null;prior=null;return null;}if(previous===null||prior!==n){if(i<n!-1)return null;const vals=src.slice(i-n!+1,i+1);if(vals.some(v=>v===null))return null;previous=vals.reduce<number>((s,v)=>s+v!,0)/n!;}else previous=x*2/(n!+1)+previous*(1-2/(n!+1));prior=n;return previous;});};
  const wmaOf=(src:Val[],n:number):Val[]=>src.map((x,i)=>{if(x===null||i<n-1)return null;const vals=src.slice(i-n+1,i+1);if(vals.some(v=>v===null))return null;return vals.reduce<number>((s,v,idx)=>s+v!*(idx+1),0)/(n*(n+1)/2);});
- if(name==='JMA'){const four=args.length>=4;const src=four?a:candles.map(c=>c.close);const len=four?args[1]:a;const pow=four?args[2]:args[1];const mul=four?args[3]:args[2];let e0=0,e1=0,j=null as Val;return src.map((x,i)=>{const n=len[i],p=pow[i],m=mul[i];if(x===null||!validPeriod(n)||p===null||p<1||p>8||m===null||!Number.isFinite(m))return null;const beta=0.45*(n!-1)/(0.45*(n!-1)+2);const alpha=Math.pow(beta,p);e0=(1-alpha)*x+alpha*e0;e1=(x-e0)*(1-beta)+beta*e1;const e2=e0+e1;j=j===null?e2:e2+(e2-j)*Math.pow(1-alpha,2);return j*m;});}
+ if(name==='JMA'){
+  const roundToEven=(value:number,digits:number)=>{const factor=10**digits;const scaled=value*factor;const floor=Math.floor(scaled);const fraction=scaled-floor;const epsilon=Number.EPSILON*Math.max(1,Math.abs(scaled))*4;const rounded=Math.abs(fraction-0.5)<=epsilon?(floor%2===0?floor:floor+1):Math.round(scaled);return rounded/factor;};
+  let e0=0,e1=0,e2=0,last=0,warm=0,count=0,init=false;
+  return candles.map((c,i)=>{
+   const period=a[i],phase=args[1][i],power=args[2][i];
+   if(!validPeriod(period)||phase===null||!Number.isFinite(phase)||phase<-100||phase>100||power===null||power<1||!Number.isInteger(power))return null;
+   const source=c.close;
+   if(!init){e0=source;e1=0;e2=0;last=source;init=true;}
+   const beta=0.45*(period!-1)/(0.45*(period!-1)+2);
+   const alpha=beta**power;
+   e0=(1-alpha)*source+alpha*e0;
+   e1=(source-e0)*(1-beta)+beta*e1;
+   e2=(e0+(phase/100+1.5)*e1-last)*((1-alpha)**2)+(alpha**2)*e2;
+   count++;warm+=source;
+   const current=count<=period!?roundToEven(warm/count,4):roundToEven(e2+last,4);
+   last=current;return current;
+  });
+ }
  if(name==='HMA'){return a.map((x,i)=>{const n=args[1][i];if(x===null||!validPeriod(n)||n!<2)return null;const half=Math.max(1,Math.floor(n!/2));const sqrt=Math.max(1,Math.floor(Math.sqrt(n!)));const w1=wmaOf(a,half),w2=wmaOf(a,n!);const diff=w1.map((v,j)=>v===null||w2[j]===null?null:2*v-w2[j]!);return wmaOf(diff,sqrt)[i];});}
  if(name==='VWMA'){return a.map((x,i)=>{const n=args[1][i];if(x===null||!validPeriod(n)||i<n!-1)return null;let pv=0,vv=0;for(let j=i-n!+1;j<=i;j++){const vol=candles[j].volume;if(a[j]===null||typeof vol!=='number')return null;pv+=a[j]!*vol;vv+=vol;}return vv===0?null:pv/vv;});}
  if(name==='ALMA'){return a.map((x,i)=>{const n=args[1][i];const off=args[2]?.[i]??0.85;const sig=args[3]?.[i]??6;if(x===null||!validPeriod(n)||off===null||sig===null||sig===0||i<n!-1)return null;const m=off*(n!-1),s=n!/sig;let wsum=0,vsum=0;for(let k=0;k<n!;k++){const v=a[i-n!+1+k];if(v===null)return null;const w=Math.exp(-((k-m)**2)/(2*s*s));wsum+=w;vsum+=w*v;}return wsum===0?null:vsum/wsum;});}
  if(name==='ADX'||name==='PLUSDI'||name==='MINUSDI'){const plus:Val[]=[];const minus:Val[]=[];const trs=trueRange();candles.forEach((c,i)=>{if(i===0){plus.push(0);minus.push(0);return;}const up=c.high-candles[i-1].high,dn=candles[i-1].low-c.low;plus.push(up>dn&&up>0?up:0);minus.push(dn>up&&dn>0?dn:0);});const sp=rma(plus,a),sm=rma(minus,a),str=rma(trs,a);const pdi=sp.map((v,i)=>{const t=str[i];return v===null||t===null||t===0?null:100*v/t;});const mdi=sm.map((v,i)=>{const t=str[i];return v===null||t===null||t===0?null:100*v/t;});if(name==='PLUSDI')return pdi;if(name==='MINUSDI')return mdi;const dx=pdi.map((p,i)=>{const m=mdi[i];if(p===null||m===null||p+m===0)return null;return 100*Math.abs(p-m)/(p+m);});return rma(dx,a);}
- if(name==='ST'||name==='STDIR'){const atrs=rma(trueRange(),a);let fu:number|null=null,fl:number|null=null,dir=1;return candles.map((c,i)=>{const atr=atrs[i],f=args[1][i];if(atr===null||f===null||!Number.isFinite(f)||f<=0)return null;const mid=(c.high+c.low)/2;let upper=mid+f*atr,lower=mid-f*atr;if(fu!==null)upper=c.close>fu?Math.min(upper,fu):upper;if(fl!==null)lower=c.close<fl?Math.max(lower,fl):lower;if(dir===1&&c.close<lower)dir=-1;else if(dir===-1&&c.close>upper)dir=1;fu=upper;fl=lower;return name==='STDIR'?dir:dir===1?lower:upper;});}
+ if(name==='ST'||name==='STDIR'){
+  const trs=trueRange();
+  type St={atr:number;fu:number;fl:number;value:number;up:boolean};
+  const states:(St|null)[]=candles.map(()=>null);
+  return candles.map((c,i)=>{
+   const period=a[i],mult=args[1][i];
+   if(!validPeriod(period)||mult===null||!Number.isFinite(mult)||mult<=0||i<period!-1)return null;
+   const hl2=(c.high+c.low)/2;
+   const prev=i>0?states[i-1]:null;
+   let atr:number;
+   if(i===period!-1){const slice=trs.slice(0,period!);if(slice.some(v=>v===null))return null;atr=slice.reduce<number>((s,v)=>s+v!,0)/period!;}
+   else if(prev&&trs[i]!==null)atr=(prev.atr*(period!-1)+trs[i]!)/period!;
+   else return null;
+   const basicUpper=hl2+mult*atr,basicLower=hl2-mult*atr;
+   let st:St;
+   if(!prev){const up=c.close>=hl2;st={atr,fu:basicUpper,fl:basicLower,value:up?basicLower:basicUpper,up};}
+   else{
+    const prevClose=candles[i-1].close;
+    const fu=basicUpper<prev.fu||prevClose>prev.fu?basicUpper:prev.fu;
+    const fl=basicLower>prev.fl||prevClose<prev.fl?basicLower:prev.fl;
+    const wasUpper=prev.value===prev.fu;
+    const value=wasUpper?(c.close<=fu?fu:fl):(c.close>=fl?fl:fu);
+    st={atr,fu,fl,value,up:value===fl};
+   }
+   states[i]=st;
+   return name==='STDIR'?(st.up?1:-1):+st.value.toFixed(6);
+  });
+ }
  if(name==='VWAP'){let day=-1,pv=0,vv=0;return candles.map((c)=>{const d=new Date((c.time+9*3600)*1000);const dayKey=d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate();const minute=d.getUTCHours()*60+d.getUTCMinutes();if(dayKey!==day||minute===540){day=dayKey;pv=0;vv=0;}const vol=typeof c.volume==='number'?c.volume:null;if(vol===null||vol<=0)return null;const tp=(c.high+c.low+c.close)/3;pv+=tp*vol;vv+=vol;return vv===0?null:pv/vv;});}
  if(name==='KCMID')return emaOf(a,args[1]);
  if(name==='KCUPPER'||name==='KCLOWER'){const mid=emaOf(a,args[1]);const atrs=rma(trueRange(),args[1]);return mid.map((m,i)=>{const atr=atrs[i],k=args[2][i];if(m===null||atr===null||k===null)return null;return name==='KCUPPER'?m+k*atr:m-k*atr;});}
@@ -153,5 +197,16 @@ export function evaluate(text:string,candles:Candle[],variables:Record<string,nu
 }
 
 export function seriesColors(values:(number|null)[],base:string,options:LineOptions):string[]{
- return values.map((value,i)=>{if(value===null||!options.colorMode||options.colorMode==='fixed')return base;const other=options.alternateColor||'#5d96e8';if(options.colorMode==='threshold')return value>=(options.threshold??0)?base:other;const previous=values[i-1];return previous===null||previous===undefined||value>=previous?base:other;});
+ const other=options.alternateColor||'#5d96e8';
+ let last=base;
+ return values.map((value,i)=>{
+  if(value===null||!options.colorMode||options.colorMode==='fixed')return base;
+  if(options.colorMode==='threshold')return value>=(options.threshold??0)?base:other;
+  if(options.colorMode==='st')return value>=0?base:other;
+  const previous=values[i-1];
+  if(previous===null||previous===undefined){last=base;return last;}
+  if(value>previous)last=base;
+  else if(value<previous)last=other;
+  return last;
+ });
 }
