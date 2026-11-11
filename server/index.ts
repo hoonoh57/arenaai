@@ -295,7 +295,9 @@ app.post('/api/chart', async (req, res) => {
           }
         }
         const listed = ranking.find((s) => s.code === code);
-        res.json({code, name: listed?.name || code, candles, hasMore: false, nextKey: '', timeframe});
+        const fetched = await api.stockName(code).catch(() => '');
+        const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
+        res.json({code, name, candles, hasMore: false, nextKey: '', timeframe});
         return;
       }
     }
@@ -310,10 +312,11 @@ app.post('/api/chart', async (req, res) => {
       }
     }
     const listed = ranking.find((s) => s.code === code);
-    const name = listed?.name && listed.name !== code ? listed.name : listed?.name || code;
+    const fetched = await api.stockName(code).catch(() => '');
+    const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
     res.json({
       code,
-      name: name || code,
+      name,
       candles,
       hasMore: page.hasMore,
       nextKey: page.nextKey,

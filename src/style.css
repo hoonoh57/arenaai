@@ -99,3 +99,4 @@
 @media(max-width:800px){.pine-grid{grid-template-columns:1fr}}
 .rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}
+.chart-host{position:relative}.chart-draw{z-index:2;overflow:hidden}.chart-toolbar{flex-wrap:wrap}

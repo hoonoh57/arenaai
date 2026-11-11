@@ -75,6 +75,7 @@ export function ChartPane({
   const [mode, setMode] = useState<'replace' | 'overlay'>((win as {compareMode?: 'replace' | 'overlay'}).compareMode || 'replace');
   const [menu, setMenu] = useState<{x: number; y: number} | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  const [drawTool, setDrawTool] = useState('cursor');
   const timeframe = win.timeframe || '1';
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
@@ -228,6 +229,42 @@ export function ChartPane({
           <button className="hts-tool" disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => void load()}>
             조회
           </button>
+          {([
+            ['cursor', '선택'],
+            ['hline', '수평'],
+            ['vline', '수직'],
+            ['trend', '추세'],
+            ['text', '메모'],
+            ['target', '목표'],
+            ['stop', '손절'],
+            ['entry', '진입'],
+          ] as const).map(([id, label]) => (
+            <button key={id} className={'hts-tool' + (drawTool === id ? ' on' : '')} onClick={() => setDrawTool(id)} title={label}>
+              {label}
+            </button>
+          ))}
+          <button className={'hts-tool' + (win.yMode === 'percent' ? ' on' : '')} onClick={() => patchWin({yMode: win.yMode === 'percent' ? 'price' : 'percent'})} title="Y축 가격/등락률">
+            {win.yMode === 'percent' ? '등락률' : '가격'}
+          </button>
+          <button className={'hts-tool' + (win.daySep ? ' on' : '')} onClick={() => patchWin({daySep: !win.daySep})} title="일 구분선">
+            일선
+          </button>
+          <button className={'hts-tool' + (win.refLines?.prev ? ' on' : '')} onClick={() => patchWin({refLines: {...win.refLines, prev: !win.refLines?.prev}})} title="전일종가">
+            전일
+          </button>
+          <button className={'hts-tool' + (win.refLines?.open ? ' on' : '')} onClick={() => patchWin({refLines: {...win.refLines, open: !win.refLines?.open}})} title="시가">
+            시가
+          </button>
+          <button className={'hts-tool' + (win.refLines?.vi ? ' on' : '')} onClick={() => patchWin({refLines: {...win.refLines, vi: !win.refLines?.vi}})} title="VI 예상">
+            VI
+          </button>
+          <button
+            className="hts-tool"
+            onClick={() => patchWin({drawings: (win.drawings || []).slice(0, -1)})}
+            title="마지막 그림 삭제"
+          >
+            지우기
+          </button>
         </div>
         {bars.length ? (
           <Chart
@@ -244,6 +281,12 @@ export function ChartPane({
             onPick={(id) => {
               if (id && formulas.some((f) => f.id === id)) setEditId(id);
             }}
+            drawings={win.drawings || []}
+            drawTool={drawTool}
+            yMode={win.yMode === 'percent' ? 'percent' : 'price'}
+            daySep={win.daySep}
+            refLines={win.refLines}
+            onDrawings={(next) => patchWin({drawings: next})}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenu({x: e.clientX, y: e.clientY});
@@ -260,6 +303,14 @@ export function ChartPane({
             <button onClick={() => patchWin({timeframe: 'W'})}>주봉</button>
             <button onClick={() => patchWin({timeframe: 'M'})}>월봉</button>
             <button onClick={() => setOverlay([])}>추종목 제거</button>
+            <button onClick={() => { setDrawTool('hline'); setMenu(null); }}>수평선</button>
+            <button onClick={() => { setDrawTool('vline'); setMenu(null); }}>수직선</button>
+            <button onClick={() => { setDrawTool('trend'); setMenu(null); }}>추세선</button>
+            <button onClick={() => { setDrawTool('text'); setMenu(null); }}>텍스트</button>
+            <button onClick={() => { setDrawTool('target'); setMenu(null); }}>목표선</button>
+            <button onClick={() => { setDrawTool('stop'); setMenu(null); }}>손절선</button>
+            <button onClick={() => { setDrawTool('entry'); setMenu(null); }}>진입마크</button>
+            <button onClick={() => { patchWin({drawings: []}); setMenu(null); }}>그림 모두 삭제</button>
             <button onClick={() => setMenu(null)}>닫기</button>
           </div>
         )}

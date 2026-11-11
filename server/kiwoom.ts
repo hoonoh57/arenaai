@@ -47,6 +47,25 @@ export function parseConditionRow(row: ObjectRow): {code: string; name: string; 
   return {code: raw.replace(/^A/, ''), name: String(row['302'] || raw), price: Math.abs(numeric(row['10'], '현재가')), change};
 }
 
+export function kstClock(sec: number): {day: number; hour: number; minute: number} {
+  const t = new Date((sec + 9 * 3600) * 1000);
+  return {day: t.getUTCFullYear() * 10000 + (t.getUTCMonth() + 1) * 100 + t.getUTCDate(), hour: t.getUTCHours(), minute: t.getUTCMinutes()};
+}
+
+/** NXT 등 08시 세션이 최신 거래일에 있는지. */
+export function hasMorningSession(candles: Candle[], hour = 8): boolean {
+  if (!candles.length) return false;
+  const last = kstClock(candles[candles.length - 1].time);
+  return candles.some((c) => {
+    const p = kstClock(c.time);
+    return p.day === last.day && p.hour === hour;
+  });
+}
+
+function mergeCandlePages(a: Candle[], b: Candle[]): Candle[] {
+  return [...a, ...b].sort((x, y) => x.time - y.time).filter((x, i, arr) => i === 0 || x.time !== arr[i - 1].time);
+}
+
 export function parseCandles(rows: unknown): Candle[] {
   if (!Array.isArray(rows)) throw new Error('분봉 응답 형식이 올바르지 않습니다.');
   const result: Candle[] = [];
@@ -299,6 +318,19 @@ export class Kiwoom {
    * Chart page for the desk toolbar. Minute bars use ka10080 tic_scope; daily uses ka10081.
    * `nextKey` requests the previous continuation page (older bars). Does not invent bars.
    */
+  /** 통합(_AL) 우선. NXT 08:00~20:00 분·틱을 포함한다. 실패 시 거래소 코드만. */
+  private async chartRows(path: string, apiId: string, code: string, body: Record<string, string>, extra: {contYn?: string; nextKey?: string}, table: string): Promise<Candle[]> {
+    try {
+      const d = await this.rest(path, apiId, {...body, stk_cd: `${code}_AL`}, extra);
+      const rows = d[table];
+      if (Array.isArray(rows) && rows.length) return parseCandles(rows);
+    } catch {
+      /* fall back to KRX code */
+    }
+    const d = await this.rest(path, apiId, {...body, stk_cd: code}, extra);
+    return parseCandles(d[table]);
+  }
+
   async chartPage(input: {code: string; timeframe: string; baseDate?: string; nextKey?: string}): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
     if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
@@ -312,32 +344,36 @@ export class Kiwoom {
       const candles = dailyToCandles(parseDailyRows(d[table]));
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
+    const pullMore = async (candles: Candle[], hasMore: boolean, nextKey: string, load: (ex: {contYn?: string; nextKey?: string}) => Promise<Candle[]>): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> => {
+      let bars = candles;
+      let more = hasMore;
+      let key = nextKey;
+      let pages = 0;
+      while (!input.nextKey && !hasMorningSession(bars) && more && key && pages < 5) {
+        const older = await load({contYn: 'Y', nextKey: key});
+        bars = mergeCandlePages(older, bars);
+        more = this.lastContinuation.contYn === 'Y';
+        key = this.lastContinuation.nextKey;
+        pages++;
+      }
+      return {candles: bars, hasMore: more, nextKey: key};
+    };
     if (input.timeframe.startsWith('T')) {
       const spec = parseTickTimeframe(input.timeframe);
       if (!spec) throw new Error('틱봉은 1/3/5/10/30 또는 30의 배수(최대 7200)만 지원합니다.');
-      let candles = parseCandles((await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: spec.native, upd_stkpc_tp: '1'}, extra)).stk_tic_chart_qry);
+      const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10079', input.code, {tic_scope: spec.native, upd_stkpc_tp: '1'}, ex, 'stk_tic_chart_qry');
+      let candles = await load(extra);
       let hasMore = this.lastContinuation.contYn === 'Y';
       let nextKey = this.lastContinuation.nextKey;
-      if (spec.group > 1) {
-        const need = spec.group * 40;
-        let pages = 1;
-        while (candles.length < need && hasMore && nextKey && pages < 6) {
-          const more = await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: spec.native, upd_stkpc_tp: '1'}, {contYn: 'Y', nextKey});
-          candles = [...parseCandles(more.stk_tic_chart_qry), ...candles].sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
-          hasMore = this.lastContinuation.contYn === 'Y';
-          nextKey = this.lastContinuation.nextKey;
-          pages++;
-        }
-        candles = aggregateTickBars(candles, spec.group);
-      }
-      return {candles, hasMore, nextKey};
+      const packed = await pullMore(candles, hasMore, nextKey, load);
+      candles = spec.group > 1 ? aggregateTickBars(packed.candles, spec.group) : packed.candles;
+      return {candles, hasMore: packed.hasMore, nextKey: packed.nextKey};
     }
     const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
     if (!allowed.has(input.timeframe)) throw new Error('지원 차트: 틱·분·일·주·월. 초봉 API는 명세에 없습니다.');
-    const body = {stk_cd: input.code, tic_scope: input.timeframe, upd_stkpc_tp: '1'};
-    const d = await this.rest('/api/dostk/chart', 'ka10080', body, extra);
-    const candles = parseCandles(d.stk_min_pole_chart_qry);
-    return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
+    const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10080', input.code, {tic_scope: input.timeframe, upd_stkpc_tp: '1'}, ex, 'stk_min_pole_chart_qry');
+    const first = await load(extra);
+    return pullMore(first, this.lastContinuation.contYn === 'Y', this.lastContinuation.nextKey, load);
   }
 
   private readonly names = new Map<string, string>();
@@ -375,7 +411,12 @@ export class Kiwoom {
     if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
     const apiId = input.daily ? 'ka10047' : 'ka10046';
-    const d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: input.code}, extra);
+    let d: any;
+    try {
+      d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: `${input.code}_AL`}, extra);
+    } catch {
+      d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: input.code}, extra);
+    }
     const rows = d.cntr_str_tm || d.cntr_str_dy || [];
     return {
       ticks: parseStrengthTicks(rows, input.hintSec),

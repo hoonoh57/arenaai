@@ -1,4 +1,4 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   createChart,
   CandlestickSeries,
@@ -16,6 +16,7 @@ import {
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
+import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
   data,
@@ -28,6 +29,12 @@ export function Chart({
   onVisibleCount,
   onContextMenu,
   onPick,
+  drawings = [],
+  drawTool = 'cursor',
+  yMode = 'price',
+  daySep,
+  refLines,
+  onDrawings,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -39,6 +46,12 @@ export function Chart({
   onVisibleCount?: (n: number) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onPick?: (formulaId: string | null) => void;
+  drawings?: ChartDrawing[];
+  drawTool?: string;
+  yMode?: 'price' | 'percent';
+  daySep?: boolean;
+  refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
+  onDrawings?: (next: ChartDrawing[]) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -55,6 +68,11 @@ export function Chart({
   const overlayRef = useRef(overlay);
   const logRef = useRef(logScale);
   const gridRef = useRef(grid);
+  const drawToolRef = useRef(drawTool);
+  const drawingsRef = useRef(drawings);
+  const onDrawingsRef = useRef(onDrawings);
+  const pendingRef = useRef<{t: number; p: number} | null>(null);
+  const [frame, setFrame] = useState(0);
   hintRef.current = visibleHint;
   countCb.current = onVisibleCount;
   pickCb.current = onPick;
@@ -63,6 +81,9 @@ export function Chart({
   overlayRef.current = overlay;
   logRef.current = logScale;
   gridRef.current = grid;
+  drawToolRef.current = drawTool;
+  drawingsRef.current = drawings;
+  onDrawingsRef.current = onDrawings;
   const formulaSig = formulas.filter((f) => f.enabled).map((f) => f.id).join(',');
   const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
@@ -177,8 +198,37 @@ export function Chart({
       if (!range) return;
       rangeRef.current = range;
       countCb.current?.(Math.max(1, Math.round((range.to as number) - (range.from as number))));
+      setFrame((n) => n + 1);
     });
     chart.subscribeClick((param) => {
+      const tool = drawToolRef.current;
+      const price = param.point && series.coordinateToPrice(param.point.y);
+      const time = param.time !== undefined ? Number(param.time) : NaN;
+      if (tool && tool !== 'cursor' && Number.isFinite(time) && price !== null && price !== undefined) {
+        const color = tool === 'stop' ? '#ed6b72' : tool === 'target' ? '#a8ec6a' : tool === 'entry' ? '#e8bd64' : '#b9ef78';
+        const make = (kind: ChartDrawing['kind'], extra: Partial<ChartDrawing> = {}): ChartDrawing => ({
+          id: `${kind}-${Date.now()}`,
+          kind,
+          t1: time,
+          p1: price,
+          color,
+          ...extra,
+        });
+        if (tool === 'trend') {
+          if (!pendingRef.current) pendingRef.current = {t: time, p: price};
+          else {
+            const a = pendingRef.current;
+            pendingRef.current = null;
+            onDrawingsRef.current?.([...(drawingsRef.current || []), make('trend', {t2: time, p2: price, t1: a.t, p1: a.p})]);
+          }
+        } else if (tool === 'text') {
+          const text = window.prompt('메모', '') || '';
+          if (text) onDrawingsRef.current?.([...(drawingsRef.current || []), make('text', {text})]);
+        } else if (tool === 'hline' || tool === 'vline' || tool === 'target' || tool === 'stop' || tool === 'entry') {
+          onDrawingsRef.current?.([...(drawingsRef.current || []), make(tool)]);
+        }
+        return;
+      }
       const id = param.hoveredSeries ? ((param.hoveredSeries as {options?: () => {title?: string}}).options?.().title ?? null) : null;
       pickCb.current?.(id);
     });
@@ -206,12 +256,101 @@ export function Chart({
     chartRef.current?.applyOptions({
       grid: {vertLines: {visible: grid}, horzLines: {visible: grid}},
     });
-    chartRef.current?.priceScale('right').applyOptions({mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal});
-  }, [grid, logScale]);
+    chartRef.current?.priceScale('right').applyOptions({
+      mode: yMode === 'percent' ? PriceScaleMode.Percentage : logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+    });
+  }, [grid, logScale, yMode]);
 
   useEffect(() => {
     paint();
   }, [dataSig, formulaSig, overlaySig]);
 
-  return <div ref={host} className="chart" style={{height, width: '100%', minHeight: 120}} onContextMenu={onContextMenu} />;
+  const chart = chartRef.current;
+  const series = candleRef.current;
+  const xy = (time: number, price: number) => {
+    if (!chart || !series) return null;
+    const x = chart.timeScale().timeToCoordinate(time as UTCTimestamp);
+    const y = series.priceToCoordinate(price);
+    if (x === null || y === null) return null;
+    return {x, y};
+  };
+  const auto: ChartDrawing[] = [];
+  if (daySep && data.length) {
+    let day = 0;
+    for (const c of data) {
+      const d = new Date((c.time + 9 * 3600) * 1000);
+      const key = d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+      if (key !== day) {
+        day = key;
+        auto.push({id: `day-${key}`, kind: 'vline', t1: c.time, p1: c.close, color: '#3a4a55'});
+      }
+    }
+  }
+  if (data.length && refLines?.open) {
+    const last = data[data.length - 1];
+    const ld = new Date((last.time + 9 * 3600) * 1000);
+    const key = ld.getUTCFullYear() * 10000 + (ld.getUTCMonth() + 1) * 100 + ld.getUTCDate();
+    const open = data.find((c) => {
+      const d = new Date((c.time + 9 * 3600) * 1000);
+      return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate() === key;
+    });
+    if (open) auto.push({id: 'open-ref', kind: 'hline', t1: open.time, p1: open.open, color: '#6ab0c8'});
+  }
+  if (data.length && refLines?.prev) {
+    const prev = data.find((c) => c.previousDay?.close)?.previousDay?.close;
+    if (prev) auto.push({id: 'prev-ref', kind: 'hline', t1: data[0].time, p1: prev, color: '#e8bd64'});
+  }
+  if (data.length && refLines?.vi) {
+    const prev = data.find((c) => c.previousDay?.close)?.previousDay?.close || data[0].close;
+    auto.push({id: 'vi-up', kind: 'hline', t1: data[0].time, p1: prev * 1.1, color: '#ed6b72'});
+    auto.push({id: 'vi-dn', kind: 'hline', t1: data[0].time, p1: prev * 0.9, color: '#5d96e8'});
+  }
+  const allDraw = [...auto, ...drawings];
+  const box = host.current?.getBoundingClientRect();
+  const w = box?.width || 0;
+  const hbox = box?.height || height;
+  void frame;
+  return (
+    <div className="chart-host" style={{height, width: '100%', minHeight: 120, position: 'relative'}} onContextMenu={onContextMenu}>
+      <div ref={host} className="chart" style={{height: '100%', width: '100%'}} />
+      <svg className="chart-draw" width={w} height={hbox} style={{position: 'absolute', inset: 0, pointerEvents: 'none'}}>
+        {allDraw.map((d) => {
+          if (d.kind === 'hline') {
+            const a = xy(data[0]?.time || d.t1, d.p1);
+            const b = xy(data[data.length - 1]?.time || d.t1, d.p1);
+            if (!a || !b) return null;
+            return <line key={d.id} x1={0} x2={w} y1={a.y} y2={a.y} stroke={d.color} strokeDasharray={d.id.startsWith('vi') ? '4 3' : undefined} />;
+          }
+          if (d.kind === 'vline') {
+            const a = xy(d.t1, d.p1);
+            if (!a) return null;
+            return <line key={d.id} x1={a.x} x2={a.x} y1={0} y2={hbox} stroke={d.color} strokeDasharray="3 3" />;
+          }
+          if (d.kind === 'trend' && d.t2 !== undefined && d.p2 !== undefined) {
+            const a = xy(d.t1, d.p1);
+            const b = xy(d.t2, d.p2);
+            if (!a || !b) return null;
+            return <line key={d.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={d.color} strokeWidth={1.5} />;
+          }
+          if (d.kind === 'text') {
+            const a = xy(d.t1, d.p1);
+            if (!a) return null;
+            return (
+              <text key={d.id} x={a.x} y={a.y} fill={d.color} fontSize={11}>
+                {d.text}
+              </text>
+            );
+          }
+          const a = xy(d.t1, d.p1);
+          if (!a) return null;
+          const mark = d.kind === 'entry' ? '●' : d.kind === 'stop' ? '▼' : '▲';
+          return (
+            <text key={d.id} x={a.x} y={a.y} fill={d.color} fontSize={12}>
+              {mark}
+            </text>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }

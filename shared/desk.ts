@@ -39,6 +39,21 @@ export type ChildWindow = {
   /** 멀티차트 열 수 (1~4). */
   gridCols?: number;
   syncCharts?: boolean;
+  drawings?: ChartDrawing[];
+  yMode?: 'price' | 'percent';
+  daySep?: boolean;
+  refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
+};
+
+export type ChartDrawing = {
+  id: string;
+  kind: 'hline' | 'vline' | 'trend' | 'text' | 'target' | 'stop' | 'entry';
+  t1: number;
+  p1: number;
+  t2?: number;
+  p2?: number;
+  text?: string;
+  color: string;
 };
 
 export type VirtualDesk = {
@@ -238,6 +253,14 @@ function validateWindow(win: ChildWindow): ChildWindow {
     overlayCode: typeof win.overlayCode === 'string' && CODE.test(win.overlayCode) ? win.overlayCode : undefined,
     gridCols: Number.isInteger(win.gridCols) ? Math.min(4, Math.max(1, win.gridCols as number)) : undefined,
     syncCharts: win.syncCharts === undefined ? undefined : Boolean(win.syncCharts),
+    yMode: win.yMode === 'percent' ? 'percent' : win.yMode === 'price' ? 'price' : undefined,
+    daySep: win.daySep === undefined ? undefined : Boolean(win.daySep),
+    refLines: win.refLines && typeof win.refLines === 'object' ? {prev: Boolean(win.refLines.prev), open: Boolean(win.refLines.open), vi: Boolean(win.refLines.vi)} : undefined,
+    drawings: Array.isArray(win.drawings)
+      ? win.drawings
+          .filter((d): d is ChartDrawing => !!d && typeof d === 'object' && typeof (d as ChartDrawing).id === 'string' && typeof (d as ChartDrawing).kind === 'string')
+          .slice(0, 80)
+      : undefined,
   };
 }
 
