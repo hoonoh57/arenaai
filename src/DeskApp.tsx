@@ -28,7 +28,7 @@ import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {HOLD_PRESETS} from '../shared/verify';
-import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
+import {CONDITION_CATALOG, FUNCTION_HELP, SAMPLE_0150, type ConditionItem} from '../shared/conditionCatalog';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
@@ -914,32 +914,79 @@ function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => void; onC
   const [hits, setHits] = useState<{code: string; close: number; time: number}[]>([]);
   const [scanned, setScanned] = useState(0);
   const [filter, setFilter] = useState('');
+  const [picked, setPicked] = useState<ConditionItem | null>(CONDITION_CATALOG[0] || null);
+  const [barsHint, setBarsHint] = useState('');
+  useEffect(() => {
+    void fetch('/api/local-scan/catalog')
+      .then((r) => r.json())
+      .then((d) => setBarsHint(typeof d.dir === 'string' ? d.dir : ''))
+      .catch(() => {});
+  }, []);
+  const apply = (item: ConditionItem, mode: 'replace' | 'and' | 'or') => {
+    setPicked(item);
+    setExpression((cur) => {
+      const next = item.expression;
+      const t = cur.trim();
+      if (mode === 'replace' || !t) return next;
+      return `(${t}) ${mode === 'and' ? 'AND' : 'OR'} (${next})`;
+    });
+  };
   const run = async () => {
     setBusy(true);
     try {
       const d = await post('/api/local-scan', {expression, timeframe});
       setHits(d.hits || []);
       setScanned(d.scanned || 0);
+      if (!(d.scanned > 0)) setNotice(`로컬 봉이 없습니다. ${barsHint || 'data/bars'}/D 또는 /1 에 csv가 있는지, 서버를 저장소 루트에서 실행했는지 확인하세요.`);
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const tree = CONDITION_CATALOG.filter((c) => !filter || c.name.includes(filter) || c.group.includes(filter));
+  const tree = CONDITION_CATALOG.filter((c) => !filter || c.name.includes(filter) || c.group.includes(filter) || c.expression.includes(filter));
+  const groups = [...new Set(tree.map((c) => c.group))];
   return (
     <div className="search150">
       <aside className="s150-tree">
-        <input placeholder="조건 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        {tree.map((c) => (
-          <button key={c.id} type="button" onClick={() => setExpression((e) => (e.includes(c.expression) ? e : e ? `(${e}) AND (${c.expression})` : c.expression))} title={c.hint}>
-            <small>{c.group}</small>
-            {c.name}
-          </button>
+        <input placeholder="조건·함수 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        {groups.map((g) => (
+          <div key={g} className="s150-group">
+            <div className="s150-group-title">{g}</div>
+            {tree.filter((c) => c.group === g).map((c) => (
+              <button key={c.id} type="button" className={picked?.id === c.id ? 'on' : ''} onClick={() => apply(c, 'replace')} title={c.hint}>
+                {c.name}
+              </button>
+            ))}
+          </div>
         ))}
+        <div className="s150-group">
+          <div className="s150-group-title">함수 요약</div>
+          {FUNCTION_HELP.filter((f) => !filter || f.name.includes(filter) || f.desc.includes(filter)).map((f) => (
+            <div key={f.name} className="s150-fn">
+              <b>{f.name}</b>
+              <span>{f.desc}</span>
+              <code>{f.example}</code>
+            </div>
+          ))}
+        </div>
       </aside>
       <div className="s150-main">
-        <p className="panel-desc">[0150] 로컬 일봉·1분봉(data/bars/D|1/종목.csv)으로 시세·기술적 조건을 검색합니다. 재무·호가·외국인·순위는 로컬 시세에 없어 제외합니다. AND/OR/NOT·괄호 최대 20조건.</p>
+        <p className="panel-desc">왼쪽 조건을 클릭하면 식이 바뀝니다. AND/OR로 붙일 수 있습니다. 봉 경로 {barsHint || 'data/bars'}/D|1. 재무·호가·외국인·순위는 로컬 시세에 없습니다.</p>
+        {picked && (
+          <div className="s150-help">
+            <strong>{picked.name}</strong>
+            <p>{picked.hint}</p>
+            <p>식: <code>{picked.expression}</code></p>
+            <p>예: {picked.example}</p>
+            <div className="v16-row">
+              <button type="button" onClick={() => apply(picked, 'replace')}>이 조건으로</button>
+              <button type="button" onClick={() => apply(picked, 'and')}>AND 추가</button>
+              <button type="button" onClick={() => apply(picked, 'or')}>OR 추가</button>
+              <button type="button" onClick={() => setExpression(SAMPLE_0150)}>기본 샘플</button>
+            </div>
+          </div>
+        )}
         <div className="v16-row">
           <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
             <option value="D">일봉</option>
