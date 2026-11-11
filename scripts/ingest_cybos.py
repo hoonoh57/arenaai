@@ -94,9 +94,19 @@ def main() -> None:
     args = p.parse_args()
     root = Path(args.src)
     dest = Path(args.dest)
-    n_d = ingest_daily(root / "1d", dest / "D") if (root / "1d").exists() else 0
-    n_m = ingest_minute(root / "1m", dest / "1") if (root / "1m").exists() else 0
-    print(f"daily={n_d} minute={n_m} -> {dest}")
+
+    def first_existing(*names: str) -> Path | None:
+        for name in names:
+            pth = root / name
+            if pth.exists():
+                return pth
+        return None
+
+    daily = first_existing("cybos_1d_A", "1d")
+    minute = first_existing("cybos_1m_A", "1m")
+    n_d = ingest_daily(daily, dest / "D") if daily else 0
+    n_m = ingest_minute(minute, dest / "1") if minute else 0
+    print(f"daily={n_d} minute={n_m} src_d={daily} src_m={minute} -> {dest}")
 
 
 if __name__ == "__main__":
