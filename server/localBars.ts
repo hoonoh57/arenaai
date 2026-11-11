@@ -1,7 +1,9 @@
-import {readdirSync, readFileSync, existsSync} from 'node:fs';
+import {readdirSync, readFileSync, existsSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 import type {Candle} from './core';
 import {aggregateTickBars} from '../shared/ticks';
+
+const barCache = new Map<string, {mtimeMs: number; bars: Candle[]}>();
 
 export function barsDir(): string {
   return process.env.BARS_DIR || join(process.cwd(), 'data', 'bars');
@@ -50,7 +52,14 @@ export function loadLocalBars(code: string, tf: string): Candle[] {
   const native = tf === 'D' || tf === 'W' || tf === 'M' ? 'D' : '1';
   const file = ['csv', 'txt'].map((ext) => join(barsDir(), native, `${code}.${ext}`)).find((p) => existsSync(p));
   if (!file) return [];
-  let bars = parseBarFile(readFileSync(file, 'utf8'));
+  const mtimeMs = statSync(file).mtimeMs;
+  const hit = barCache.get(file);
+  let bars: Candle[];
+  if (hit && hit.mtimeMs === mtimeMs) bars = hit.bars;
+  else {
+    bars = parseBarFile(readFileSync(file, 'utf8'));
+    barCache.set(file, {mtimeMs, bars});
+  }
   if (tf === 'D' || tf === '1' || tf.startsWith('T')) return bars;
   const minutes = Number(tf);
   if (!Number.isFinite(minutes) || minutes <= 1) return bars;

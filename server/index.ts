@@ -459,7 +459,7 @@ app.post('/api/local-scan', (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : 'D';
     const listed = listLocalCodes(timeframe === 'D' ? 'D' : '1');
     const raw = Array.isArray(req.body?.codes) ? req.body.codes : listed;
-    const codes = [...new Set(raw.filter((c: unknown) => typeof c === 'string' && /^\d{6}$/.test(c)))].slice(0, 500) as string[];
+    const codes = [...new Set(raw.filter((c: unknown) => typeof c === 'string' && /^\d{6}$/.test(c)))].slice(0, 5000) as string[];
     if (!codes.length) throw new Error(`로컬 봉이 없습니다. ${process.env.BARS_DIR || 'data/bars'}/D|1/종목.csv 에 일봉·1분봉을 두세요.`);
     const hits: {code: string; close: number; time: number}[] = [];
     for (const code of codes) {
