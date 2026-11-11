@@ -1,6 +1,6 @@
 import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
-import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget, type StrengthTick} from '../shared/strength';
+import {correctSmallLotStrength, fillStrengthOnCandles, parseStrengthTicks, strengthPageBudget, type StrengthTick} from '../shared/strength';
 import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
 
 type ObjectRow = Record<string, unknown>;
@@ -396,14 +396,16 @@ export class Kiwoom {
     let nextKey = '';
     let all: StrengthTick[] = [];
     const pages = strengthPageBudget(candles.length);
+    let hintSec = hint;
     for (let i = 0; i < pages; i++) {
-      const page = await this.strengthPage({code, daily, hintSec: hint, nextKey: nextKey || undefined});
+      const page = await this.strengthPage({code, daily, hintSec, nextKey: nextKey || undefined});
       all = [...page.ticks, ...all].sort((a, b) => a.time - b.time);
+      if (all.length) hintSec = Math.min(hintSec, all[0].time);
       nextKey = page.nextKey;
       if (all.some((t) => t.time <= oldest) || !page.hasMore || !nextKey) break;
     }
     const unique = all.filter((x, i, a) => i === 0 || x.time !== a[i - 1].time || x.qty !== a[i - 1].qty);
-    return alignStrengthToCandles(candles, correctSmallLotStrength(unique), timeframe);
+    return fillStrengthOnCandles(candles, correctSmallLotStrength(unique), timeframe);
   }
 }
 

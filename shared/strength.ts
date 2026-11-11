@@ -25,9 +25,14 @@ export function parseStrengthTime(value: unknown, hintSec: number): number {
 export function parseStrengthTicks(rows: unknown, hintSec: number): StrengthTick[] {
   if (!Array.isArray(rows)) return [];
   const out: StrengthTick[] = [];
+  let cursor = hintSec;
   for (const row of rows) {
     const r = row as Record<string, unknown>;
-    const time = parseStrengthTime(r.cntr_tm ?? r.dt ?? r.date, hintSec);
+    const raw = r.cntr_tm ?? r.dt ?? r.date;
+    const stamp = String(raw ?? '').trim();
+    let time = parseStrengthTime(raw, cursor);
+    if (/^\d{6}$/.test(stamp) && Number.isFinite(time) && Number.isFinite(cursor) && time > cursor + 120) time -= 86400;
+    if (/^\d{6}$/.test(stamp) && Number.isFinite(time)) cursor = time;
     const qtyText = String(r.trde_qty ?? r.cntr_qty ?? '').trim().replace(/,/g, '');
     const strText = String(r.cntr_str ?? '').trim().replace(/,/g, '');
     const qty = /^[+-]?\d+(\.\d+)?$/.test(qtyText) ? Number(qtyText) : 0;
@@ -83,6 +88,17 @@ export function alignStrengthToCandles<T extends StrengthBar>(candles: T[], tick
   });
 }
 
+/** 봉마다 강도를 붙인 뒤 0·빈칸은 앞·뒤 유효값으로 채워 차트 전체에 그린다. */
+export function fillStrengthOnCandles<T extends StrengthBar>(candles: T[], ticks: StrengthTick[], timeframe: string): T[] {
+  const aligned = alignStrengthToCandles(candles, ticks, timeframe);
+  const fwd = carryStrength(aligned.map((c) => c.strength));
+  const first = fwd.find((v) => v !== null) ?? null;
+  return aligned.map((c, i) => {
+    const v = fwd[i] ?? first;
+    return v === null ? c : {...c, strength: v};
+  });
+}
+
 /** 0·결측은 직전 유효 강도로 채운다. 맨 앞이 비면 그대로 비운다. */
 export function carryStrength(values: Array<number | null | undefined>): Array<number | null> {
   let last: number | null = null;
@@ -97,5 +113,5 @@ export function carryStrength(values: Array<number | null | undefined>): Array<n
 
 export function strengthPageBudget(barCount: number): number {
   const n = Number.isFinite(barCount) ? Math.max(1, Math.min(500, Math.floor(barCount))) : 1;
-  return Math.min(8, Math.max(1, Math.ceil(n / 50)));
+  return Math.min(16, Math.max(1, Math.ceil(n / 20)));
 }

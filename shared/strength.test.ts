@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {alignStrengthToCandles, carryStrength, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget} from './strength';
+import {alignStrengthToCandles, carryStrength, fillStrengthOnCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget} from './strength';
 
 test('소량 연속 매수 체결강도는 50으로 보정한다', () => {
   const ticks = [
@@ -47,10 +47,20 @@ test('0 체결강도는 직전 값을 이어받는다', () => {
   assert.deepEqual(carryStrength([0, 0, 70]), [null, null, 70]);
 });
 
-test('페이지 수는 차트 봉 수에 비례하고 최대 8', () => {
+test('체결강도를 전 봉에 이어 그린다', () => {
+  const bars: {time: number; open: number; high: number; low: number; close: number; strength?: number}[] = [
+    {time: 100, open: 1, high: 1, low: 1, close: 1},
+    {time: 160, open: 1, high: 1, low: 1, close: 1},
+    {time: 220, open: 1, high: 1, low: 1, close: 1},
+  ];
+  const filled = fillStrengthOnCandles(bars, [{time: 160, qty: 20, strength: 88}], '1');
+  assert.deepEqual(filled.map((c) => c.strength), [88, 88, 88]);
+});
+
+test('페이지 수는 차트 봉 수에 비례하고 최대 16', () => {
   assert.equal(strengthPageBudget(10), 1);
-  assert.equal(strengthPageBudget(200), 4);
-  assert.equal(strengthPageBudget(900), 8);
+  assert.equal(strengthPageBudget(200), 10);
+  assert.equal(strengthPageBudget(900), 16);
 });
 
 test('6자리 체결시각은 힌트 날짜의 KST로 붙인다', () => {

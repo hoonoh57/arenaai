@@ -44,6 +44,7 @@ export function Chart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const extras = useRef<ISeriesApi<'Line' | 'Histogram'>[]>([]);
+  const markersRef = useRef<{setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void} | null>(null);
   const rangeRef = useRef<LogicalRange | null>(null);
   const meta = useRef({len: 0, first: 0});
   const hintRef = useRef(visibleHint);
@@ -136,7 +137,9 @@ export function Chart({
         });
       }
     }
-    createSeriesMarkers(series, markers.sort((a, b) => Number(a.time) - Number(b.time)));
+    const sorted = markers.sort((a, b) => Number(a.time) - Number(b.time));
+    if (!markersRef.current) markersRef.current = createSeriesMarkers(series, []);
+    markersRef.current?.setMarkers(sorted);
     if (!rangeRef.current) {
       const hint = Math.min(bars.length, Math.max(20, hintRef.current || 200));
       rangeRef.current = {from: bars.length - hint, to: bars.length - 1} as LogicalRange;
@@ -192,6 +195,7 @@ export function Chart({
     return () => {
       ro.disconnect();
       extras.current = [];
+      markersRef.current = null;
       chart.remove();
       chartRef.current = null;
       candleRef.current = null;

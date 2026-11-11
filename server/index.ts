@@ -286,8 +286,16 @@ app.post('/api/chart', async (req, res) => {
     if (timeframe === '1' && !nextKey) {
       const cachedBars = cache.candles(code);
       if (cachedBars.length) {
+        let candles = cachedBars;
+        if (req.body?.withStrength) {
+          try {
+            candles = await api.attachStrength(code, timeframe, candles);
+          } catch {
+            /* keep price bars */
+          }
+        }
         const listed = ranking.find((s) => s.code === code);
-        res.json({code, name: listed?.name || code, candles: cachedBars, hasMore: false, nextKey: '', timeframe});
+        res.json({code, name: listed?.name || code, candles, hasMore: false, nextKey: '', timeframe});
         return;
       }
     }

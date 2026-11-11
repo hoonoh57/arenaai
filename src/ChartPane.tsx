@@ -79,7 +79,7 @@ export function ChartPane({
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
   const formulaOpen = win.formulaOpen !== false;
-  const enabled = new Set(win.enabledFormulas ?? formulas.filter((f) => f.enabled).map((f) => f.id));
+  const enabled = new Set(win.enabledFormulas ?? formulas.filter((f) => f.enabled && f.kind !== 'system').map((f) => f.id));
 
   useEffect(() => setCodeText(code), [code]);
   useEffect(() => {
