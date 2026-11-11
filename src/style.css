@@ -21,6 +21,11 @@
 .hts-var{display:flex;align-items:center;gap:6px;font-size:11px;color:#9db0a4}
 .hts-var input{width:88px;background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:6px 8px;border-radius:4px}
 .hts-desk-name{color:#8fa79a;font-size:11px;margin-left:auto}
+.hts-lights{display:flex;gap:6px;align-items:center}
+.hts-lights i{width:10px;height:10px;border-radius:50%;background:#445;display:inline-block}
+.hts-lights i.go{background:#6dcf6d;box-shadow:0 0 6px #6dcf6d}
+.hts-lights i.wait{background:#e0c35a}
+.hts-lights i.stop{background:#e05a5a;box-shadow:0 0 6px #e05a5a}
 .hts-workspace{position:relative;flex:1;overflow:hidden;background:#0a1210}
 .hts-empty{position:absolute;inset:40% 10% auto;text-align:center;color:#6f857c;font-size:13px}
 .hts-taskbar{position:absolute;left:8px;bottom:8px;display:flex;gap:6px;z-index:50}

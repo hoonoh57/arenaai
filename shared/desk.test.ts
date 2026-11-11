@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createDesk,
   defaultWorkspace,
+  ensureMockTradeWorkspace,
   insertWindow,
   removeWindow,
   setWindowState,
@@ -11,6 +12,16 @@ import {
   validateWorkspace,
   nextDeskNumber,
 } from './desk';
+
+test('빈 3번 화면에 모의매매 세 창을 넣는다', () => {
+  const ws = ensureMockTradeWorkspace({
+    active: 1,
+    desks: [{id: 'desk-1', number: 1, name: '가상화면 1', vars: {code: '', name: '', strategyId: ''}, windows: []}],
+  });
+  const d3 = ws.desks.find((d) => d.number === 3);
+  assert.ok(d3);
+  assert.deepEqual(d3!.windows.map((w) => w.kind), ['scanner', 'multi-chart', 'book']);
+});
 
 test('가상화면은 1~8번만 만들고 번호가 비지 않게 채운다', () => {
   const desks = [defaultWorkspace().desks[0]];

@@ -32,7 +32,7 @@ import {Search150Pane} from './Search150Pane';
 import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean};
 type State = {
   mode: string;
   config: Config;
@@ -314,8 +314,13 @@ export function DeskApp() {
           </select>
         </label>
         <span className="hts-desk-name">{desk.number}. {desk.name}</span>
+        <span className="hts-lights" title="중앙 관리자 신호등">
+          <i className={state.realtime?.hub.state === 'ready' ? 'go' : 'stop'} title={`실시간 ${state.realtime?.hub.state || '없음'}`} />
+          <i className={state.busy || !state.config.condition ? 'wait' : 'go'} title={state.config.condition ? '조건검색' : '조건식 없음'} />
+          <i className={state.risk?.blocked ? 'stop' : state.config.running ? 'go' : 'wait'} title={state.config.running ? '모의매매' : '대기'} />
+        </span>
         <span className="mode">
-          <i /> {state.mode === 'mock' ? '모의 조회' : '실전 조회'}
+          <i /> {state.mode === 'mock' ? '모의 조회·주문' : '실전 조회(주문 없음)'}
         </span>
       </header>
       <div className="hts-workspace">
@@ -1174,6 +1179,13 @@ function ScannerPane(props: {
         </label>
         <input type="range" min={1} max={40} value={draft.count} onChange={(e) => props.setDraft({...draft, count: Number(e.target.value)})} />
         <label>목록 갱신 주기</label>
+        <button
+          className={state.config.running ? 'stop' : 'start'}
+          disabled={!draft.condition || state.busy}
+          onClick={() => void props.update({condition: draft.condition, running: !state.config.running, refreshMs: 60000, count: 9, autoTopCharts: true})}
+        >
+          {state.config.running ? '모의매매 정지' : '모의매매 시작 (1분·상위9)'}
+        </button>
         <select value={draft.refreshMs || 60000} onChange={(e) => props.setDraft({...draft, refreshMs: Number(e.target.value)})}>
           <option value={15000}>15초</option>
           <option value={30000}>30초</option>
@@ -1302,7 +1314,7 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
         <button className="stop" onClick={() => void run('/api/book/flatten', {})}>일괄 청산(시장가 가정)</button>
         <button className="apply" onClick={() => void run('/api/book/cancel', {})}>미체결 일괄 취소</button>
       </div>
-      <h3>모의 보유</h3>
+      <h3>보유현황</h3>
       {book?.holdings.length ? book.holdings.map((h) => (
         <div className="rank-row" key={h.code}>
           <div className="rank-name">
@@ -1316,7 +1328,7 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
           }}>지정 매도</button>
         </div>
       )) : <div className="empty-activity">모의 보유가 없습니다.</div>}
-      <h3>미체결</h3>
+      <h3>미체결현황</h3>
       {book?.working.length ? book.working.map((o) => (
         <div className="rank-row" key={o.id}>
           <div className="rank-name">
@@ -1327,7 +1339,7 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
           <button className="text-button" onClick={() => void run('/api/book/cancel', {code: o.code})}>종목 일괄취소</button>
         </div>
       )) : <div className="empty-activity">미체결이 없습니다.</div>}
-      <h3>최근 가정 체결</h3>
+      <h3>체결</h3>
       {book?.recent.filter((o) => o.status === 'filled').slice(0, 12).map((o) => (
         <div key={o.id}>{o.code} {o.side === 'buy' ? '매수' : '매도'} {o.fillPrice ? fmt(o.fillPrice) : ''}원 · {o.reason}</div>
       ))}

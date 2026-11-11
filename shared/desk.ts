@@ -84,11 +84,41 @@ export function emptyVars(): CommonVars {
   return {code: '', name: '', strategyId: ''};
 }
 
-export function defaultWorkspace(): DeskWorkspace {
+export function mockTradeDesk(): VirtualDesk {
   return {
-    active: 1,
-    desks: [{id: 'desk-1', number: 1, name: '가상화면 1', vars: emptyVars(), windows: []}],
+    id: 'desk-3-trade',
+    number: 3,
+    name: '모의매매',
+    vars: emptyVars(),
+    windows: [
+      {id: 'win-trade-scanner', kind: 'scanner', title: '실시간 점수', x: 8, y: 8, w: 360, h: 620, z: 1, state: 'normal', locked: false},
+      {id: 'win-trade-multi', kind: 'multi-chart', title: '상위9 멀티차트', x: 376, y: 8, w: 780, h: 620, z: 2, state: 'normal', locked: false, gridCols: 3, timeframe: '1', syncCharts: true},
+      {id: 'win-trade-book', kind: 'book', title: '보유·미체결', x: 1164, y: 8, w: 400, h: 620, z: 3, state: 'normal', locked: false},
+    ],
   };
+}
+
+export function ensureMockTradeWorkspace(workspace: DeskWorkspace): DeskWorkspace {
+  const desks = [...workspace.desks];
+  const idx = desks.findIndex((d) => d.number === 3);
+  if (idx < 0) {
+    if (desks.length >= DESK_MAX) return workspace;
+    desks.push(mockTradeDesk());
+  } else if (desks[idx].windows.length === 0) {
+    const layout = mockTradeDesk();
+    desks[idx] = {...layout, id: desks[idx].id, name: desks[idx].name || layout.name, vars: desks[idx].vars};
+  }
+  return {active: workspace.active, desks: desks.sort((a, b) => a.number - b.number)};
+}
+
+export function defaultWorkspace(): DeskWorkspace {
+  return ensureMockTradeWorkspace({
+    active: 3,
+    desks: [
+      {id: 'desk-1', number: 1, name: '가상화면 1', vars: emptyVars(), windows: []},
+      mockTradeDesk(),
+    ],
+  });
 }
 
 export function nextDeskNumber(desks: readonly VirtualDesk[]): number | null {

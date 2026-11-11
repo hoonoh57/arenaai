@@ -106,6 +106,14 @@ const risk = new RiskManager({
   maxEntriesPerMinute: positiveInt('RISK_MAX_ENTRIES_PER_MINUTE', 10),
 });
 
+if (mode === 'mock') {
+  try {
+    hub.book.setFillMode('kiwoom-mock');
+  } catch (e) {
+    console.log(`모의 주문 모드 기본값 실패: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 hub.setPositionHooks({
   canEnter: ({code, price, at}) => {
     const decision = risk.canEnter({code, price, at});
@@ -142,10 +150,11 @@ type AppConfig = {
   strategyId: string;
   strategyByCode: Record<string, string>;
   tradeByCode: Record<string, 'wait' | 'run' | 'stop'>;
+  autoTopCharts: boolean;
 };
 let config: AppConfig = {
   condition: '',
-  count: 10,
+  count: 9,
   weights: {change: 40, strength: 35, value: 25},
   running: false,
   refreshMs: 60_000,
@@ -153,6 +162,7 @@ let config: AppConfig = {
   strategyId: '',
   strategyByCode: {},
   tradeByCode: {},
+  autoTopCharts: true,
 };
 
 function bridgeCfg() {
@@ -220,6 +230,40 @@ function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Re
   ranking = result.ranking;
   updatedAt = Date.now();
   for (const [code, reason] of Object.entries(result.warnings)) cache.setWarning(code, reason);
+  void followTopCharts();
+}
+
+let followBusy = false;
+async function followTopCharts(): Promise<void> {
+  if (!config.autoTopCharts || followBusy) return;
+  const top = ranking.filter((s) => Number.isFinite(s.score) && s.score >= 0).slice(0, 9).map((s) => s.code);
+  if (!top.length) return;
+  if (top.join(',') === config.chartCodes.join(',')) return;
+  followBusy = true;
+  try {
+    const tradeByCode = {...config.tradeByCode};
+    for (const code of top) {
+      if (config.running) tradeByCode[code] = 'run';
+      else if (!tradeByCode[code]) tradeByCode[code] = 'wait';
+    }
+    config = {...config, chartCodes: top, tradeByCode, count: Math.min(40, Math.max(config.count, 9))};
+    syncSignals();
+    const result = await bridge.syncSubscriptions(bridgeCfg());
+    ranking = result.ranking;
+    updatedAt = Date.now();
+    for (const code of top) {
+      try {
+        await bridge.refreshChart(code);
+      } catch (e) {
+        cache.setWarning(code, e instanceof Error ? e.message : '분봉 갱신 실패');
+      }
+    }
+    bridge.reevaluate(top);
+  } catch (e) {
+    error = e instanceof Error ? e.message : '상위 종목 차트 갱신 실패';
+  } finally {
+    followBusy = false;
+  }
 }
 
 async function refreshRanking(): Promise<void> {
@@ -713,7 +757,8 @@ app.post('/api/config', async (req, res) => {
     res.status(400).json({error: '설정값을 확인하세요. 표시 종목 1~40, 갱신 주기 15/30/60/120/300초, 가중치 합 > 0.'});
     return;
   }
-  if (running && chartCodes.length === 0) {
+  const autoTopCharts = req.body.autoTopCharts === undefined ? config.autoTopCharts : Boolean(req.body.autoTopCharts);
+  if (running && chartCodes.length === 0 && !autoTopCharts) {
     res.status(400).json({error: '멀티차트에 체크한 종목이 있어야 모의 매매를 시작할 수 있습니다.'});
     return;
   }
@@ -746,6 +791,7 @@ app.post('/api/config', async (req, res) => {
       strategyId,
       strategyByCode,
       tradeByCode,
+      autoTopCharts,
     };
     await applyConfig(next);
     restartRefreshTimer();

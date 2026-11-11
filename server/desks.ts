@@ -1,12 +1,13 @@
 import {mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
-import {defaultWorkspace, validateWorkspace, type DeskWorkspace} from '../shared/desk';
+import {defaultWorkspace, ensureMockTradeWorkspace, validateWorkspace, type DeskWorkspace} from '../shared/desk';
 
 const path = process.env.DESKS_PATH || 'data/desks.json';
 
 export function loadDesks(): DeskWorkspace {
   try {
-    return validateWorkspace(JSON.parse(readFileSync(path, 'utf8')));
+    const loaded = ensureMockTradeWorkspace(validateWorkspace(JSON.parse(readFileSync(path, 'utf8'))));
+    return loaded;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaultWorkspace();
     throw new Error(`가상화면을 불러올 수 없습니다: ${error instanceof Error ? error.message : '오류'}`);
