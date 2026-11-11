@@ -9,7 +9,9 @@ function numeric(value: unknown, field: string): number {
 }
 function kstTimestamp(value: unknown):number {
  const t=String(value ?? ''); if(!/^\d{14}$/.test(t))return NaN;
- return Date.parse(`${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}T${t.slice(8,10)}:${t.slice(10,12)}:${t.slice(12,14)}+09:00`);
+ const ms=Date.parse(`${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}T${t.slice(8,10)}:${t.slice(10,12)}:${t.slice(12,14)}+09:00`);
+ if(!Number.isFinite(ms))return NaN;
+ const normalized=new Date(ms+9*3600000).toISOString().replace(/[-:T]/g,'').slice(0,14);return normalized===t?ms:NaN;
 }
 export function parseConditionRow(row: ObjectRow): {code:string;name:string;price:number;change:number}|null {
  const raw=String(row['9001'] ?? '');
@@ -67,5 +69,5 @@ export class Kiwoom {
   const stocks:Omit<Stock,'score'>[]=[];for(const stock of unique.values()){const d=await this.rest('/api/dostk/mrkcond','ka10046',{stk_cd:stock.code});const q=d.cntr_str_tm?.[0];if(!q)throw new Error(`${stock.code} 체결강도 데이터 없음`);stocks.push({...stock,strength:numeric(q.cntr_str,'체결강도'),value:Math.abs(numeric(q.acc_trde_prica,'누적거래대금'))});}return stocks;
  }
  async daily(code:string,baseDate:string):Promise<DailyRow[]>{const d=await this.rest('/api/dostk/chart','ka10081',{stk_cd:code,base_dt:baseDate,upd_stkpc_tp:'1'});return parseDailyRows(d.stk_dt_pole_chart_qry);}
- async candles(code:string):Promise<Candle[]>{const d=await this.rest('/api/dostk/chart','ka10080',{stk_cd:code,tic_scope:'1',upd_stkpc_tp:'1'});return parseCandles(d.stk_min_pole_chart_qry);}
+ async candles(code:string):Promise<Candle[]>{const d=await this.rest('/api/dostk/chart','ka10080',{stk_cd:code,tic_scope:'1',upd_stkpc_tp:'1'});const candles=parseCandles(d.stk_min_pole_chart_qry);if(!candles.length)throw new Error(`${code} 유효한 분봉 데이터 없음`);return candles;}
 }
