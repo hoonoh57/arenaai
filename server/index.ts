@@ -9,6 +9,7 @@ import {evaluate} from '../shared/formula';
 import {loadFormulas, saveFormulas} from './formulas';
 import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
+import {barReturn, holdEndDate, summarizeVerify, type VerifyRow} from '../shared/verify';
 import {AuditLog} from './realtime/audit';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
@@ -448,6 +449,52 @@ app.post('/api/backtest', (req, res) => {
     res.json({code, strategy: system.name, updatedAt, ...backtest(closed, system, formulas, feeBps, {slippageBps, positionMode, stopLossPct, takeProfitPct, startTime, endTime})});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '백테스트 실패'});
+  }
+});
+app.post('/api/verify', async (req, res) => {
+  try {
+    const formulaId = typeof req.body?.formulaId === 'string' ? req.body.formulaId : '';
+    const formula = formulas.find((f) => f.id === formulaId && (f.kind === 'signal' || f.kind === 'system' || f.kind === 'highlight'));
+    if (!formula) throw new Error('검증할 조건(신호·시스템) 수식을 선택하세요.');
+    const searchDate = typeof req.body?.searchDate === 'string' ? req.body.searchDate : '';
+    const holdDays = Number(req.body?.holdDays);
+    const endDate = holdEndDate(searchDate, holdDays);
+    const searchMs = Date.parse(`${searchDate}T00:00:00+09:00`) / 1000;
+    const endMs = Date.parse(`${endDate}T00:00:00+09:00`) / 1000;
+    const raw = Array.isArray(req.body?.codes) ? req.body.codes : [];
+    const codes = [...new Set(raw.filter((c: unknown) => typeof c === 'string' && /^\d{6}$/.test(c)))].slice(0, 16) as string[];
+    if (!codes.length) throw new Error('검증 종목을 선택하세요. 한 번에 16종목까지입니다.');
+    const rows: VerifyRow[] = [];
+    for (const code of codes) {
+      const page = await api.chartPage({code, timeframe: 'D', baseDate: endDate.replace(/-/g, '')});
+      const candles = page.candles;
+      const listed = ranking.find((s) => s.code === code);
+      const name = listed?.name && listed.name !== code ? listed.name : await api.stockName(code).catch(() => code);
+      if (candles.length < 2) {
+        rows.push({code, name, matched: false, searchPrice: null, endPrice: null, returnPct: null});
+        continue;
+      }
+      const values = evaluate(formula.expression, candles, formula.variables, formulas);
+      let searchIdx = -1;
+      for (let i = 0; i < candles.length; i++) if (candles[i].time <= searchMs + 86399) searchIdx = i;
+      let endIdx = -1;
+      for (let i = 0; i < candles.length; i++) if (candles[i].time <= endMs + 86399) endIdx = i;
+      const matched = searchIdx >= 0 && Boolean(values[searchIdx]);
+      const searchPrice = searchIdx >= 0 ? candles[searchIdx].close : null;
+      const endPrice = endIdx >= 0 ? candles[endIdx].close : null;
+      rows.push({
+        code,
+        name,
+        matched,
+        searchPrice,
+        endPrice,
+        volume: searchIdx >= 0 ? candles[searchIdx].volume : undefined,
+        returnPct: matched ? barReturn(searchPrice || 0, endPrice || 0) : null,
+      });
+    }
+    res.json({formula: formula.name, searchDate, endDate, holdDays, ...summarizeVerify(rows), universe: rows.length});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '성과검증 실패'});
   }
 });
 app.post('/api/conditions', async (_req, res) => {

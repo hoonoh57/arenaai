@@ -100,3 +100,4 @@
 .rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}
 .chart-host{position:relative}.chart-draw{z-index:2;overflow:hidden}.chart-toolbar{flex-wrap:wrap}
+.verify-pane label{display:flex;justify-content:space-between;gap:8px;margin:8px 0;color:#a9b7bf;font-size:11px}.verify-pane select,.verify-pane input[type=date]{background:#0e151e;border:1px solid #30404b;color:#d3dde2;border-radius:4px;padding:6px}.verify-stats{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#cfe3d3;margin:8px 0}.verify-result{margin-top:12px}

@@ -636,6 +636,9 @@ function Pane(props: {
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
   if (win.kind === 'captures') return <CapturesPane state={state} draft={draft} setDraft={props.setDraft} update={props.update} onCode={props.onCommonCode} toggleChart={props.toggleChart} chartCodes={chartCodes} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
+  if (win.kind === 'verify') {
+    return <VerifyPane state={state} chartCodes={chartCodes} selected={selected} setNotice={props.setNotice} onCode={props.onCommonCode} />;
+  }
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   return (
     <div className="activity">
@@ -711,6 +714,122 @@ function StockMiniChart({
       visibleHint={visibleHint}
       onContextMenu={onContext}
     />
+  );
+}
+
+function VerifyPane({
+  state,
+  chartCodes,
+  selected,
+  setNotice,
+  onCode,
+}: {
+  state: State;
+  chartCodes: string[];
+  selected: Stock[];
+  setNotice: (v: string) => void;
+  onCode: (code: string) => void;
+}) {
+  const candidates = state.formulas.filter((f) => f.kind === 'signal' || f.kind === 'system');
+  const [formulaId, setFormulaId] = useState(candidates.find((f) => f.enabled)?.id || candidates[0]?.id || '');
+  const [searchDate, setSearchDate] = useState(() => new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
+  const [holdDays, setHoldDays] = useState(20);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'all' | 'up' | 'down'>('all');
+  const [result, setResult] = useState<{
+    formula: string;
+    searchDate: string;
+    endDate: string;
+    holdDays: number;
+    matched: number;
+    upCount: number;
+    upRatio: number | null;
+    avgReturn: number | null;
+    universe: number;
+    rows: {code: string; name: string; matched: boolean; searchPrice: number | null; endPrice: number | null; returnPct: number | null; volume?: number}[];
+  } | null>(null);
+  const codes = (chartCodes.length ? chartCodes : selected.map((s) => s.code)).slice(0, 16);
+  const run = async () => {
+    if (!formulaId) return setNotice('검증할 조건 수식을 고르세요.');
+    if (!codes.length) return setNotice('멀티차트 또는 포착 종목을 넣으세요. 최대 16종목.');
+    setBusy(true);
+    try {
+      const d = await post('/api/verify', {formulaId, searchDate, holdDays, codes});
+      setResult(d);
+    } catch (e) {
+      setNotice((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rows = (result?.rows || []).filter((r) => (tab === 'up' ? (r.returnPct || 0) > 0 : tab === 'down' ? (r.returnPct || 0) < 0 : true));
+  return (
+    <div className="scanner-pane verify-pane">
+      <p className="panel-desc">
+        [1516] 조건식을 과거 검색시점에 적용한 뒤 수익률기간만큼 보유한 성과입니다. 일봉 기준, 종목은 16개까지. 키움 서버 과거조건 검색은 REST에 없습니다.
+      </p>
+      <label>
+        조건
+        <select value={formulaId} onChange={(e) => setFormulaId(e.target.value)}>
+          <option value="">수식 선택</option>
+          {candidates.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        검색시점
+        <input type="date" value={searchDate} onChange={(e) => setSearchDate(e.target.value)} />
+      </label>
+      <label>
+        수익률기간
+        <select value={String(holdDays)} onChange={(e) => setHoldDays(Number(e.target.value))}>
+          <option value={1}>1일</option>
+          <option value={5}>1주</option>
+          <option value={20}>1개월</option>
+          <option value={60}>3개월</option>
+          <option value={120}>6개월</option>
+        </select>
+      </label>
+      <p className="editor-hint">대상 {codes.length}종목 · 일단위 검증</p>
+      <button className="hts-tool on" disabled={busy} onClick={() => void run()}>
+        {busy ? '검증 중…' : '성과 검증하기'}
+      </button>
+      {result && (
+        <div className="verify-result">
+          <p>
+            <b>{result.formula}</b> {result.searchDate} → {result.endDate} ({result.holdDays}일)
+          </p>
+          <div className="verify-stats">
+            <span>검색 {result.matched}/{result.universe}</span>
+            <span>상승종목비율 {result.upRatio == null ? '—' : `${result.upRatio.toFixed(1)}%`}</span>
+            <span>기간수익률 {result.avgReturn == null ? '—' : `${result.avgReturn.toFixed(2)}%`}</span>
+          </div>
+          <div className="formula-tabs">
+            <button className={tab === 'all' ? 'selected' : ''} onClick={() => setTab('all')}>전체</button>
+            <button className={tab === 'up' ? 'selected' : ''} onClick={() => setTab('up')}>상승</button>
+            <button className={tab === 'down' ? 'selected' : ''} onClick={() => setTab('down')}>하락</button>
+          </div>
+          <div className="table-head">
+            <span>종목</span>
+            <span>검색가</span>
+            <span>수익률</span>
+          </div>
+          {rows.map((r) => (
+            <button key={r.code} className="rank-row" onClick={() => onCode(r.code)}>
+              <span className="rank-name">
+                <b>{r.name}</b>
+                <small>{r.code}</small>
+              </span>
+              <span>{r.searchPrice ? fmt(Math.round(r.searchPrice)) : '—'}</span>
+              <strong className={(r.returnPct || 0) >= 0 ? 'positive' : 'negative'}>{r.returnPct == null ? '—' : `${r.returnPct.toFixed(2)}%`}</strong>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
