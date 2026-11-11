@@ -28,6 +28,7 @@ import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {HOLD_PRESETS} from '../shared/verify';
+import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
@@ -635,6 +636,7 @@ function Pane(props: {
     );
   }
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
+  if (win.kind === 'search150') return <Search150Pane setNotice={props.setNotice} onCode={props.onCommonCode} />;
   if (win.kind === 'captures') return <CapturesPane state={state} draft={draft} setDraft={props.setDraft} update={props.update} onCode={props.onCommonCode} toggleChart={props.toggleChart} chartCodes={chartCodes} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
   if (win.kind === 'verify') {
@@ -899,6 +901,63 @@ function VerifyPane({
           {picked.length > 0 && result && (
             <div className="v16-picked">{picked.map((code) => { const r = result.rows.find((x) => x.code === code); return r ? <span key={code}>{r.name} {pct(r.returnPct)}</span> : null; })}</div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => void; onCode: (code: string) => void}) {
+  const [expression, setExpression] = useState(SAMPLE_0150);
+  const [timeframe, setTimeframe] = useState('D');
+  const [busy, setBusy] = useState(false);
+  const [hits, setHits] = useState<{code: string; close: number; time: number}[]>([]);
+  const [scanned, setScanned] = useState(0);
+  const [filter, setFilter] = useState('');
+  const run = async () => {
+    setBusy(true);
+    try {
+      const d = await post('/api/local-scan', {expression, timeframe});
+      setHits(d.hits || []);
+      setScanned(d.scanned || 0);
+    } catch (e) {
+      setNotice((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tree = CONDITION_CATALOG.filter((c) => !filter || c.name.includes(filter) || c.group.includes(filter));
+  return (
+    <div className="search150">
+      <aside className="s150-tree">
+        <input placeholder="조건 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        {tree.map((c) => (
+          <button key={c.id} type="button" onClick={() => setExpression((e) => (e.includes(c.expression) ? e : e ? `(${e}) AND (${c.expression})` : c.expression))} title={c.hint}>
+            <small>{c.group}</small>
+            {c.name}
+          </button>
+        ))}
+      </aside>
+      <div className="s150-main">
+        <p className="panel-desc">[0150] 로컬 일봉·1분봉(data/bars/D|1/종목.csv)으로 시세·기술적 조건을 검색합니다. 재무·호가·외국인·순위는 로컬 시세에 없어 제외합니다. AND/OR/NOT·괄호 최대 20조건.</p>
+        <div className="v16-row">
+          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+            <option value="D">일봉</option>
+            <option value="1">1분</option>
+            <option value="5">5분(1분 집계)</option>
+            <option value="60">60분(1분 집계)</option>
+          </select>
+          <button className="v16-run" style={{width: 'auto', padding: '6px 16px'}} disabled={busy} onClick={() => void run()}>{busy ? '검색 중…' : '검색'}</button>
+          <span>스캔 {scanned} · 결과 {hits.length}</span>
+        </div>
+        <textarea className="formula-code" value={expression} onChange={(e) => setExpression(e.target.value)} rows={5} />
+        <div className="s150-hits">
+          {hits.map((h) => (
+            <button key={h.code} className="rank-row" onClick={() => onCode(h.code)}>
+              <b>{h.code}</b>
+              <span>{fmt(Math.round(h.close))}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
