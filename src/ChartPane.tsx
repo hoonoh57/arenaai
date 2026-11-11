@@ -10,6 +10,10 @@ const TF = [
   {id: 'T5', label: '5틱'},
   {id: 'T10', label: '10틱'},
   {id: 'T30', label: '30틱'},
+  {id: 'T60', label: '60틱'},
+  {id: 'T120', label: '120틱'},
+  {id: 'T240', label: '240틱'},
+  {id: 'T720', label: '720틱'},
   {id: '1', label: '1분'},
   {id: '3', label: '3분'},
   {id: '5', label: '5분'},
@@ -179,13 +183,29 @@ export function ChartPane({
           </button>
           <input className="code-in" value={codeText} maxLength={6} placeholder="종목" onChange={(e) => commitCode(e.target.value)} />
           <span className="chart-name">{name || codeText || '종목명'}</span>
-          <select value={timeframe} onChange={(e) => patchWin({timeframe: e.target.value})}>
+          <select value={TF.some((t) => t.id === timeframe) ? timeframe : timeframe.startsWith('T') ? timeframe : '1'} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}
               </option>
             ))}
+            {timeframe.startsWith('T') && !TF.some((t) => t.id === timeframe) && (
+              <option value={timeframe}>{timeframe.slice(1)}틱</option>
+            )}
           </select>
+          <input
+            className="vis-bars"
+            style={{width: 52}}
+            title="틱 주기(30의 배수)"
+            placeholder="틱"
+            defaultValue={timeframe.startsWith('T') ? timeframe.slice(1) : ''}
+            key={timeframe}
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isInteger(n) || n < 1) return;
+              if ([1, 3, 5, 10].includes(n) || (n % 30 === 0 && n >= 30 && n <= 7200)) patchWin({timeframe: `T${n}`});
+            }}
+          />
           <label className="date-btn" title="기준 일자">
             📅
             <input type="date" value={baseDate} onChange={(e) => patchWin({baseDate: e.target.value})} />

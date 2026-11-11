@@ -1,6 +1,7 @@
 import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
 import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget, type StrengthTick} from '../shared/strength';
+import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
 
 type ObjectRow = Record<string, unknown>;
 
@@ -312,11 +313,24 @@ export class Kiwoom {
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
     if (input.timeframe.startsWith('T')) {
-      const tic = input.timeframe.slice(1);
-      if (!['1', '3', '5', '10', '30'].includes(tic)) throw new Error('틱봉은 1/3/5/10/30만 지원합니다.');
-      const d = await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: tic, upd_stkpc_tp: '1'}, extra);
-      const candles = parseCandles(d.stk_tic_chart_qry);
-      return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
+      const spec = parseTickTimeframe(input.timeframe);
+      if (!spec) throw new Error('틱봉은 1/3/5/10/30 또는 30의 배수(최대 7200)만 지원합니다.');
+      let candles = parseCandles((await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: spec.native, upd_stkpc_tp: '1'}, extra)).stk_tic_chart_qry);
+      let hasMore = this.lastContinuation.contYn === 'Y';
+      let nextKey = this.lastContinuation.nextKey;
+      if (spec.group > 1) {
+        const need = spec.group * 40;
+        let pages = 1;
+        while (candles.length < need && hasMore && nextKey && pages < 6) {
+          const more = await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: spec.native, upd_stkpc_tp: '1'}, {contYn: 'Y', nextKey});
+          candles = [...parseCandles(more.stk_tic_chart_qry), ...candles].sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
+          hasMore = this.lastContinuation.contYn === 'Y';
+          nextKey = this.lastContinuation.nextKey;
+          pages++;
+        }
+        candles = aggregateTickBars(candles, spec.group);
+      }
+      return {candles, hasMore, nextKey};
     }
     const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
     if (!allowed.has(input.timeframe)) throw new Error('지원 차트: 틱·분·일·주·월. 초봉 API는 명세에 없습니다.');
