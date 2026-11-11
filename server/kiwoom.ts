@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import {RateQueue, type Candle, type Stock} from './core';
+import {RateQueue, type Candle, type Stock, type PreviousDay} from './core';
 
 type ObjectRow = Record<string, unknown>;
 function numeric(value: unknown, field: string): number {
@@ -9,7 +9,9 @@ function numeric(value: unknown, field: string): number {
 }
 function kstTimestamp(value: unknown):number {
  const t=String(value ?? ''); if(!/^\d{14}$/.test(t))return NaN;
- return Date.parse(`${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}T${t.slice(8,10)}:${t.slice(10,12)}:${t.slice(12,14)}+09:00`);
+ const ms=Date.parse(`${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}T${t.slice(8,10)}:${t.slice(10,12)}:${t.slice(12,14)}+09:00`);
+ if(!Number.isFinite(ms))return NaN;
+ const normalized=new Date(ms+9*3600000).toISOString().replace(/[-:T]/g,'').slice(0,14);return normalized===t?ms:NaN;
 }
 export function parseConditionRow(row: ObjectRow): {code:string;name:string;price:number;change:number}|null {
  const raw=String(row['9001'] ?? '');
@@ -23,8 +25,26 @@ export function parseConditionRow(row: ObjectRow): {code:string;name:string;pric
 export function parseCandles(rows:unknown):Candle[] {
  if(!Array.isArray(rows))throw new Error('분봉 응답 형식이 올바르지 않습니다.');
  const result:Candle[]=[];
- for(const x of rows){try{const time=kstTimestamp(x.cntr_tm)/1000;const open=Math.abs(numeric(x.open_pric,'시가')),high=Math.abs(numeric(x.high_pric,'고가')),low=Math.abs(numeric(x.low_pric,'저가')),close=Math.abs(numeric(x.cur_prc,'종가'));if(Number.isFinite(time)&&open>0&&low>0&&high>=Math.max(open,close,low)&&low<=Math.min(open,close))result.push({time,open,high,low,close});}catch{/* invalid rows must not become fabricated candles */}}
+ for(const x of rows){try{const time=kstTimestamp(x.cntr_tm)/1000;const open=Math.abs(numeric(x.open_pric,'시가')),high=Math.abs(numeric(x.high_pric,'고가')),low=Math.abs(numeric(x.low_pric,'저가')),close=Math.abs(numeric(x.cur_prc,'종가'));if(Number.isFinite(time)&&open>0&&low>0&&high>=Math.max(open,close,low)&&low<=Math.min(open,close))result.push({time,open,high,low,close,...(/^[+-]?\d+$/.test(String(x.trde_qty ?? '').trim())?{volume:Math.abs(Number(x.trde_qty))}:{})});}catch{/* invalid rows must not become fabricated candles */}}
  return result.sort((a,b)=>a.time-b.time).filter((x,i,a)=>i===0||x.time!==a[i-1].time);
+}
+type DailyRow = PreviousDay;
+export function parseDailyRows(rows:unknown):DailyRow[]{
+ if(!Array.isArray(rows))throw new Error('일봉 응답 형식이 올바르지 않습니다.');
+ const result:DailyRow[]=[];const seen=new Set<string>();
+ for(const row of rows){
+  const date=String(row?.dt??'');if(!/^\d{8}$/.test(date))throw new Error('일봉 일자가 올바르지 않습니다.');
+  const t=Date.parse(`${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}T00:00:00+09:00`);
+  if(!Number.isFinite(t)||new Date(t+9*3600000).toISOString().slice(0,10).replace(/-/g,'')!==date||seen.has(date))throw new Error('일봉 일자가 중복되거나 유효하지 않습니다.');seen.add(date);
+  const optional=(value:unknown)=>{try{const n=Math.abs(numeric(value,'일봉'));return n>0?n:undefined;}catch{return undefined;}};
+  result.push({date,open:optional(row.open_pric),high:optional(row.high_pric),low:optional(row.low_pric),close:optional(row.cur_prc)});
+ }
+ return result.sort((a,b)=>a.date.localeCompare(b.date));
+}
+export function attachPreviousDays(candles:Candle[],daily:DailyRow[]):Candle[]{
+ // Require the current session row to exist; never jump over malformed or absent daily rows.
+ const prev=new Map<string,DailyRow>();for(let i=1;i<daily.length;i++)prev.set(daily[i].date,daily[i-1]);
+ return candles.map(c=>{const d=new Date((c.time+9*3600)*1000);const date=`${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;const row=prev.get(date);return row?{...c,previousDay:{...row}}:c;});
 }
 function checkResult(data:any, label:string){if(data.return_code!==undefined&&Number(data.return_code)!==0)throw new Error(`키움 ${label}: ${String(data.return_msg||'요청 실패')}`);}
 export class Kiwoom {
@@ -48,5 +68,6 @@ export class Kiwoom {
   const unique=new Map<string,NonNullable<ReturnType<typeof parseConditionRow>>>();for(const row of rows){const stock=parseConditionRow(row);if(stock)unique.set(stock.code,stock);}
   const stocks:Omit<Stock,'score'>[]=[];for(const stock of unique.values()){const d=await this.rest('/api/dostk/mrkcond','ka10046',{stk_cd:stock.code});const q=d.cntr_str_tm?.[0];if(!q)throw new Error(`${stock.code} 체결강도 데이터 없음`);stocks.push({...stock,strength:numeric(q.cntr_str,'체결강도'),value:Math.abs(numeric(q.acc_trde_prica,'누적거래대금'))});}return stocks;
  }
- async candles(code:string):Promise<Candle[]>{const d=await this.rest('/api/dostk/chart','ka10080',{stk_cd:code,tic_scope:'1',upd_stkpc_tp:'1'});return parseCandles(d.stk_min_pole_chart_qry);}
+ async daily(code:string,baseDate:string):Promise<DailyRow[]>{const d=await this.rest('/api/dostk/chart','ka10081',{stk_cd:code,base_dt:baseDate,upd_stkpc_tp:'1'});return parseDailyRows(d.stk_dt_pole_chart_qry);}
+ async candles(code:string):Promise<Candle[]>{const d=await this.rest('/api/dostk/chart','ka10080',{stk_cd:code,tic_scope:'1',upd_stkpc_tp:'1'});const candles=parseCandles(d.stk_min_pole_chart_qry);if(!candles.length)throw new Error(`${code} 유효한 분봉 데이터 없음`);return candles;}
 }
