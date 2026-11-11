@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
-    "test": "tsx --test server/*.test.ts server/realtime/*.test.ts"
+    "test": "tsx --test server/*.test.ts server/realtime/*.test.ts shared/*.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

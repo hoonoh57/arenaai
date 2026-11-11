@@ -7,6 +7,7 @@ import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {loadFormulas, saveFormulas} from './formulas';
+import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
 import {AuditLog} from './realtime/audit';
 import {DemandBridge} from './realtime/bridge';
@@ -251,6 +252,43 @@ app.post('/api/risk/reset', (_req, res) => {
   risk.resetDay();
   audit.record('risk', '운영자가 당일 위험 카운터를 초기화했습니다.');
   res.json({ok: true, risk: risk.snapshot()});
+});
+app.get('/api/desks', (_req, res) => {
+  try { res.json(loadDesks()); }
+  catch (e) { res.status(500).json({error: e instanceof Error ? e.message : '가상화면 조회 실패'}); }
+});
+app.put('/api/desks', (req, res) => {
+  try {
+    const workspace = saveDesks(req.body);
+    audit.record('state', '가상화면 배치를 저장했습니다.', {desks: workspace.desks.length, active: workspace.active});
+    res.json(workspace);
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '가상화면 저장 실패'});
+  }
+});
+app.post('/api/tr', async (req, res) => {
+  const id = req.body?.id;
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  try {
+    if (id === 'ka10171') {
+      const list = await bridge.loadConditions();
+      res.json({id, data: list});
+      return;
+    }
+    if (id === 'ka10080') {
+      if (!/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+      res.json({id, code, data: await api.candles(code)});
+      return;
+    }
+    if (id === 'ka10046') {
+      if (!/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+      res.json({id, code, data: await api.strengthSnapshot(code)});
+      return;
+    }
+    res.status(400).json({error: '허용된 TR만 조회할 수 있습니다: ka10171, ka10080, ka10046'});
+  } catch (e) {
+    res.status(502).json({error: e instanceof Error ? e.message : 'TR 조회 실패'});
+  }
 });
 app.put('/api/formulas', (req, res) => {
   try {
