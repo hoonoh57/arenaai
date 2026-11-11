@@ -78,8 +78,8 @@ async function put(path: string, body: unknown) {
 const TOOLS: {kind: WindowKind; label: string}[] = WINDOW_KINDS.map((kind) => ({kind, label: KIND_TITLE[kind]}));
 
 let chartQueue: Promise<unknown> = Promise.resolve();
-function queuedChart(code: string, timeframe: string) {
-  const run = chartQueue.then(() => post('/api/chart', {code, timeframe}));
+function queuedChart(code: string, timeframe: string, withStrength = false) {
+  const run = chartQueue.then(() => post('/api/chart', {code, timeframe, withStrength}));
   chartQueue = run.then(
     () => undefined,
     () => undefined,
@@ -685,7 +685,8 @@ function StockMiniChart({
     if (!/^\d{6}$/.test(code) || cached.length) return;
     let stop = false;
     setWait(true);
-    void queuedChart(code, timeframe)
+    const withStrength = formulas.some((f) => f.enabled && (f.id === 'cntrstr' || /STRENGTH|체결강도/.test(f.expression)));
+    void queuedChart(code, timeframe, withStrength)
       .then((d) => {
         if (!stop && d.candles?.length) {
           setBars(d.candles);

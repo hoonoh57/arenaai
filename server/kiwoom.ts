@@ -1,5 +1,6 @@
 import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
+import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget, type StrengthTick} from '../shared/strength';
 
 type ObjectRow = Record<string, unknown>;
 
@@ -354,6 +355,41 @@ export class Kiwoom {
     const strength = optionalNumber(row.cntr_str);
     const value = optionalNumber(row.acc_trde_prica);
     return {strength: strength === null ? null : Math.abs(strength), value: value === null ? null : Math.abs(value), change: null};
+  }
+
+  async strengthPage(input: {code: string; daily?: boolean; nextKey?: string; hintSec: number}): Promise<{ticks: StrengthTick[]; hasMore: boolean; nextKey: string}> {
+    if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
+    const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
+    const apiId = input.daily ? 'ka10047' : 'ka10046';
+    const d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: input.code}, extra);
+    const rows = d.cntr_str_tm || d.cntr_str_dy || [];
+    return {
+      ticks: parseStrengthTicks(rows, input.hintSec),
+      hasMore: this.lastContinuation.contYn === 'Y',
+      nextKey: this.lastContinuation.nextKey,
+    };
+  }
+
+  /**
+   * 차트 봉 수만큼 ka10046(분·틱) / ka10047(일·주·월)을 연속조회해 봉 시각에 맞춘다.
+   * 소량 연속 매수 이상치는 50으로 보정한다.
+   */
+  async attachStrength(code: string, timeframe: string, candles: Candle[]): Promise<Candle[]> {
+    if (!candles.length) return candles;
+    const daily = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
+    const hint = candles[candles.length - 1].time;
+    const oldest = candles[0].time;
+    let nextKey = '';
+    let all: StrengthTick[] = [];
+    const pages = strengthPageBudget(candles.length);
+    for (let i = 0; i < pages; i++) {
+      const page = await this.strengthPage({code, daily, hintSec: hint, nextKey: nextKey || undefined});
+      all = [...page.ticks, ...all].sort((a, b) => a.time - b.time);
+      nextKey = page.nextKey;
+      if (all.some((t) => t.time <= oldest) || !page.hasMore || !nextKey) break;
+    }
+    const unique = all.filter((x, i, a) => i === 0 || x.time !== a[i - 1].time || x.qty !== a[i - 1].qty);
+    return alignStrengthToCandles(candles, correctSmallLotStrength(unique), timeframe);
   }
 }
 

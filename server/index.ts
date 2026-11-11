@@ -292,13 +292,21 @@ app.post('/api/chart', async (req, res) => {
       }
     }
     const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
-    if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
+    let candles = page.candles;
+    if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
+    if (req.body?.withStrength) {
+      try {
+        candles = await api.attachStrength(code, timeframe, candles);
+      } catch {
+        /* 체결강도는 선택. 가격 봉은 그대로 반환 */
+      }
+    }
     const listed = ranking.find((s) => s.code === code);
     const name = listed?.name && listed.name !== code ? listed.name : listed?.name || code;
     res.json({
       code,
       name: name || code,
-      candles: page.candles,
+      candles,
       hasMore: page.hasMore,
       nextKey: page.nextKey,
       timeframe,

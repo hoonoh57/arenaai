@@ -87,11 +87,13 @@ export function ChartPane({
     if (!/^\d{6}$/.test(useCode)) return;
     setBusy(true);
     try {
+      const needStrength = formulas.some((f) => f.enabled && (f.id === 'cntrstr' || /STRENGTH|체결강도/.test(f.expression + (f.extraLines || []).map((l) => l.expression).join(''))));
       const d = await post('/api/chart', {
         code: useCode,
         timeframe: opts.timeframe ?? timeframe,
         baseDate: opts.baseDate ?? baseDate,
         nextKey: opts.append ? nextKey : '',
+        withStrength: needStrength || enabled.has('cntrstr'),
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
@@ -106,9 +108,10 @@ export function ChartPane({
     }
   };
 
+  const wantStrength = enabled.has('cntrstr');
   useEffect(() => {
     if (/^\d{6}$/.test(code)) void load({code});
-  }, [code, timeframe, baseDate]);
+  }, [code, timeframe, baseDate, wantStrength]);
 
   const commitCode = (value: string) => {
     const next = value.replace(/\D/g, '').slice(0, 6);

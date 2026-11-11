@@ -1,5 +1,5 @@
 export type PreviousDay = {date:string;open?:number;high?:number;low?:number;close?:number};
-export type Candle = {time:number; open:number; high:number; low:number; close:number; volume?:number; turnover?:number; previousDay?:PreviousDay};
+export type Candle = {time:number; open:number; high:number; low:number; close:number; volume?:number; turnover?:number; strength?:number; previousDay?:PreviousDay};
 export type Stock = {code:string; name:string; price:number; change:number; strength:number; value:number; score:number};
 export type Weights = {change:number; strength:number; value:number};
 
