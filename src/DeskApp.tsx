@@ -46,6 +46,13 @@ type State = {
     rotation?: {skipped: number};
   };
   risk?: {blocked: boolean; positions: number; entriesToday: number; realisedPct: number; consecutiveLosses: number; limits: {maxPositions: number}};
+  book?: {
+    holdings: {code: string; qty: number; avgPrice: number; openedAt: number}[];
+    working: {id: string; code: string; side: string; type: string; qty: number; limitPrice: number | null; reason: string}[];
+    recent: {id: string; code: string; side: string; status: string; fillPrice: number | null; reason: string; updatedAt: number}[];
+    assumedFill: boolean;
+    brokerOrders: boolean;
+  };
 };
 
 const fmt = (n: number) => new Intl.NumberFormat('ko-KR').format(n);
@@ -490,6 +497,7 @@ function Pane(props: {
   }
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
+  if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   return (
     <div className="activity">
       {state.events.length ? (
@@ -658,6 +666,56 @@ function TrPane({code}: {code: string}) {
         조회
       </button>
       <pre>{out || '결과가 여기에 표시됩니다.'}</pre>
+    </div>
+  );
+}
+
+function BookPane({state, load, setNotice}: {state: State; load: () => Promise<void>; setNotice: (v: string) => void}) {
+  const book = state.book;
+  const run = async (path: string, body: unknown) => {
+    try {
+      await post(path, body);
+      await load();
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  };
+  return (
+    <div className="book-pane">
+      <p className="panel-desc">키움 주문 없음 · 관측 가격으로만 가정 체결 · 시세가 없으면 미체결</p>
+      <div className="book-actions">
+        <button className="stop" onClick={() => void run('/api/book/flatten', {})}>일괄 청산(시장가 가정)</button>
+        <button className="apply" onClick={() => void run('/api/book/cancel', {})}>미체결 일괄 취소</button>
+      </div>
+      <h3>모의 보유</h3>
+      {book?.holdings.length ? book.holdings.map((h) => (
+        <div className="rank-row" key={h.code}>
+          <div className="rank-name">
+            <b>{h.code}</b>
+            <small>{h.qty}주 · 평균 {fmt(Math.round(h.avgPrice))}원</small>
+          </div>
+          <button className="text-button" onClick={() => void run('/api/book/sell', {code: h.code, type: 'market'})}>시장가 매도</button>
+          <button className="text-button" onClick={() => {
+            const limit = Number(window.prompt('지정 매도가', String(Math.round(h.avgPrice))));
+            if (Number.isFinite(limit) && limit > 0) void run('/api/book/sell', {code: h.code, type: 'limit', limitPrice: limit});
+          }}>지정 매도</button>
+        </div>
+      )) : <div className="empty-activity">모의 보유가 없습니다.</div>}
+      <h3>미체결</h3>
+      {book?.working.length ? book.working.map((o) => (
+        <div className="rank-row" key={o.id}>
+          <div className="rank-name">
+            <b>{o.code} {o.side === 'buy' ? '매수' : '매도'} {o.type === 'limit' ? '지정' : '시장'}</b>
+            <small>{o.qty}주 {o.limitPrice ? `· ${fmt(o.limitPrice)}원` : ''} · {o.reason}</small>
+          </div>
+          <button className="text-button" onClick={() => void run('/api/book/cancel', {id: o.id})}>취소</button>
+          <button className="text-button" onClick={() => void run('/api/book/cancel', {code: o.code})}>종목 일괄취소</button>
+        </div>
+      )) : <div className="empty-activity">미체결이 없습니다.</div>}
+      <h3>최근 가정 체결</h3>
+      {book?.recent.filter((o) => o.status === 'filled').slice(0, 12).map((o) => (
+        <div key={o.id}>{o.code} {o.side === 'buy' ? '매수' : '매도'} {o.fillPrice ? fmt(o.fillPrice) : ''}원 · {o.reason}</div>
+      ))}
     </div>
   );
 }

@@ -263,12 +263,47 @@ app.get('/api/state', (_req, res) =>
     risk: risk.snapshot(),
     audit: audit.list(20),
     orderMode: 'simulation-only',
+    book: hub.book.snapshot(),
   }),
 );
 app.get('/api/audit', (req, res) => {
   const limit = Number(req.query.limit ?? 100);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({error: 'limit은 1~500이어야 합니다.'});
   res.json({entries: audit.list(limit), counts: audit.counts()});
+});
+app.post('/api/book/sell', (req, res) => {
+  try {
+    const {code, type, limitPrice, qty} = req.body ?? {};
+    if (typeof code !== 'string') throw new Error('종목코드를 확인하세요.');
+    const order = hub.book.sell(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? undefined : Number(qty));
+    hub.noteBookOrder(order);
+    res.json({ok: true, order, book: hub.book.snapshot()});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '모의 매도 실패'});
+  }
+});
+app.post('/api/book/flatten', (req, res) => {
+  try {
+    const orders = hub.book.flatten(req.body?.type === 'limit' ? 'limit' : 'market');
+    for (const order of orders) hub.noteBookOrder(order);
+    res.json({ok: true, orders, book: hub.book.snapshot()});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '일괄 청산 실패'});
+  }
+});
+app.post('/api/book/cancel', (req, res) => {
+  try {
+    const id = req.body?.id;
+    const code = req.body?.code;
+    if (typeof id === 'string' && id) {
+      res.json({ok: true, order: hub.book.cancel(id), book: hub.book.snapshot()});
+      return;
+    }
+    const n = hub.book.cancelAll(typeof code === 'string' ? code : undefined);
+    res.json({ok: true, cancelled: n, book: hub.book.snapshot()});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '미체결 취소 실패'});
+  }
 });
 app.post('/api/risk/reset', (_req, res) => {
   risk.resetDay();

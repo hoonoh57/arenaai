@@ -5,7 +5,7 @@
 
 export const DESK_MIN = 1;
 export const DESK_MAX = 8;
-export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'tr', 'events'] as const;
+export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'tr', 'events', 'book'] as const;
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
 
@@ -45,6 +45,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   scanner: '실시간 조건검색',
   tr: '키움 REST TR',
   events: '모의 이벤트',
+  book: '주문 대시보드',
 };
 
 const CODE = /^\d{6}$/;

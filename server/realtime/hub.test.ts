@@ -269,7 +269,7 @@ test('모의 신호는 확정봉당 한 번만 처리되고 감사에 기록된�
     assert.equal(hub.eventsSnapshot().length, 1, '같은 봉에서 중복 신호 금지');
     assert.equal(hub.positionsSnapshot()['005930'], 1);
     assert.ok(audit.list(50).some((entry) => entry.category === 'position'));
-    assert.ok(audit.list(50).some((entry) => entry.category === 'order' && entry.message.includes('주문 없음')));
+    assert.ok(audit.list(50).some((entry) => entry.category === 'order' && entry.message.includes('가정 체결')));
   } finally {
     hub.stop();
     await server.close();

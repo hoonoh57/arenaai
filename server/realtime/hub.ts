@@ -22,6 +22,7 @@ import {SharedCache} from './cache';
 import {classifyMessage, LimitGovernor, RealtimeCaps, type RealtimeLimits} from './limits';
 import {KeyedDedup, SignalDedup} from './ring';
 import {signalDataStatus} from '../data-quality';
+import {SimulationBook, type BookHooks} from './book';
 
 export type HubState = 'idle' | 'connecting' | 'logging-in' | 'ready' | 'reconnecting' | 'closed';
 
@@ -46,11 +47,7 @@ export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean;
  * Optional guards around the simulated position. `canEnter` may only *block*; exits are
  * never gated because a risk system must not trap a position.
  */
-export type PositionHooks = {
-  canEnter?: (intent: {code: string; price: number; at: number}) => {allowed: boolean; reason?: string};
-  onOpen?: (intent: {code: string; price: number; at: number}) => void;
-  onClose?: (result: {code: string; entryPrice: number; exitPrice: number; at: number}) => void;
-};
+export type PositionHooks = BookHooks;
 
 export type HubDeps = {
   url: string;
@@ -121,8 +118,8 @@ export class RealtimeHub {
   private readonly debounceMs: number;
   private readonly pending = new Map<string, {resolve: (frame: RealtimeFrame) => void; reject: (error: Error) => void; timer: any}>();
   private readonly refreshTimers = new Map<string, any>();
-  private readonly positions = new Map<string, {side: 'long'; entryPrice: number; entryTime: number}>();
   private readonly events: SimulatedEvent[] = [];
+  readonly book: SimulationBook;
   private loginWaiter: {resolve: () => void; reject: (error: Error) => void} | null = null;
   private watchdog: any = null;
   private reconnectTimer: any = null;
@@ -154,6 +151,7 @@ export class RealtimeHub {
     this.debounceMs = deps.candleRefreshDebounceMs ?? 2000;
     this.dedup = new KeyedDedup({ttlMs: 5000, max: 20000});
     this.signalDedup = new SignalDedup(deps.signalDedupSize ?? 20000);
+    this.book = new SimulationBook({cache: this.cache, audit: this.audit, now: this.now, hooks: () => this.hooks});
     if (!Number.isFinite(this.reconnectBaseMs) || this.reconnectBaseMs < 10) throw new Error('재연결 기본 지연 시간이 올바르지 않습니다.');
     if (!Number.isFinite(this.staleMs) || this.staleMs < 1000) throw new Error('무응답 판정 시간이 올바르지 않습니다.');
   }
@@ -184,13 +182,23 @@ export class RealtimeHub {
     this.hooks = hooks;
   }
 
+  noteBookOrder(order: {status: string; fillPrice: number | null; fillAt: number | null; code: string; side: 'buy' | 'sell'}): void {
+    if (order.status !== 'filled' || !order.fillPrice) return;
+    this.pushEvent({
+      time: order.fillAt ?? this.now(),
+      code: order.code,
+      side: order.side === 'buy' ? '모의 매수 체결' : '모의 매도 체결',
+      price: order.fillPrice,
+    });
+  }
+
   /** Only these codes are evaluated for simulated signals. */
   setActiveCodes(codes: readonly string[]): void {
     this.activeCodes = new Set(codes);
   }
 
   positionsSnapshot(): Record<string, number> {
-    return Object.fromEntries([...this.positions.keys()].map((code) => [code, 1]));
+    return Object.fromEntries(this.book.snapshot().holdings.map((row) => [row.code, row.qty]));
   }
 
   eventsSnapshot(limit = 50): SimulatedEvent[] {
@@ -424,6 +432,9 @@ export class RealtimeHub {
           continue;
         }
         this.cache.setQuote(quote);
+        for (const fill of this.book.onQuote(quote.code, quote.price)) {
+          this.pushEvent({time: fill.fillAt ?? receivedAt, code: fill.code, side: fill.side === 'buy' ? '모의 매수 체결' : '모의 매도 체결', price: fill.fillPrice ?? quote.price});
+        }
         this.maybeRefreshCandles(quote, today);
         continue;
       }
@@ -520,37 +531,32 @@ export class RealtimeHub {
   private applySignal(code: string, bar: Candle, side: 'buy' | 'sell'): void {
     const key = `${code}|${bar.time}|${side}`;
     if (!this.signalDedup.claim(key)) return;
-    if (side === 'buy') {
-      if (this.positions.has(code)) return;
-      const at = this.now();
-      const decision = this.hooks.canEnter?.({code, price: bar.close, at});
-      if (decision && !decision.allowed) {
-        this.audit.record('risk', '위험 한도로 모의 진입을 차단했습니다.', {code, barTime: bar.time, reason: decision.reason ?? ''});
-        return;
+    try {
+      const order = this.book.place({
+        code,
+        side,
+        type: 'market',
+        qty: side === 'sell' ? this.book.qty(code) || 1 : 1,
+        source: 'signal',
+        priceHint: bar.close,
+      });
+      if (order.status === 'filled' && order.fillPrice) {
+        this.pushEvent({
+          time: order.fillAt ?? this.now(),
+          code,
+          side: side === 'buy' ? '모의 매수 체결' : '모의 매도 체결',
+          price: order.fillPrice,
+        });
       }
-      this.positions.set(code, {side: 'long', entryPrice: bar.close, entryTime: bar.time});
-      this.hooks.onOpen?.({code, price: bar.close, at});
-      this.audit.record('position', '모의 매수 포지션을 열었습니다.', {code, price: bar.close, barTime: bar.time});
-      this.pushEvent({time: at, code, side: '모의 매수', price: bar.close});
-      return;
+    } catch (error) {
+      this.audit.record('order', error instanceof Error ? error.message : '모의 주문 실패', {code, side, barTime: bar.time});
     }
-    const position = this.positions.get(code);
-    if (!position) return;
-    this.positions.delete(code);
-    this.hooks.onClose?.({code, entryPrice: position.entryPrice, exitPrice: bar.close, at: this.now()});
-    this.audit.record('position', '모의 매도로 포지션을 청산했습니다.', {
-      code,
-      entryPrice: position.entryPrice,
-      exitPrice: bar.close,
-      barTime: bar.time,
-    });
-    this.pushEvent({time: this.now(), code, side: '모의 매도', price: bar.close});
   }
 
   private pushEvent(event: SimulatedEvent): void {
     this.events.unshift(event);
     if (this.events.length > 50) this.events.length = 50;
-    this.audit.record('order', '주문 없음: 모의 이벤트만 기록했습니다.', {code: event.code, side: event.side});
+    this.audit.record('order', '키움 주문 없음: 가정 체결만 기록했습니다.', {code: event.code, side: event.side, assumed: true});
   }
 
   /** Register a demand (owner) for realtime types of the given items. Idempotent per owner. */

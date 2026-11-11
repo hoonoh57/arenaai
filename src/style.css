@@ -43,3 +43,7 @@
 
 .hts-var select,.strategy-select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:5px 8px;border-radius:4px;max-width:180px}
 .pane-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+
+.book-pane h3{font-size:12px;margin:14px 0 6px;color:#b7e88e}
+.book-actions{display:flex;gap:8px;flex-wrap:wrap}
+.book-actions button{width:auto;margin-top:0;padding:8px 10px}
