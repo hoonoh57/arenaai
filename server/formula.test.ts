@@ -9,6 +9,15 @@ test('임의 코드 실행 및 범위 밖 기간 거부',()=>{for(const expressi
 test('수식 세트 유효성 및 중복 시스템 방지',()=>{defaults.forEach(f=>validateFormula(f));assert.equal(validateSet(defaults).length,defaults.length);assert.throws(()=>validateSet([...defaults,{...defaults[2],id:'another'}]));assert.throws(()=>validateSet([...defaults,defaults[0]]));});
 
 test('키움 형식 변수, 주석, 과거 봉 및 기본 함수',()=>{const f='// 교차 신호\nA=avg(C, 단기); B=avg(C, 장기); if(Crossup(A,B),1,0)';const values=evaluate(f,candles,{단기:2,장기:3});assert.deepEqual(values,evaluate('CROSSUP(SMA(CLOSE,2),SMA(CLOSE,3))',candles));assert.deepEqual(evaluate('종가(1)',candles),evaluate('REF(CLOSE,1)',candles));assert.deepEqual(evaluate('V',candles),Array(candles.length).fill(null));assert.deepEqual(evaluate('V',candles.map(c=>({...c,volume:42}))),Array(candles.length).fill(42));assert.throws(()=>evaluate('avg(C, 기간)',candles,{기간:0}));});
+test('RSI·ATR 등 기본 기술적 지표',()=>{
+ const up=Array.from({length:20},(_,i)=>({time:i*60,open:i+1,high:i+1.5,low:i+0.5,close:i+1,volume:10}));
+ const rsi=evaluate('RSI(CLOSE, 14)',up);
+ assert.ok(rsi.slice(0,13).every((v)=>v===null));
+ assert.ok(rsi.at(-1)!>50);
+ assert.ok(evaluate('ATR(5)',up).at(-1)!>0);
+ assert.ok(evaluate('STOCHK(5)',up).every((v,i)=>i<4?v===null:v!==null&&v>=0&&v<=100));
+ assert.ok(evaluate('BBUPPER(CLOSE, 5, 2)',up).at(-1)!>=evaluate('BBMID(CLOSE, 5)',up).at(-1)!);
+});
 test('조건·누적·고저·이벤트 함수',()=>{assert.equal(evaluate('IF(C>3, 10, 20)',candles)[3],10);assert.deepEqual(evaluate('HIGHEST(C,3)',candles).slice(2,5),[3,4,4]);assert.deepEqual(evaluate('LOWEST(C,3)',candles).slice(2,5),[1,2,3]);assert.deepEqual(evaluate('SUM(C,3)',candles).slice(2,4),[6,9]);assert.deepEqual(evaluate('BARSSINCE(C==4)',candles).slice(3,7),[0,1,2,3]);assert.deepEqual(evaluate('VALUEWHEN(1,C==4,C)',candles).slice(2,5),[null,4,4]);});
 test('다중 지표 설정을 검증하고 기존 단일 수식과 함께 저장',()=>{
  const indicator={...defaults[0],pane:'separate' as const,variables:{기간:3},extraLines:[{name:'평균',expression:'avg(C,기간)',color:'#123456',visible:true},{name:'전봉',expression:'C(1)',color:'#654321',visible:false}],baselines:[{value:0,color:'#999999'}]};

@@ -11,12 +11,23 @@ const FN: Record<string, string> = {
   'ta.sma': 'SMA',
   'ta.ema': 'EMA',
   'ta.wma': 'WAVG',
+  'ta.rma': 'RMA',
+  'ta.rsi': 'RSI',
+  'ta.atr': 'ATR',
+  'ta.tr': 'TR',
+  'ta.cci': 'CCI',
+  'ta.mom': 'MOM',
+  'ta.obv': 'OBV',
+  'ta.stdev': 'STDEV',
   'ta.highest': 'HIGHEST',
   'ta.lowest': 'LOWEST',
   'ta.crossover': 'CROSSUP',
   'ta.crossunder': 'CROSSDOWN',
   'ta.change': 'ROC',
   'ta.cum': 'SUM',
+  rsi: 'RSI',
+  atr: 'ATR',
+  rma: 'RMA',
   'math.abs': 'ABS',
   'math.max': 'MAX',
   'math.min': 'MIN',
@@ -229,14 +240,18 @@ function translateExpr(expr: string, notes: PineNote[]): string {
     const re = new RegExp(`\\b${from.replace('.', '\\.')}\\s*\\(`, 'gi');
     s = s.replace(re, `${to}(`);
   }
-  s = s.replace(/\bta\.rsi\s*\(/gi, () => {
-    notes.push({line: 0, text: 'ta.rsi는 키움 내장 RSI가 없어 SMA/MAX 조합으로 직접 쓰세요.'});
-    return 'RSI_UNSUPPORTED(';
+  s = s.replace(/\bta\.bb\s*\(/gi, () => {
+    notes.push({line: 0, text: 'ta.bb는 BBMID/BBUPPER/BBLOWER로 나눠 쓰세요.'});
+    return 'BBMID(';
   });
+  s = s.replace(/\bta\.stoch\s*\(/gi, () => {
+    notes.push({line: 0, text: 'ta.stoch는 STOCHK(기간) / STOCHD(K기간, D기간)로 옮깁니다.'});
+    return 'STOCHK(';
+  });
+  s = s.replace(/\bta\.wpr\s*\(/gi, 'WILLR(');
   s = s.replace(/\s+and\s+/gi, ' AND ').replace(/\s+or\s+/gi, ' OR ').replace(/\bnot\s+/gi, 'NOT ');
   s = s.replace(/:=/g, '=');
   s = s.replace(/\?:/g, ','); // cannot map ternary well
-  if (s.includes('RSI_UNSUPPORTED')) s = s.replace(/RSI_UNSUPPORTED\([^)]*\)/g, 'SMA(CLOSE, 14)');
   return s;
 }
 
