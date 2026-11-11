@@ -257,6 +257,7 @@ app.get('/api/state', (_req, res) =>
     conditions,
     ranking,
     captured: bridge.capturedList(),
+    lastSearch: bridge.lastSearch,
     candles: bridge.candlesByCode(config.chartCodes),
     updatedAt,
     error,

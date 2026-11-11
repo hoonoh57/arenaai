@@ -77,7 +77,9 @@ test('조건검색 초기 목록은 중앙 세션 요청으로 받고 포착 종
   const bridge = new DemandBridge({hub, cache, audit: new AuditLog(), broker: {candles: async () => [], daily: async () => []}});
   const result = await bridge.apply(config);
   const request = calls.requests[0];
-  assert.deepEqual(request.packet, {trnm: 'CNSRREQ', seq: '4', search_type: '1', stex_tp: 'K'});
+  assert.equal(request.packet.trnm, 'CNSRREQ');
+  assert.equal(request.packet.seq, '4');
+  assert.ok(calls.requests.some((item) => item.packet.search_type === '0'));
   assert.deepEqual(cache.capturedCodes('4'), ['005930'], 'ETF 등 비주식 코드는 제외');
   assert.equal(result.ranking.length, 1);
   assert.equal(result.ranking[0].code, '005930');

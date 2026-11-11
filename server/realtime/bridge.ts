@@ -62,6 +62,7 @@ export class DemandBridge {
   private config: BridgeConfig | null = null;
   private watched: string[] = [];
   private conditionsCache: {seq: string; name: string}[] = [];
+  lastSearch: {seq: string; rows: number; sample: Record<string, unknown>[]} = {seq: '', rows: 0, sample: []};
 
   constructor(options: BridgeOptions) {
     this.hub = options.hub;
@@ -73,6 +74,7 @@ export class DemandBridge {
     this.quoteBudget = options.quoteBudget ?? 40;
     this.fallbackBudget = options.fallbackBudget ?? 20;
     this.quoteTtlMs = options.quoteTtlMs ?? 30000;
+    this.lastSearch = {seq: '', rows: 0, sample: []};
     this.maxSubscriptions = options.maxSubscriptions;
     if (!Number.isFinite(this.quoteTtlMs) || this.quoteTtlMs < 0) throw new Error('시세 신선도 한도가 올바르지 않습니다.');
     if (!Number.isFinite(this.fallbackTtlMs) || this.fallbackTtlMs < 0) throw new Error('REST 대체 데이터 TTL이 올바르지 않습니다.');
@@ -118,21 +120,20 @@ export class DemandBridge {
     this.fallback.clear();
     this.audit.record('state', '조건검색을 다시 시작합니다.', {seq: config.seq, count: config.count});
 
-    const frame = await this.hub.request(
-      {trnm: 'CNSRREQ', seq: config.seq, search_type: '1', stex_tp: 'K'},
+    const snapshot = await this.hub.request(
+      {trnm: 'CNSRREQ', seq: config.seq, search_type: '0', stex_tp: 'K', cont_yn: 'N', next_key: ''},
       'CNSRREQ',
     );
-    const raw = frame.data;
-    const rows = Array.isArray(raw)
-      ? raw
-      : raw && typeof raw === 'object' && Array.isArray((raw as {data?: unknown}).data)
-        ? ((raw as {data: unknown[]}).data)
-        : [];
+    try {
+      await this.hub.request({trnm: 'CNSRREQ', seq: config.seq, search_type: '1', stex_tp: 'K'}, 'CNSRREQ');
+    } catch {
+      /* 실시간 구독 실패해도 스냅샷은 보여 준다 */
+    }
+    const rows = flattenSearchRows(snapshot.data);
+    this.lastSearch = {seq: config.seq, rows: rows.length, sample: rows.slice(0, 2)};
     this.captureSnapshot.clear();
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') continue;
-      const record = row as Record<string, unknown>;
-      const code = String(record['9001'] ?? '').trim().replace(/^A(?=\d{6}$)/, '');
+    for (const record of rows) {
+      const code = String(record['9001'] ?? record.stk_cd ?? record.code ?? '').trim().replace(/^A(?=\d{6}$)/, '');
       if (!/^\d{6}$/.test(code)) continue;
       // 조건검색 응답은 등락률(고정소수점)·현재가를 함께 주므로 초기 표시에 사용한다.
       // 실시간 체결이 도착하면 0B 값이 우선한다.
@@ -327,8 +328,38 @@ export class DemandBridge {
       rotation: {cursor: this.rotationCursor, watched: this.lastPlan.watched, skipped: this.lastPlan.skipped},
       quoteTtlMs: this.quoteTtlMs,
       captured: this.config ? this.cache.capturedCodes(this.config.seq).length : 0,
+      lastSearch: this.lastSearch,
       fallbackTtlMs: this.fallbackTtlMs,
       capabilities: this.cache.capabilities(),
     };
   }
+}
+
+function flattenSearchRows(raw: unknown): Record<string, unknown>[] {
+  const lists: unknown[] = [];
+  if (Array.isArray(raw)) lists.push(raw);
+  else if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    for (const key of ['data', 'output', 'list', 'stk_cd_list']) {
+      if (Array.isArray(obj[key])) lists.push(obj[key]);
+    }
+    if (!lists.length) lists.push([raw]);
+  }
+  const rows: Record<string, unknown>[] = [];
+  for (const list of lists) {
+    for (const row of list as unknown[]) {
+      if (Array.isArray(row)) {
+        const code = String(row[0] ?? '').trim();
+        const name = String(row[1] ?? '').trim();
+        rows.push({'9001': code, '302': name, '10': row[2], '12': row[3]});
+      } else if (row && typeof row === 'object') {
+        const rec = row as Record<string, unknown>;
+        if (rec.values && typeof rec.values === 'object') rows.push(rec.values as Record<string, unknown>);
+        else rows.push(rec);
+      } else if (typeof row === 'string' && /^\d{6}$/.test(row.replace(/^A/, ''))) {
+        rows.push({'9001': row});
+      }
+    }
+  }
+  return rows;
 }

@@ -33,6 +33,7 @@ type State = {
   conditions: {seq: string; name: string}[];
   ranking: Stock[];
   captured: {code: string; name: string}[];
+  lastSearch?: {seq: string; rows: number; sample: Record<string, unknown>[]};
   candles: Record<string, Candle[]>;
   updatedAt: number | null;
   error: string;
@@ -409,7 +410,7 @@ function ChildFrame({
           </button>
         </span>
       </div>
-      <div className="child-body">{children}</div>
+      <div className={'child-body' + (win.kind === 'chart' || win.kind === 'multi-chart' ? ' fill-chart' : '')}>{children}</div>
       {!maximized && <div className="child-resize" onMouseDown={(e) => onDrag(e, 'resize')} />}
     </div>
   );
@@ -472,32 +473,63 @@ function Pane(props: {
     );
   }
   if (win.kind === 'multi-chart') {
+    const cellH = Math.max(140, Math.floor(((win.h || 480) - 72) / Math.max(1, Math.ceil(Math.max(selected.length, 1) / 2))) - 48);
     return (
-      <div className="chart-grid pane-multi">
-        {selected.map((s) => (
-          <article className="chart-card" key={s.code}>
-            <div className="chart-top">
-              <div>
-                <b>{s.name}</b> <span className="stock-code">{s.code}</span>
-                <div className="price">
-                  {fmt(s.price)} <span className={s.change >= 0 ? 'positive' : 'negative'}>{s.change.toFixed(2)}%</span>
+      <div className="pane-multi">
+        <div className="multi-bar">
+          <select
+            value={draft?.condition || ''}
+            onChange={(e) => props.setDraft({...draft, condition: e.target.value})}
+          >
+            <option value="">조건식</option>
+            {state.conditions.map((c) => (
+              <option key={c.seq} value={c.seq}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={!draft?.condition}
+            onClick={() => void props.update({condition: draft.condition})}
+          >
+            조건검색 실행
+          </button>
+          <button
+            disabled={!state.captured?.length}
+            onClick={() => {
+              const codes = (state.captured || []).slice(0, 10).map((r) => r.code);
+              void post('/api/charts', {codes}).then(() => props.load());
+            }}
+          >
+            포착 종목 넣기
+          </button>
+        </div>
+        <div className="chart-grid">
+          {selected.map((s) => (
+            <article className="chart-card" key={s.code}>
+              <div className="chart-top">
+                <div>
+                  <b>{s.name}</b> <span className="stock-code">{s.code}</span>
+                  <div className="price">
+                    {fmt(s.price)} <span className={s.change >= 0 ? 'positive' : 'negative'}>{s.change.toFixed(2)}%</span>
+                  </div>
                 </div>
+                {strategySelect(s.code)}
               </div>
-              {strategySelect(s.code)}
-            </div>
-            {state.candles[s.code]?.length ? (
-              <Chart data={state.candles[s.code]} formulas={props.formulasFor(s.code)} chartHeight={210} grid={props.grid} logScale={props.logScale} />
-            ) : (
-              <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>
-            )}
-          </article>
-        ))}
-        {selected.length === 0 && <div className="empty">조건검색 창에서 종목을 체크하세요. 체크한 종목만 모의 매매가 가능합니다.</div>}
+              {state.candles[s.code]?.length ? (
+                <Chart data={state.candles[s.code]} formulas={props.formulasFor(s.code)} chartHeight={cellH} grid={props.grid} logScale={props.logScale} />
+              ) : (
+                <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>
+              )}
+            </article>
+          ))}
+          {selected.length === 0 && <div className="empty">조건검색 실행 후 「포착 종목 넣기」를 누르거나, 조건검색 창에서 종목을 체크하세요.</div>}
+        </div>
       </div>
     );
   }
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
-  if (win.kind === 'captures') return <CapturesPane state={state} onCode={props.onCommonCode} />;
+  if (win.kind === 'captures') return <CapturesPane state={state} draft={draft} setDraft={props.setDraft} update={props.update} onCode={props.onCommonCode} toggleChart={props.toggleChart} chartCodes={chartCodes} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   return (
@@ -515,25 +547,57 @@ function Pane(props: {
   );
 }
 
-function CapturesPane({state, onCode}: {state: State; onCode: (code: string) => void}) {
+function CapturesPane({
+  state,
+  draft,
+  setDraft,
+  update,
+  onCode,
+  toggleChart,
+  chartCodes,
+}: {
+  state: State;
+  draft: Config;
+  setDraft: React.Dispatch<React.SetStateAction<Config | null>>;
+  update: (patch?: Partial<Config>) => Promise<void>;
+  onCode: (code: string) => void;
+  toggleChart: (code: string) => Promise<void>;
+  chartCodes: string[];
+}) {
   const rows = state.captured?.length ? state.captured : state.ranking.map((s) => ({code: s.code, name: s.name}));
   return (
     <div className="scanner-pane">
       <p className="panel-desc">
-        조건검색 포착 원본 · 실시간 {state.realtime?.hub.state || '없음'} · {rows.length}종목
+        실시간 {state.realtime?.hub.state || '없음'} · 응답 {state.lastSearch?.rows ?? 0}행 · 포착 {rows.length}종목
       </p>
+      <select value={draft.condition} onChange={(e) => setDraft({...draft, condition: e.target.value})}>
+        <option value="">조건식 선택</option>
+        {state.conditions.map((c) => (
+          <option key={c.seq} value={c.seq}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <button className="start" disabled={!draft.condition || state.busy} onClick={() => void update({condition: draft.condition})}>
+        실행
+      </button>
       {rows.map((row) => (
-        <button key={row.code} className="rank-row" type="button" onClick={() => onCode(row.code)}>
-          <span className="rank">·</span>
-          <div className="rank-name">
+        <div key={row.code} className="rank-row">
+          <label className="chart-check">
+            <input type="checkbox" checked={chartCodes.includes(row.code)} onChange={() => void toggleChart(row.code)} />
+          </label>
+          <button type="button" className="rank-name" onClick={() => onCode(row.code)}>
             <b>{row.name}</b>
             <small>{row.code}</small>
-          </div>
-        </button>
+          </button>
+        </div>
       ))}
       {!rows.length && (
         <div className="empty-activity">
-          {state.error || (state.realtime?.hub.state !== 'ready' ? '실시간 연결이 필요합니다.' : '아직 포착된 종목이 없습니다.')}
+          {state.error ||
+            (state.lastSearch?.seq
+              ? `조건식 ${state.lastSearch.seq} 응답 ${state.lastSearch.rows}행. 포착 종목이 없습니다.`
+              : '조건식을 고른 뒤 실행을 누르세요.')}
         </div>
       )}
     </div>

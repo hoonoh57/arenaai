@@ -371,7 +371,9 @@ export type ConditionEvent = {seq: string; code: string; action: 'insert' | 'del
  * 따라서 'I'/'D' 로 시작하는 경우만 해석하고 그 외는 null(무시)로 둔다.
  */
 export function conditionEvent(event: RealtimeEvent, kstDate: string): ConditionEvent | null {
-  if (event.type !== 'ka10173') return null;
+  const typed = event.type === 'ka10173' || event.type === '4' || event.type === '04' || event.type === 'CNSR';
+  const hasFields = Boolean(event.values[FID.condSeq] && event.values[FID.condAction]);
+  if (!typed && !hasFields) return null;
   const seq = String(event.values[FID.condSeq] ?? '').trim();
   const code = String(event.values[FID.code] ?? '').trim().replace(/^A(?=\d{6}$)/, '');
   const flag = String(event.values[FID.condAction] ?? '').trim().toUpperCase();

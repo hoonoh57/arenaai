@@ -33,7 +33,10 @@
 .child-title span{display:flex;gap:4px}
 .child-title button{background:#24352c;border:1px solid #3e5648;color:#d5e6d8;border-radius:3px;padding:2px 7px;font-size:10px}
 .child-title button.close{color:#f3c0c0;border-color:#6a3d40}
-.child-body{flex:1;overflow:auto;padding:8px}
+.child-body{flex:1;overflow:auto;padding:8px;min-height:0}
+.child-body.fill-chart{overflow:hidden;display:flex;flex-direction:column;padding:0}
+.child-body.fill-chart .chart-work,.child-body.fill-chart .chart-grid{flex:1;min-height:0;height:100%}
+.child-body.fill-chart .chart{height:100%!important;flex:1}
 .child-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,#4d6b58 50%)}
 .scanner-pane,.tr-pane,.pane-chart{min-height:100%}
 .tr-pane select,.tr-pane input{display:block;width:100%;margin:8px 0;background:#0c141c;border:1px solid #30414b;color:#dfebef;border-radius:5px;padding:8px}
@@ -74,4 +77,9 @@
 .ctx-menu button{background:none;border:0;color:#d5e6d8;text-align:left;padding:6px 8px}
 .ctx-menu button:hover{background:#24352c}
 .formula-pop{position:absolute;right:12px;top:48px;z-index:40;background:#15241c;border:1px solid #3a5344;padding:10px;border-radius:6px;width:200px}
+.multi-bar{display:flex;gap:6px;padding:8px;align-items:center;flex-shrink:0}
+.multi-bar select,.multi-bar button{background:#1b2a24;border:1px solid #355044;color:#d5e6d8;border-radius:4px;padding:6px 8px}
+.pane-multi{display:flex;flex-direction:column;height:100%;min-height:0}
+.pane-multi .chart-grid{flex:1;min-height:0;overflow:hidden}
+.rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}

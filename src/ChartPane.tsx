@@ -133,7 +133,7 @@ export function ChartPane({
   const editor = formulas.find((f) => f.id === editId);
 
   return (
-    <div className={'chart-work' + (formulaOpen ? ' dock-on' : '')}>
+    <div className={'chart-work' + (formulaOpen ? ' dock-on' : '')} style={{height: '100%'}}>
       <aside className="chart-dock">
         <div className="dock-head">수식</div>
         {groups.map((g) => (
@@ -210,7 +210,7 @@ export function ChartPane({
             data={bars}
             overlay={overlay}
             formulas={applied}
-            chartHeight={Math.max(160, (win.h || 380) - 72)}
+            chartHeight={Math.max(160, (win.h || 380) - 56)}
             grid={grid}
             logScale={logScale}
             visibleHint={visibleBars}

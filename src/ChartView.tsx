@@ -61,8 +61,7 @@ export function Chart({
   dataRef.current = data;
   const overlayRef = useRef(overlay);
   overlayRef.current = overlay;
-  const separateCount = formulas.filter((f) => f.enabled && f.kind === 'indicator' && f.pane === 'separate').length;
-  const height = chartHeight + separateCount * 120;
+  const height = Math.max(160, chartHeight);
 
   useEffect(() => {
     if (!host.current) return;
@@ -151,7 +150,15 @@ export function Chart({
       }),
     );
     if (overlay?.length) {
-      const line = chart.addSeries(LineSeries, {color: '#e8bd64', lineWidth: 1, title: '추', priceLineVisible: false, lastValueVisible: true});
+      const line = chart.addSeries(LineSeries, {
+        color: '#e8bd64',
+        lineWidth: 1,
+        title: '추',
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceScaleId: 'left',
+      });
+      chart.applyOptions({leftPriceScale: {visible: true, borderVisible: false}});
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
     }
