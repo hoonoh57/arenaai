@@ -279,6 +279,14 @@ app.post('/api/chart', async (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
+    if (timeframe === '1' && !nextKey) {
+      const cachedBars = cache.candles(code);
+      if (cachedBars.length) {
+        const listed = ranking.find((s) => s.code === code);
+        res.json({code, name: listed?.name || code, candles: cachedBars, hasMore: false, nextKey: '', timeframe});
+        return;
+      }
+    }
     const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
     if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
     const listed = ranking.find((s) => s.code === code);
@@ -468,12 +476,17 @@ app.post('/api/charts', async (req, res) => {
       hub.setActiveCodes(chartCodes);
     }
     const added = chartCodes.filter((code) => !previous.includes(code));
-    for (const code of added) {
-      try { await bridge.refreshChart(code); }
-      catch (e) { cache.setWarning(code, e instanceof Error ? e.message : '분봉 조회 실패'); }
-    }
-    if (added.length) bridge.reevaluate(added);
     res.json({ok: true, config, ranking});
+    void (async () => {
+      for (const code of added) {
+        try {
+          await bridge.refreshChart(code);
+        } catch (e) {
+          cache.setWarning(code, e instanceof Error ? e.message : '분봉 조회 실패');
+        }
+      }
+      if (added.length) bridge.reevaluate(added);
+    })();
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '차트 종목 설정 실패'});
   }

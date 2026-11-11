@@ -76,6 +76,16 @@ async function put(path: string, body: unknown) {
 
 const TOOLS: {kind: WindowKind; label: string}[] = WINDOW_KINDS.map((kind) => ({kind, label: KIND_TITLE[kind]}));
 
+let chartQueue: Promise<unknown> = Promise.resolve();
+function queuedChart(code: string, timeframe: string) {
+  const run = chartQueue.then(() => post('/api/chart', {code, timeframe}));
+  chartQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export function DeskApp() {
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
@@ -601,7 +611,7 @@ function StockMiniChart({
   height,
   grid,
   logScale,
-  timeframe: _timeframe = '1',
+  timeframe = '1',
 }: {
   code: string;
   cached: Candle[];
@@ -612,10 +622,32 @@ function StockMiniChart({
   timeframe?: string;
 }) {
   const [bars, setBars] = useState<Candle[]>(cached);
+  const [wait, setWait] = useState(!cached.length);
   useEffect(() => {
-    if (cached.length) setBars(cached);
+    if (cached.length) {
+      setBars(cached);
+      setWait(false);
+    }
   }, [cached]);
-  if (!bars.length) return <div className="empty-chart">중앙 허브에서 분봉 대기 중…</div>;
+  useEffect(() => {
+    if (!/^\d{6}$/.test(code) || cached.length) return;
+    let stop = false;
+    setWait(true);
+    void queuedChart(code, timeframe)
+      .then((d) => {
+        if (!stop && d.candles?.length) {
+          setBars(d.candles);
+          setWait(false);
+        }
+      })
+      .catch(() => {
+        if (!stop) setWait(false);
+      });
+    return () => {
+      stop = true;
+    };
+  }, [code, timeframe, cached.length]);
+  if (!bars.length) return <div className="empty-chart">{wait ? '분봉 조회 대기(중앙 큐)…' : '분봉 없음. 한도 해제 후 다시 포착넣기.'}</div>;
   return <Chart data={bars} formulas={formulas} chartHeight={height} grid={grid} logScale={logScale} />;
 }
 
