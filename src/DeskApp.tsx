@@ -28,7 +28,8 @@ import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {HOLD_PRESETS} from '../shared/verify';
-import {CONDITION_CATALOG, FUNCTION_HELP, SAMPLE_0150, type ConditionItem} from '../shared/conditionCatalog';
+import {Search150Pane} from './Search150Pane';
+import type {SavedCondition} from '../shared/localConditions';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
 type State = {
@@ -637,6 +638,7 @@ function Pane(props: {
   }
   if (win.kind === 'scanner') return <ScannerPane {...props} />;
   if (win.kind === 'search150') return <Search150Pane setNotice={props.setNotice} onCode={props.onCommonCode} />;
+
   if (win.kind === 'captures') return <CapturesPane state={state} draft={draft} setDraft={props.setDraft} update={props.update} onCode={props.onCommonCode} toggleChart={props.toggleChart} chartCodes={chartCodes} />;
   if (win.kind === 'tr') return <TrPane code={code} />;
   if (win.kind === 'verify') {
@@ -741,6 +743,16 @@ function VerifyPane({
   const formulas = state.formulas.filter((f) => f.kind === 'signal' || f.kind === 'system');
   const [formulaId, setFormulaId] = useState(formulas.find((f) => f.enabled)?.id || formulas[0]?.id || '');
   const [conditionSeq, setConditionSeq] = useState(state.config.condition || '');
+  const [localConds, setLocalConds] = useState<SavedCondition[]>([]);
+  const [localConditionId, setLocalConditionId] = useState('');
+  useEffect(() => {
+    void fetch('/api/local-conditions').then((r) => r.json()).then((d) => {
+      if (Array.isArray(d.saved)) {
+        setLocalConds(d.saved);
+        if (!localConditionId && d.saved[0]) setLocalConditionId(d.saved[0].id);
+      }
+    }).catch(() => {});
+  }, []);
   const [searchDate, setSearchDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [searchTime, setSearchTime] = useState('09:10');
   const [minute, setMinute] = useState(true);
@@ -780,7 +792,8 @@ function VerifyPane({
     try {
       const d = await post('/api/verify', {
         formulaId: formulaId || undefined,
-        conditionName: condName,
+        localConditionId: localConditionId || undefined,
+        conditionName: condName || localConds.find((c) => c.id === localConditionId)?.name,
         searchDate,
         searchTime,
         minute,
@@ -808,12 +821,18 @@ function VerifyPane({
           <div className="v16-row">
             <span>조건</span>
             <select value={conditionSeq} onChange={(e) => setConditionSeq(e.target.value)}>
-              <option value="">0150 조건식</option>
+              <option value="">키움 조건식</option>
               {state.conditions.map((c) => (
                 <option key={c.seq} value={c.seq}>{c.name}</option>
               ))}
             </select>
-            <select value={formulaId} onChange={(e) => setFormulaId(e.target.value)}>
+            <select value={localConditionId} onChange={(e) => { setLocalConditionId(e.target.value); setFormulaId(''); }}>
+              <option value="">로컬 0150</option>
+              {localConds.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <select value={formulaId} onChange={(e) => { setFormulaId(e.target.value); if (e.target.value) setLocalConditionId(''); }}>
               <option value="">수식(신호)</option>
               {formulas.map((f) => (
                 <option key={f.id} value={f.id}>{f.name}</option>
@@ -901,111 +920,6 @@ function VerifyPane({
           {picked.length > 0 && result && (
             <div className="v16-picked">{picked.map((code) => { const r = result.rows.find((x) => x.code === code); return r ? <span key={code}>{r.name} {pct(r.returnPct)}</span> : null; })}</div>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => void; onCode: (code: string) => void}) {
-  const [expression, setExpression] = useState(SAMPLE_0150);
-  const [timeframe, setTimeframe] = useState('D');
-  const [busy, setBusy] = useState(false);
-  const [hits, setHits] = useState<{code: string; close: number; time: number}[]>([]);
-  const [scanned, setScanned] = useState(0);
-  const [filter, setFilter] = useState('');
-  const [picked, setPicked] = useState<ConditionItem | null>(CONDITION_CATALOG[0] || null);
-  const [barsHint, setBarsHint] = useState('');
-  useEffect(() => {
-    void fetch('/api/local-scan/catalog')
-      .then((r) => r.json())
-      .then((d) => setBarsHint(typeof d.dir === 'string' ? d.dir : ''))
-      .catch(() => {});
-  }, []);
-  const apply = (item: ConditionItem, mode: 'replace' | 'and' | 'or') => {
-    setPicked(item);
-    if (item.available === false || !item.expression) return;
-    setExpression((cur) => {
-      const next = item.expression;
-      const t = cur.trim();
-      if (mode === 'replace' || !t) return next;
-      return `(${t}) ${mode === 'and' ? 'AND' : 'OR'} (${next})`;
-    });
-  };
-  const run = async () => {
-    setBusy(true);
-    try {
-      const d = await post('/api/local-scan', {expression, timeframe});
-      setHits(d.hits || []);
-      setScanned(d.scanned || 0);
-      if (!(d.scanned > 0)) setNotice(`로컬 봉이 없습니다. ${barsHint || 'data/bars'}/D 또는 /1 에 csv가 있는지, 서버를 저장소 루트에서 실행했는지 확인하세요.`);
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const tree = CONDITION_CATALOG.filter((c) => !filter || c.name.includes(filter) || c.group.includes(filter) || c.expression.includes(filter));
-  const groups = [...new Set(tree.map((c) => c.group))];
-  return (
-    <div className="search150">
-      <aside className="s150-tree">
-        <input placeholder="조건·함수 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        {groups.map((g) => (
-          <div key={g} className="s150-group">
-            <div className="s150-group-title">{g}</div>
-            {tree.filter((c) => c.group === g).map((c) => (
-              <button key={c.id} type="button" className={`${picked?.id === c.id ? 'on' : ''} ${c.available === false ? 'off' : ''}`} onClick={() => apply(c, 'replace')} title={c.hint}>
-                {c.name}{c.available === false ? ' (불가)' : ''}
-              </button>
-            ))}
-          </div>
-        ))}
-        <div className="s150-group">
-          <div className="s150-group-title">함수 요약</div>
-          {FUNCTION_HELP.filter((f) => !filter || f.name.includes(filter) || f.desc.includes(filter)).map((f) => (
-            <div key={f.name} className="s150-fn">
-              <b>{f.name}</b>
-              <span>{f.desc}</span>
-              <code>{f.example}</code>
-            </div>
-          ))}
-        </div>
-      </aside>
-      <div className="s150-main">
-        <p className="panel-desc">왼쪽 조건을 클릭하면 식이 바뀝니다. AND/OR로 붙일 수 있습니다. 봉 경로 {barsHint || 'data/bars'}/D|1. 재무·호가·외국인·순위는 로컬 시세에 없습니다.</p>
-        {picked && (
-          <div className="s150-help">
-            <strong>{picked.name}</strong>
-            <p>{picked.hint}</p>
-            <p>식: <code>{picked.expression}</code></p>
-            <p>예: {picked.example}</p>
-            <div className="v16-row">
-              <button type="button" onClick={() => apply(picked, 'replace')}>이 조건으로</button>
-              <button type="button" onClick={() => apply(picked, 'and')}>AND 추가</button>
-              <button type="button" onClick={() => apply(picked, 'or')}>OR 추가</button>
-              <button type="button" onClick={() => setExpression(SAMPLE_0150)}>기본 샘플</button>
-            </div>
-          </div>
-        )}
-        <div className="v16-row">
-          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
-            <option value="D">일봉</option>
-            <option value="1">1분</option>
-            <option value="5">5분(1분 집계)</option>
-            <option value="60">60분(1분 집계)</option>
-          </select>
-          <button className="v16-run" style={{width: 'auto', padding: '6px 16px'}} disabled={busy} onClick={() => void run()}>{busy ? '검색 중…' : '검색'}</button>
-          <span>스캔 {scanned} · 결과 {hits.length}</span>
-        </div>
-        <textarea className="formula-code" value={expression} onChange={(e) => setExpression(e.target.value)} rows={5} />
-        <div className="s150-hits">
-          {hits.map((h) => (
-            <button key={h.code} className="rank-row" onClick={() => onCode(h.code)}>
-              <b>{h.code}</b>
-              <span>{fmt(Math.round(h.close))}</span>
-            </button>
-          ))}
         </div>
       </div>
     </div>

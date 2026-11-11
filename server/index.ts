@@ -8,6 +8,8 @@ import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
+import {compileCombo} from '../shared/localConditions';
+import {loadLocalConditions, saveLocalConditions} from './localConditions';
 import {loadFormulas, saveFormulas} from './formulas';
 import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
@@ -170,6 +172,7 @@ function normalizeChartCodes(raw: unknown): string[] {
 }
 let conditions: {seq: string; name: string}[] = [];
 let formulas = loadFormulas();
+let localConditions = loadLocalConditions();
 let ranking: Stock[] = [];
 let updatedAt: number | null = null;
 let error = '';
@@ -474,12 +477,26 @@ app.post('/api/local-scan', (req, res) => {
   }
 });
 app.get('/api/local-scan/catalog', (_req, res) => {
-  res.json({catalog: CONDITION_CATALOG, sample: SAMPLE_0150, dir: process.env.BARS_DIR || 'data/bars'});
+  res.json({catalog: CONDITION_CATALOG, sample: SAMPLE_0150, dir: process.env.BARS_DIR || 'data/bars', saved: localConditions});
+});
+app.get('/api/local-conditions', (_req, res) => {
+  res.json({saved: localConditions});
+});
+app.put('/api/local-conditions', (req, res) => {
+  try {
+    localConditions = saveLocalConditions(req.body?.saved);
+    res.json({saved: localConditions});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '조건식 저장 실패'});
+  }
 });
 app.post('/api/verify', async (req, res) => {
   try {
     const formulaId = typeof req.body?.formulaId === 'string' ? req.body.formulaId : '';
     const formula = formulas.find((f) => f.id === formulaId && (f.kind === 'signal' || f.kind === 'system' || f.kind === 'highlight'));
+    const localConditionId = typeof req.body?.localConditionId === 'string' ? req.body.localConditionId : '';
+    const savedCond = localConditions.find((c) => c.id === localConditionId);
+    const localExpr = savedCond ? compileCombo(savedCond.rows, savedCond.combo) : '';
     const conditionName = typeof req.body?.conditionName === 'string' ? req.body.conditionName.slice(0, 80) : '';
     const searchDate = typeof req.body?.searchDate === 'string' ? req.body.searchDate : '';
     const searchTime = typeof req.body?.searchTime === 'string' ? req.body.searchTime : '09:00';
@@ -507,7 +524,11 @@ app.post('/api/verify', async (req, res) => {
       const closes = candles.map((c) => c.close);
       const searchIdx = indexAtOrBefore(times, searchAt);
       const endIdx = indexAtOrBefore(times, searchAt + holdMinutes * 60);
-      const matched = formula ? searchIdx >= 0 && Boolean(evaluate(formula.expression, candles, formula.variables, formulas)[searchIdx]) : searchIdx >= 0;
+      const matched = formula
+        ? searchIdx >= 0 && Boolean(evaluate(formula.expression, candles, formula.variables, formulas)[searchIdx])
+        : localExpr
+          ? searchIdx >= 0 && Boolean(evaluate(localExpr, candles)[searchIdx])
+          : searchIdx >= 0;
       const searchPrice = searchIdx >= 0 ? closes[searchIdx] : null;
       const endPrice = endIdx >= 0 ? closes[endIdx] : null;
       const returns: Record<string, number | null> = {};
@@ -526,7 +547,7 @@ app.post('/api/verify', async (req, res) => {
     }
     const holdLabel = HOLD_PRESETS.find((p) => p.id === holdMinutes)?.label || `${holdMinutes}분간`;
     res.json({
-      formula: formula?.name || conditionName || '조건식',
+      formula: formula?.name || savedCond?.name || conditionName || '조건식',
       searchDate,
       searchTime,
       searchAt,
