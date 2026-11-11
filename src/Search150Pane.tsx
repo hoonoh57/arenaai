@@ -19,8 +19,8 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
   const [name, setName] = useState(SAMPLE_SAVED.name);
   const [savedId, setSavedId] = useState(SAMPLE_SAVED.id);
   const [saved, setSaved] = useState<SavedCondition[]>([SAMPLE_SAVED]);
-  const [tab, setTab] = useState<'build' | 'mine'>('build');
   const [picked, setPicked] = useState<ConditionItem | null>(null);
+  const [editLetter, setEditLetter] = useState('');
   const [filter, setFilter] = useState('');
   const [timeframe, setTimeframe] = useState('D');
   const [busy, setBusy] = useState(false);
@@ -60,6 +60,18 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
   const removeRow = (letter: string) => {
     setRows((cur) => cur.filter((r) => r.letter !== letter));
     setCombo((c) => c.replace(new RegExp(`\\b(and|or)?\\s*${letter}\\b`, 'gi'), '').replace(/^\s*(and|or)\s+/i, '').trim());
+    if (editLetter === letter) setEditLetter('');
+  };
+
+  const moveRow = (letter: string, dir: -1 | 1) => {
+    setRows((cur) => {
+      const i = cur.findIndex((r) => r.letter === letter);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= cur.length) return cur;
+      const next = [...cur];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   };
 
   const loadSaved = (s: SavedCondition) => {
@@ -67,7 +79,6 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
     setName(s.name);
     setRows(s.rows);
     setCombo(s.combo);
-    setTab('build');
   };
 
   const persist = async (list: SavedCondition[]) => {
@@ -131,47 +142,42 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
   const tree = CONDITION_CATALOG.filter((c) => !filter || c.name.includes(filter) || c.group.includes(filter));
   const groups = [...new Set(tree.map((c) => c.group))];
 
+  const editing = rows.find((r) => r.letter === editLetter);
+
   return (
     <div className="search150">
       <aside className="s150-tree">
-        <div className="s150-tabs">
-          <button type="button" className={tab === 'build' ? 'on' : ''} onClick={() => setTab('build')}>조건식</button>
-          <button type="button" className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>내조건식</button>
-        </div>
-        {tab === 'mine' ? (
-          <div>
-            {saved.map((s) => (
-              <div key={s.id} className="s150-saved">
-                <button type="button" className={savedId === s.id ? 'on' : ''} onClick={() => loadSaved(s)}>{s.name}</button>
-                <button type="button" className="s150-x" onClick={() => void removeSaved(s.id)}>삭제</button>
-              </div>
+        <div className="s150-group-title">조건 목록 (클릭=추가)</div>
+        <input placeholder="조건 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        {groups.map((g) => (
+          <div key={g} className="s150-group">
+            <div className="s150-group-title">{g}</div>
+            {tree.filter((c) => c.group === g).map((c) => (
+              <button key={c.id} type="button" className={`${picked?.id === c.id ? 'on' : ''} ${c.available === false ? 'off' : ''}`} onClick={() => addRow(c)} title={c.hint}>
+                {c.name}{c.available === false ? ' (불가)' : ''}
+              </button>
             ))}
           </div>
-        ) : (
-          <>
-            <input placeholder="조건 찾기" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            {groups.map((g) => (
-              <div key={g} className="s150-group">
-                <div className="s150-group-title">{g}</div>
-                {tree.filter((c) => c.group === g).map((c) => (
-                  <button key={c.id} type="button" className={`${picked?.id === c.id ? 'on' : ''} ${c.available === false ? 'off' : ''}`} onClick={() => addRow(c)} title={c.hint}>
-                    {c.name}{c.available === false ? ' (불가)' : ''}
-                  </button>
-                ))}
-              </div>
-            ))}
-            <div className="s150-group">
-              <div className="s150-group-title">함수 요약</div>
-              {FUNCTION_HELP.map((f) => (
-                <div key={f.name} className="s150-fn">
-                  <b>{f.name}</b>
-                  <span>{f.desc}</span>
-                  <code>{f.example}</code>
-                </div>
-              ))}
+        ))}
+        <div className="s150-group">
+          <div className="s150-group-title">함수 요약</div>
+          {FUNCTION_HELP.map((f) => (
+            <div key={f.name} className="s150-fn">
+              <b>{f.name}</b>
+              <span>{f.desc}</span>
+              <code>{f.example}</code>
             </div>
-          </>
-        )}
+          ))}
+        </div>
+      </aside>
+      <aside className="s150-mine">
+        <div className="s150-group-title">내조건식</div>
+        {saved.map((s) => (
+          <div key={s.id} className="s150-saved">
+            <button type="button" className={savedId === s.id ? 'on' : ''} onClick={() => loadSaved(s)}>{s.name}</button>
+            <button type="button" className="s150-x" onClick={() => void removeSaved(s.id)}>삭제</button>
+          </div>
+        ))}
       </aside>
       <div className="s150-main">
         {picked && (
@@ -180,6 +186,14 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
             <p>{picked.hint}</p>
             {picked.expression ? <p>식: <code>{picked.expression}</code></p> : null}
             <p>예: {picked.example}</p>
+            <button type="button" disabled={picked.available === false} onClick={() => addRow(picked)}>표에 추가</button>
+          </div>
+        )}
+        {editing && (
+          <div className="s150-help">
+            <strong>조건 {editing.letter} 수정</strong>
+            <input value={editing.label} onChange={(e) => patchRow(editing.letter, {label: e.target.value})} />
+            <textarea rows={3} value={editing.expression} onChange={(e) => patchRow(editing.letter, {expression: e.target.value})} />
           </div>
         )}
         <table className="s150-table">
@@ -188,11 +202,15 @@ export function Search150Pane({setNotice, onCode}: {setNotice: (v: string) => vo
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.letter}>
+              <tr key={r.letter} className={editLetter === r.letter ? 'on' : ''} onClick={() => setEditLetter(r.letter)}>
                 <td><input type="checkbox" checked={r.enabled} onChange={(e) => patchRow(r.letter, {enabled: e.target.checked})} /></td>
                 <td>{r.letter}</td>
                 <td>{r.label}<div className="s150-mini"><code>{r.expression}</code></div></td>
-                <td><button type="button" onClick={() => removeRow(r.letter)}>X</button></td>
+                <td className="s150-ops">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); moveRow(r.letter, -1); }}>▲</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); moveRow(r.letter, 1); }}>▼</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); removeRow(r.letter); }}>X</button>
+                </td>
               </tr>
             ))}
           </tbody>
