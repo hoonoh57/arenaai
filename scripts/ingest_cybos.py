@@ -21,8 +21,12 @@ def code6(raw: str) -> str | None:
 
 def ingest_daily(src: Path, dest: Path) -> int:
     dest.mkdir(parents=True, exist_ok=True)
+    files = sorted(src.rglob("*.parquet"))
+    print(f"daily parquet {len(files)} in {src}", flush=True)
+    for f in files[-3:]:
+        print(f"  {f.name}", flush=True)
     by: dict[str, list[tuple]] = defaultdict(list)
-    for f in src.rglob("*.parquet"):
+    for f in files:
         cols = ["code", "date", "open", "high", "low", "close", "volume"]
         names = pq.read_schema(f).names
         if "market_cap" in names:
@@ -53,6 +57,9 @@ def ingest_daily(src: Path, dest: Path) -> int:
             w.write("time,open,high,low,close,volume,market_cap\n")
             for r in ordered:
                 w.write(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]},{r[5]},{r[6]}\n")
+    dates = [r[0] for rows in by.values() for r in rows]
+    if dates:
+        print(f"daily dates {min(dates)} .. {max(dates)} codes={len(by)}", flush=True)
     return len(by)
 
 

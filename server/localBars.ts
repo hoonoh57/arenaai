@@ -44,7 +44,7 @@ function parseTime(raw: string): number {
     return Number.isFinite(ms) ? ms / 1000 : NaN;
   }
   if (/^\d{8}$/.test(t)) {
-    const ms = Date.parse(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}T00:00:00+09:00`);
+    const ms = Date.parse(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}T09:00:00+09:00`);
     return Number.isFinite(ms) ? ms / 1000 : NaN;
   }
   const ms = Date.parse(t);
