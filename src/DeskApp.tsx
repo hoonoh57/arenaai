@@ -516,11 +516,7 @@ function Pane(props: {
                 </div>
                 {strategySelect(s.code)}
               </div>
-              {state.candles[s.code]?.length ? (
-                <Chart data={state.candles[s.code]} formulas={props.formulasFor(s.code)} chartHeight={cellH} grid={props.grid} logScale={props.logScale} />
-              ) : (
-                <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>
-              )}
+              <StockMiniChart code={s.code} cached={state.candles[s.code] || []} formulas={props.formulasFor(s.code)} height={cellH} grid={props.grid} logScale={props.logScale} />
             </article>
           ))}
           {selected.length === 0 && <div className="empty">조건검색 실행 후 「포착 종목 넣기」를 누르거나, 조건검색 창에서 종목을 체크하세요.</div>}
@@ -545,6 +541,42 @@ function Pane(props: {
       )}
     </div>
   );
+}
+
+function StockMiniChart({
+  code,
+  cached,
+  formulas,
+  height,
+  grid,
+  logScale,
+}: {
+  code: string;
+  cached: Candle[];
+  formulas: Formula[];
+  height: number;
+  grid: boolean;
+  logScale: boolean;
+}) {
+  const [bars, setBars] = useState<Candle[]>(cached);
+  useEffect(() => {
+    if (cached.length) setBars(cached);
+  }, [cached]);
+  useEffect(() => {
+    if (!/^\d{6}$/.test(code)) return;
+    if (bars.length) return;
+    let stop = false;
+    void post('/api/chart', {code, timeframe: '1'})
+      .then((d) => {
+        if (!stop && d.candles?.length) setBars(d.candles);
+      })
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, [code]);
+  if (!bars.length) return <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>;
+  return <Chart data={bars} formulas={formulas} chartHeight={height} grid={grid} logScale={logScale} />;
 }
 
 function CapturesPane({

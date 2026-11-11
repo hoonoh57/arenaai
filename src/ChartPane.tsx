@@ -94,8 +94,9 @@ export function ChartPane({
         nextKey: opts.append ? nextKey : '',
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
-      if (opts.overlay) setOverlay(d.candles || []);
-      else setBars((prev) => (opts.append ? mergeBars(prev, d.candles || []) : d.candles || []));
+      const next = d.candles || [];
+      if (opts.overlay) setOverlay(next);
+      else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
       setHasMore(Boolean(d.hasMore));
       setNextKey(d.nextKey || '');
     } catch (e) {
