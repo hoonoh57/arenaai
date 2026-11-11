@@ -9,6 +9,15 @@ export const HOLD_PRESETS = [
   {id: 420, label: '7시간'},
 ] as const;
 
+export const DAY_HOLD_PRESETS = [
+  {id: 1, label: '1일'},
+  {id: 3, label: '3일'},
+  {id: 5, label: '5일'},
+  {id: 10, label: '10일'},
+  {id: 20, label: '20일'},
+  {id: 60, label: '60일'},
+] as const;
+
 export type VerifyRow = {
   code: string;
   name: string;
@@ -71,6 +80,12 @@ export function returnAfterMinutes(closes: number[], times: number[], searchIdx:
   const target = times[searchIdx] + minutes * 60;
   const endIdx = indexAtOrBefore(times, target);
   if (endIdx < searchIdx) return null;
+  return barReturn(closes[searchIdx], closes[endIdx]);
+}
+
+export function returnAfterBars(closes: number[], searchIdx: number, bars: number): number | null {
+  if (searchIdx < 0 || searchIdx >= closes.length || !Number.isInteger(bars) || bars < 1) return null;
+  const endIdx = Math.min(searchIdx + bars, closes.length - 1);
   return barReturn(closes[searchIdx], closes[endIdx]);
 }
 

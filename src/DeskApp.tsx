@@ -27,7 +27,7 @@ import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
-import {HOLD_PRESETS} from '../shared/verify';
+import {DAY_HOLD_PRESETS, HOLD_PRESETS} from '../shared/verify';
 import {Search150Pane} from './Search150Pane';
 import type {SavedCondition} from '../shared/localConditions';
 
@@ -741,7 +741,7 @@ function VerifyPane({
   onCode: (code: string) => void;
 }) {
   const formulas = state.formulas.filter((f) => f.kind === 'signal' || f.kind === 'system');
-  const [formulaId, setFormulaId] = useState(formulas.find((f) => f.enabled)?.id || formulas[0]?.id || '');
+  const [formulaId, setFormulaId] = useState('');
   const [conditionSeq, setConditionSeq] = useState(state.config.condition || '');
   const [localConds, setLocalConds] = useState<SavedCondition[]>([]);
   const [localConditionId, setLocalConditionId] = useState('');
@@ -749,15 +749,15 @@ function VerifyPane({
     void fetch('/api/local-conditions').then((r) => r.json()).then((d) => {
       if (Array.isArray(d.saved)) {
         setLocalConds(d.saved);
-        if (!localConditionId && d.saved[0]) setLocalConditionId(d.saved[0].id);
+        setLocalConditionId((id) => id || d.saved[0]?.id || '');
       }
     }).catch(() => {});
   }, []);
   const [searchDate, setSearchDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [searchTime, setSearchTime] = useState('09:10');
-  const [minute, setMinute] = useState(true);
-  const [holdMinutes, setHoldMinutes] = useState(420);
-  const [customMin, setCustomMin] = useState(50);
+  const [minute, setMinute] = useState(false);
+  const [holdMinutes, setHoldMinutes] = useState(5);
+  const [customMin, setCustomMin] = useState(10);
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [result, setResult] = useState<null | {
@@ -787,7 +787,7 @@ function VerifyPane({
   ).slice(0, 16);
   const condName = state.conditions.find((c) => c.seq === conditionSeq)?.name || '';
   const run = async () => {
-    if (!codes.length) return setNotice('조건검색을 실행하거나 종목을 포착하세요. 최대 16종목.');
+    if (!localConditionId && !codes.length) return setNotice('로컬 0150 조건식을 고르거나, 조건검색 포착 종목을 넣으세요.');
     setBusy(true);
     try {
       const d = await post('/api/verify', {
@@ -798,7 +798,7 @@ function VerifyPane({
         searchTime,
         minute,
         holdMinutes: holdMinutes === 0 ? customMin : holdMinutes,
-        codes,
+        codes: localConditionId ? [] : codes,
       });
       setResult(d);
       setPicked([]);
@@ -839,22 +839,27 @@ function VerifyPane({
               ))}
             </select>
           </div>
-          <p className="v16-target">대상 {codes.length}종목 · {minute ? '분단위 검증' : '일단위 검증'}</p>
+          <p className="v16-target">{localConditionId ? `로컬 조건식 · ${minute ? '분봉' : '일봉'} 전종목 검색` : `대상 ${codes.length}종목`} · {minute ? '분단위 검증' : '일단위 검증'}</p>
           <div className="v16-row">
             <span>검색시점</span>
             <input type="date" value={searchDate} onChange={(e) => setSearchDate(e.target.value)} />
-            <input type="time" value={searchTime} onChange={(e) => setSearchTime(e.target.value)} disabled={!minute} />
+            {minute && <input type="time" value={searchTime} onChange={(e) => setSearchTime(e.target.value)} />}
             <label className="v16-check">
-              <input type="checkbox" checked={minute} onChange={(e) => setMinute(e.target.checked)} /> 분단위 검증
+              <input type="checkbox" checked={minute} onChange={(e) => {
+                const on = e.target.checked;
+                setMinute(on);
+                setHoldMinutes(on ? 420 : 5);
+                setCustomMin(on ? 50 : 10);
+              }} /> 분단위 검증
             </label>
           </div>
           <div className="v16-holds">
             <span>수익률기간</span>
-            {HOLD_PRESETS.map((p) => (
+            {(minute ? HOLD_PRESETS : DAY_HOLD_PRESETS).map((p) => (
               <button key={p.id} className={holdMinutes === p.id ? 'on' : ''} onClick={() => setHoldMinutes(p.id)}>{p.label}</button>
             ))}
             <button className={holdMinutes === 0 ? 'on' : ''} onClick={() => setHoldMinutes(0)}>기타</button>
-            {holdMinutes === 0 && <input type="number" min={1} max={2000} value={customMin} onChange={(e) => setCustomMin(Number(e.target.value) || 1)} />}
+            {holdMinutes === 0 && <input type="number" min={1} max={minute ? 2000 : 400} value={customMin} onChange={(e) => setCustomMin(Number(e.target.value) || 1)} />}
           </div>
           <button className="v16-run" disabled={busy} onClick={() => void run()}>{busy ? '검증 중…' : '성과 검증하기'}</button>
           <h4>성과 검증 결과</h4>
@@ -898,7 +903,7 @@ function VerifyPane({
             <div className="v16-list-head">
               <span />
               <span>종목명</span>
-              {cols.map((m) => <span key={m}>{HOLD_PRESETS.find((p) => p.id === m)?.label || `${m}분간`}</span>)}
+              {cols.map((m) => <span key={m}>{(minute ? HOLD_PRESETS : DAY_HOLD_PRESETS).find((p) => p.id === m)?.label || (minute ? `${m}분간` : `${m}일`)}</span>)}
               <span>기간 내 최고수익률</span>
               <span>검색시점 거래량</span>
             </div>
