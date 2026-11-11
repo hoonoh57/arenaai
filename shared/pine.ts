@@ -25,6 +25,15 @@ const FN: Record<string, string> = {
   'ta.crossunder': 'CROSSDOWN',
   'ta.change': 'ROC',
   'ta.cum': 'SUM',
+  'ta.vwap': 'VWAP',
+  'ta.vwma': 'VWMA',
+  'ta.alma': 'ALMA',
+  'ta.hma': 'HMA',
+  'ta.dmi': 'ADX',
+  supertrend: 'ST',
+  jma: 'JMA',
+  'ta.mfi': 'MFI',
+  'ta.tsi': 'TSI',
   rsi: 'RSI',
   atr: 'ATR',
   rma: 'RMA',
@@ -107,16 +116,8 @@ export function convertPine(source: string, kindHint?: Kind): PineResult {
     if (args[0]) plots.push({name: (title || `plot${plots.length + 1}`).slice(0, 60), expression: args[0]});
   }
 
-  let longExpr = '';
-  let exitExpr = '';
-  const long = /strategy\.entry\s*\([^)]*(?:strategy\.long|id\s*=\s*["'][^"']+["'])[^)]*\)\s*(?:when\s*=\s*)?([^\n]+)?/.exec(source);
-  const ifLong = /if\s+(.+)\n\s*strategy\.entry\s*\([^)]*strategy\.long/.exec(source);
-  if (ifLong) longExpr = ifLong[1].trim();
-  else if (long?.[1]) longExpr = long[1].replace(/^when\s*=\s*/, '').trim();
-  const close = /strategy\.close(?:_all)?\s*\([^)]*\)(?:\s*when\s*=\s*)?([^\n]+)?/.exec(source);
-  const ifClose = /if\s+(.+)\n\s*strategy\.close/.exec(source);
-  if (ifClose) exitExpr = ifClose[1].trim();
-  else if (close?.[1]) exitExpr = close[1].replace(/^when\s*=\s*/, '').trim();
+  let longExpr = strategyCondition(source, 'entry', 'long');
+  let exitExpr = strategyCondition(source, 'close', '') || strategyCondition(source, 'exit', '');
 
   const shape = /plotshape\s*\(\s*([^,]+)/.exec(source);
   const barcolor = /barcolor\s*\(\s*([^)]+?)\s*\)/.exec(source);
@@ -135,7 +136,8 @@ export function convertPine(source: string, kindHint?: Kind): PineResult {
   if (kind === 'system') expression = longExpr || plots[0]?.expression || 'CROSSUP(SMA(CLOSE, 5), SMA(CLOSE, 20))';
   else if (kind === 'signal') expression = shape?.[1]?.trim() || plots[0]?.expression || 'CROSSUP(SMA(CLOSE, 5), SMA(CLOSE, 20))';
   else if (kind === 'highlight') expression = barcolor?.[1]?.trim() || 'CLOSE > OPEN';
-  else expression = plots[0]?.expression || lastAssignment(body) || 'SMA(CLOSE, 20)';
+  else expression = plots[0] ? `PLOT(${plots[0].expression})` : lastAssignment(body) || 'SMA(CLOSE, 20)';
+  if (kind === 'indicator' && plots[0]) expression = `PLOT(${plots[0].expression})`;
 
   const extraLines = plots.slice(1, 5).map((p, i) => ({
     name: p.name,
@@ -173,6 +175,24 @@ export function convertPine(source: string, kindHint?: Kind): PineResult {
     notes,
     skipped,
   };
+}
+
+function strategyCondition(source: string, kind: 'entry' | 'close' | 'exit', side: string): string {
+  const lines = source.replace(/\r/g, '').split('\n');
+  const token = `strategy.${kind}`;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.includes(token)) continue;
+    if (kind === 'entry' && side === 'long' && line.includes('strategy.short') && !line.includes('strategy.long')) continue;
+    const inner = extractCalls(lines.slice(Math.max(0, i - 1), i + 2).join('\n'), token.replace('.', '\\.'))[0] || '';
+    const named = /when\s*=\s*([^,\n]+)/.exec(inner)?.[1];
+    if (named) return named.trim();
+    for (let j = i; j >= 0 && j >= i - 3; j -= 1) {
+      const iff = /^if\s+(.+)$/.exec(lines[j].trim());
+      if (iff) return iff[1].replace(/:$/, '').trim();
+    }
+  }
+  return '';
 }
 
 function extractCalls(source: string, name: string): string[] {

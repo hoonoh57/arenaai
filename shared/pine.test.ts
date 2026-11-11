@@ -13,7 +13,7 @@ plot(ta.sma(close, len), title="MA")
   const {formula, notes} = convertPine(src);
   assert.equal(formula.kind, 'indicator');
   assert.equal(formula.name, 'My SMA');
-  assert.match(formula.expression, /SMA\(CLOSE/);
+  assert.match(formula.expression, /PLOT\(SMA\(CLOSE/);
   assert.equal(formula.variables?.len, 20);
   validateFormula({id: 't', ...formula, enabled: false, color: '#a8ec6a', exitExpression: formula.exitExpression || ''});
   assert.ok(notes.length >= 1);
