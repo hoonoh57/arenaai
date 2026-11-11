@@ -282,7 +282,7 @@ app.post('/api/chart', async (req, res) => {
     const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
     if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
     const listed = ranking.find((s) => s.code === code);
-    const name = listed?.name && listed.name !== code ? listed.name : await api.stockName(code);
+    const name = listed?.name && listed.name !== code ? listed.name : listed?.name || code;
     res.json({
       code,
       name: name || code,

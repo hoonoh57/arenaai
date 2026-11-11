@@ -600,7 +600,7 @@ function StockMiniChart({
   height,
   grid,
   logScale,
-  timeframe = '1',
+  timeframe: _timeframe = '1',
 }: {
   code: string;
   cached: Candle[];
@@ -614,19 +614,7 @@ function StockMiniChart({
   useEffect(() => {
     if (cached.length) setBars(cached);
   }, [cached]);
-  useEffect(() => {
-    if (!/^\d{6}$/.test(code)) return;
-    let stop = false;
-    void post('/api/chart', {code, timeframe})
-      .then((d) => {
-        if (!stop && d.candles?.length) setBars(d.candles);
-      })
-      .catch(() => undefined);
-    return () => {
-      stop = true;
-    };
-  }, [code, timeframe]);
-  if (!bars.length) return <div className="empty-chart">분봉을 불러오는 중이거나 조회에 실패했습니다.</div>;
+  if (!bars.length) return <div className="empty-chart">중앙 허브에서 분봉 대기 중…</div>;
   return <Chart data={bars} formulas={formulas} chartHeight={height} grid={grid} logScale={logScale} />;
 }
 

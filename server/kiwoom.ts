@@ -248,7 +248,18 @@ export class Kiwoom {
     return {ordNo: String(d.ord_no ?? input.origOrdNo)};
   }
 
+  private restChain: Promise<unknown> = Promise.resolve();
+
   async rest(path: string, id: string, body: object, extra: {contYn?: string; nextKey?: string} = {}): Promise<any> {
+    const run = this.restChain.then(() => this.restOnce(path, id, body, extra));
+    this.restChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async restOnce(path: string, id: string, body: object, extra: {contYn?: string; nextKey?: string} = {}): Promise<any> {
     let retriedRateLimit = false;
     let retriedAuth = false;
     for (;;) {
@@ -258,7 +269,7 @@ export class Kiwoom {
       } catch (error) {
         const info = error instanceof KiwoomApiError ? error : null;
         if (!info) throw error;
-        const kind = classifyMessage(info.returnCode, info.returnMsg);
+        const kind = classifyMessage(info.returnCode, info.returnMsg, info.httpStatus);
         if (kind === 'rate-limit' && !retriedRateLimit) {
           retriedRateLimit = true;
           this.governor.penalize();

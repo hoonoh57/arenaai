@@ -36,6 +36,7 @@ test('공식 오류코드 1700/1701/1702 및 인증 만료 코드 분류', () =>
   assert.equal(embeddedReturnCode('CODE=1701'), 1701);
   assert.equal(classifyMessage(3, '[8005:Token이 유효하지 않습니다]'), 'auth-expired');
   assert.equal(classifyMessage(0, 'ok'), 'other');
+  assert.equal(classifyMessage(null, 'HTTP 429', 429), 'rate-limit');
 });
 
 test('토큰 버킷은 용량까지 보충되고 대기 시간을 계산', () => {

@@ -36,7 +36,8 @@ export function embeddedReturnCode(message: unknown): number | null {
   return match ? Number(match[1] ?? match[2]) : null;
 }
 
-export function classifyMessage(code: number | null, message: unknown): ReturnCodeClass {
+export function classifyMessage(code: number | null, message: unknown, httpStatus?: number): ReturnCodeClass {
+  if (httpStatus === 429 || /\bHTTP\s*429\b/i.test(String(message ?? ''))) return 'rate-limit';
   const direct = classifyReturnCode(code);
   if (direct !== 'other') return direct;
   return classifyReturnCode(embeddedReturnCode(message));
