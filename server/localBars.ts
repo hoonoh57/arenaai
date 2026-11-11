@@ -1,9 +1,37 @@
-import {readdirSync, readFileSync, existsSync, statSync} from 'node:fs';
+import {readdirSync, readFileSync, existsSync, statSync, openSync, readSync, closeSync} from 'node:fs';
 import {join} from 'node:path';
 import type {Candle} from './core';
 import {aggregateTickBars} from '../shared/ticks';
 
 const barCache = new Map<string, {mtimeMs: number; bars: Candle[]}>();
+const CACHE_MAX = 400;
+const MINUTE_TAIL_BYTES = 96 * 1024;
+const MINUTE_MAX_BARS = 800;
+
+function cacheSet(key: string, value: {mtimeMs: number; bars: Candle[]}) {
+  if (barCache.has(key)) barCache.delete(key);
+  barCache.set(key, value);
+  while (barCache.size > CACHE_MAX) {
+    const oldest = barCache.keys().next().value;
+    if (oldest === undefined) break;
+    barCache.delete(oldest);
+  }
+}
+
+function readCsvTail(file: string, maxBytes: number): string {
+  const size = statSync(file).size;
+  if (size <= maxBytes) return readFileSync(file, 'utf8');
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    readSync(fd, buf, 0, maxBytes, size - maxBytes);
+    const text = buf.toString('utf8');
+    const nl = text.indexOf('\n');
+    return nl >= 0 ? text.slice(nl + 1) : text;
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export function barsDir(): string {
   return process.env.BARS_DIR || join(process.cwd(), 'data', 'bars');
@@ -53,12 +81,15 @@ export function loadLocalBars(code: string, tf: string): Candle[] {
   const file = ['csv', 'txt'].map((ext) => join(barsDir(), native, `${code}.${ext}`)).find((p) => existsSync(p));
   if (!file) return [];
   const mtimeMs = statSync(file).mtimeMs;
-  const hit = barCache.get(file);
+  const cacheKey = `${file}:${native}`;
+  const hit = barCache.get(cacheKey);
   let bars: Candle[];
   if (hit && hit.mtimeMs === mtimeMs) bars = hit.bars;
   else {
-    bars = parseBarFile(readFileSync(file, 'utf8'));
-    barCache.set(file, {mtimeMs, bars});
+    const raw = native === '1' ? readCsvTail(file, MINUTE_TAIL_BYTES) : readFileSync(file, 'utf8');
+    bars = parseBarFile(raw);
+    if (native === '1' && bars.length > MINUTE_MAX_BARS) bars = bars.slice(-MINUTE_MAX_BARS);
+    cacheSet(cacheKey, {mtimeMs, bars});
   }
   if (tf === 'D' || tf === '1' || tf.startsWith('T')) return bars;
   const minutes = Number(tf);
