@@ -289,6 +289,12 @@ app.post('/api/chart', async (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
+    const localBars = !nextKey ? loadLocalBars(code, timeframe) : [];
+    if (localBars.length) {
+      const listed = ranking.find((s) => s.code === code);
+      res.json({code, name: listed?.name && listed.name !== code ? listed.name : code, candles: localBars, hasMore: false, nextKey: '', timeframe});
+      return;
+    }
     if (timeframe === '1' && !nextKey) {
       const cachedBars = cache.candles(code);
       if (cachedBars.length) {

@@ -121,8 +121,9 @@
 .v16-table th{background:#1c2a38;color:#9eb4c4}
 .v16-detail-head{background:#0f1822;border:1px solid #2a3a48;padding:8px;margin-bottom:8px}
 .v16-list{overflow:auto;max-height:280px}
-.v16-list-head,.v16-list-row{display:grid;grid-template-columns:22px minmax(70px,1.2fr) repeat(5,minmax(64px,1fr));gap:4px;align-items:center;font-size:11px;padding:5px 4px;border-bottom:1px solid #243240}
+.v16-list-head,.v16-list-row{display:grid;grid-template-columns:22px 64px minmax(72px,1.1fr) repeat(5,minmax(58px,1fr));gap:4px;align-items:center;font-size:11px;padding:5px 4px;border-bottom:1px solid #243240}
 .v16-list-head{color:#8aa0b0}
+.v16-list-head button{background:none;border:0;color:#8aa0b0;text-align:left;padding:0;cursor:pointer}
 .v16-list-row.on{background:#1a2a3a}
 .v16-list-row button{background:none;border:0;color:#e8f0ff;text-align:left;padding:0}
 .v16-picked{display:flex;gap:10px;flex-wrap:wrap;color:#cfe3d3}

@@ -27,8 +27,9 @@ import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
-import {DAY_HOLD_PRESETS, HOLD_PRESETS} from '../shared/verify';
+import {DAY_HOLD_PRESETS, HOLD_PRESETS, parseSearchAt} from '../shared/verify';
 import {Search150Pane} from './Search150Pane';
+import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 
 type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>};
@@ -760,6 +761,8 @@ function VerifyPane({
   const [customMin, setCustomMin] = useState(10);
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
+  const [sortKey, setSortKey] = useState<'code' | 'name' | 'max' | 'vol' | string>('max');
+  const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [result, setResult] = useState<null | {
     formula: string;
     searchDate: string;
@@ -808,8 +811,35 @@ function VerifyPane({
       setBusy(false);
     }
   };
-  const cols = result?.extraCols?.length ? result.extraCols : [10, 30, holdMinutes || customMin];
+  const cols = result?.extraCols?.length ? result.extraCols : minute ? [10, 30, holdMinutes || customMin] : [1, 5, holdMinutes || customMin];
   const toggle = (code: string) => setPicked((p) => (p.includes(code) ? p.filter((c) => c !== code) : p.length >= 4 ? p : [...p, code]));
+  const nameOf = (code: string, fallback: string) => {
+    const n = state.ranking.find((s) => s.code === code)?.name;
+    return n && n !== code ? n : fallback && fallback !== code ? fallback : code;
+  };
+  const clickSort = (key: string) => {
+    if (sortKey === key) setSortDir((d) => (d === 1 ? -1 : 1));
+    else {
+      setSortKey(key);
+      setSortDir(key === 'name' || key === 'code' ? 1 : -1);
+    }
+  };
+  const sortedRows = [...(result?.rows || [])].sort((a, b) => {
+    const dir = sortDir;
+    const num = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? -Infinity * dir : v);
+    if (sortKey === 'code') return dir * a.code.localeCompare(b.code);
+    if (sortKey === 'name') return dir * nameOf(a.code, a.name).localeCompare(nameOf(b.code, b.name), 'ko');
+    if (sortKey === 'max') return dir * (num(a.maxReturnPct) - num(b.maxReturnPct));
+    if (sortKey === 'vol') return dir * (num(a.volume) - num(b.volume));
+    const col = Number(sortKey);
+    if (Number.isFinite(col)) {
+      const va = a.returns?.[String(col)] ?? a.returnPct;
+      const vb = b.returns?.[String(col)] ?? b.returnPct;
+      return dir * (num(va) - num(vb));
+    }
+    return 0;
+  });
+  const searchAt = result ? parseSearchAt(result.searchDate, minute ? result.searchTime : '15:30') : 0;
   return (
     <div className="verify-1516">
       <div className="v16-banner">
@@ -902,15 +932,22 @@ function VerifyPane({
           <div className="v16-list">
             <div className="v16-list-head">
               <span />
-              <span>종목명</span>
-              {cols.map((m) => <span key={m}>{(minute ? HOLD_PRESETS : DAY_HOLD_PRESETS).find((p) => p.id === m)?.label || (minute ? `${m}분간` : `${m}일`)}</span>)}
-              <span>기간 내 최고수익률</span>
-              <span>검색시점 거래량</span>
+              <button type="button" onClick={() => clickSort('code')}>종목코드{sortKey === 'code' ? (sortDir > 0 ? '▲' : '▼') : ''}</button>
+              <button type="button" onClick={() => clickSort('name')}>종목명{sortKey === 'name' ? (sortDir > 0 ? '▲' : '▼') : ''}</button>
+              {cols.map((m) => (
+                <button key={m} type="button" onClick={() => clickSort(String(m))}>
+                  {(minute ? HOLD_PRESETS : DAY_HOLD_PRESETS).find((p) => p.id === m)?.label || (minute ? `${m}분간` : `${m}일`)}
+                  {sortKey === String(m) ? (sortDir > 0 ? '▲' : '▼') : ''}
+                </button>
+              ))}
+              <button type="button" onClick={() => clickSort('max')}>기간 내 최고수익률{sortKey === 'max' ? (sortDir > 0 ? '▲' : '▼') : ''}</button>
+              <button type="button" onClick={() => clickSort('vol')}>검색시점 거래량{sortKey === 'vol' ? (sortDir > 0 ? '▲' : '▼') : ''}</button>
             </div>
-            {(result?.rows || []).map((r) => (
+            {sortedRows.map((r) => (
               <div key={r.code} className={'v16-list-row' + (picked.includes(r.code) ? ' on' : '')}>
                 <input type="checkbox" checked={picked.includes(r.code)} onChange={() => toggle(r.code)} />
-                <button type="button" onClick={() => onCode(r.code)}>{r.name}</button>
+                <span>{r.code}</span>
+                <button type="button" onClick={() => onCode(r.code)}>{nameOf(r.code, r.name)}</button>
                 {cols.map((m) => {
                   const v = r.returns?.[String(m)] ?? (m === (result?.holdMinutes || 0) ? r.returnPct : null);
                   return <span key={m} className={(v || 0) < 0 ? 'negative' : (v || 0) > 0 ? 'positive' : ''}>{pct(v)}</span>;
@@ -921,9 +958,14 @@ function VerifyPane({
             ))}
           </div>
           <h4>차트 분석</h4>
-          <p className="editor-hint">체크 종목 {picked.length}/4. 코스피·코스닥 지수 라인은 미제공.</p>
+          <p className="editor-hint">체크 종목 {picked.length}/4. 검색시점 종가를 0%로 두고 현재까지 비교합니다.</p>
           {picked.length > 0 && result && (
-            <div className="v16-picked">{picked.map((code) => { const r = result.rows.find((x) => x.code === code); return r ? <span key={code}>{r.name} {pct(r.returnPct)}</span> : null; })}</div>
+            <VerifyCompare
+              codes={picked}
+              names={Object.fromEntries(picked.map((c) => [c, nameOf(c, result.rows.find((x) => x.code === c)?.name || c)]))}
+              searchAt={searchAt}
+              timeframe={minute ? '1' : 'D'}
+            />
           )}
         </div>
       </div>
