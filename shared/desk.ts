@@ -32,6 +32,8 @@ export type ChildWindow = {
   visibleBars?: number;
   formulaOpen?: boolean;
   enabledFormulas?: string[];
+  compareMode?: 'replace' | 'overlay';
+  overlayCode?: string;
 };
 
 export type VirtualDesk = {

@@ -550,14 +550,14 @@ function ScannerPane(props: {
           <div className="rank-name">
             <b>{s.name}</b>
             <small>
-              {s.code} · 강도 {s.strength.toFixed(1)} · 대금 {fmt(s.value)}백만원
+              {s.code} {s.score < 0 ? '· 시세 대기' : `· 강도 ${s.strength.toFixed(1)} · 대금 ${fmt(s.value)}백만원`}
             </small>
           </div>
           <span className={s.change >= 0 ? 'positive' : 'negative'}>
             {s.change >= 0 ? '+' : ''}
             {s.change.toFixed(2)}%
           </span>
-          <strong>{s.score.toFixed(1)}</strong>
+          <strong>{s.score < 0 ? '대기' : s.score.toFixed(1)}</strong>
         </div>
       ))}
       {!state.ranking.length && <div className="empty-activity">조건식을 적용하면 점수 상위 종목이 표시됩니다.</div>}
@@ -579,7 +579,14 @@ function ScannerPane(props: {
             목록 불러오기
           </button>
         </label>
-        <select value={draft.condition} onChange={(e) => props.setDraft({...draft, condition: e.target.value})}>
+        <select
+          value={draft.condition}
+          onChange={(e) => {
+            const condition = e.target.value;
+            props.setDraft({...draft, condition});
+            if (condition) void props.update({condition});
+          }}
+        >
           <option value="">조건식 선택</option>
           {state.conditions.map((c) => (
             <option key={c.seq} value={c.seq}>

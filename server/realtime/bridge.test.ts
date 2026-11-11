@@ -79,7 +79,9 @@ test('조건검색 초기 목록은 중앙 세션 요청으로 받고 포착 종
   const request = calls.requests[0];
   assert.deepEqual(request.packet, {trnm: 'CNSRREQ', seq: '4', search_type: '1', stex_tp: 'K'});
   assert.deepEqual(cache.capturedCodes('4'), ['005930'], 'ETF 등 비주식 코드는 제외');
-  assert.deepEqual(result.ranking, [], '실시간/대체 데이터가 없으면 순위를 만들지 않는다');
+  assert.equal(result.ranking.length, 1);
+  assert.equal(result.ranking[0].code, '005930');
+  assert.equal(result.ranking[0].score, -1, '시세 전에는 대기 항목으로 목록에 둔다');
   assert.equal(result.warnings['005930'], '실시간 시세·체결강도·누적거래대금 대기');
 });
 
@@ -140,7 +142,7 @@ test('REST 대체 조회는 한 번의 계산에서 예산만큼만 호출한다
   calls = 0;
   const first = await bridge.computeRanking({seq: '4', count: 3, weights: {change: 0, strength: 50, value: 50}});
   assert.ok(calls <= 2, `한 번의 계산에서 예산(2)을 넘지 않아야 합니다: ${calls}`);
-  assert.equal(first.ranking.length, 0, '등락률이 없으면 순위를 만들지 않는다');
+  assert.ok(first.ranking.length > 0, '시세 전에도 포착 종목은 목록에 둔다');
   // 캐시된 대체 값은 TTL 안에서 재사용된다.
   calls = 0;
   await bridge.computeRanking({seq: '4', count: 3, weights: {change: 0, strength: 50, value: 50}});
@@ -165,7 +167,8 @@ test('오래된 실시간 시세는 순위에서 제외한다', async () => {
   assert.equal(fresh.ranking.length, 1);
   now.t += 2000;
   const stale = await bridge.computeRanking({seq: '4', count: 1, weights: {change: 100, strength: 0, value: 0}});
-  assert.equal(stale.ranking.length, 0);
+  assert.equal(stale.ranking.length, 1);
+  assert.equal(stale.ranking[0].score, -1);
   assert.ok(stale.warnings['005930']);
 });
 

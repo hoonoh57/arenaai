@@ -289,20 +289,41 @@ export class Kiwoom {
   async chartPage(input: {code: string; timeframe: string; baseDate?: string; nextKey?: string}): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
     if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
-    if (input.timeframe === 'D') {
+    if (input.timeframe === 'D' || input.timeframe === 'W' || input.timeframe === 'M') {
+      const apiId = input.timeframe === 'D' ? 'ka10081' : input.timeframe === 'W' ? 'ka10082' : 'ka10083';
+      const table = input.timeframe === 'D' ? 'stk_dt_pole_chart_qry' : input.timeframe === 'W' ? 'stk_stk_pole_chart_qry' : 'stk_mth_pole_chart_qry';
       const base = (input.baseDate || '').replace(/-/g, '');
       const body: Record<string, string> = {stk_cd: input.code, upd_stkpc_tp: '1'};
       if (/^\d{8}$/.test(base)) body.base_dt = base;
-      const d = await this.rest('/api/dostk/chart', 'ka10081', body, extra);
-      const candles = dailyToCandles(parseDailyRows(d.stk_dt_pole_chart_qry));
+      const d = await this.rest('/api/dostk/chart', apiId, body, extra);
+      const candles = dailyToCandles(parseDailyRows(d[table]));
+      return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
+    }
+    if (input.timeframe.startsWith('T')) {
+      const tic = input.timeframe.slice(1);
+      if (!['1', '3', '5', '10', '30'].includes(tic)) throw new Error('틱봉은 1/3/5/10/30만 지원합니다.');
+      const d = await this.rest('/api/dostk/chart', 'ka10079', {stk_cd: input.code, tic_scope: tic, upd_stkpc_tp: '1'}, extra);
+      const candles = parseCandles(d.stk_tic_chart_qry);
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
     const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
-    if (!allowed.has(input.timeframe)) throw new Error('지원 분봉은 1/3/5/10/15/30/45/60분과 일봉입니다.');
+    if (!allowed.has(input.timeframe)) throw new Error('지원 차트: 틱·분·일·주·월. 초봉 API는 명세에 없습니다.');
     const body = {stk_cd: input.code, tic_scope: input.timeframe, upd_stkpc_tp: '1'};
     const d = await this.rest('/api/dostk/chart', 'ka10080', body, extra);
     const candles = parseCandles(d.stk_min_pole_chart_qry);
     return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
+  }
+
+  private readonly names = new Map<string, string>();
+
+  async stockName(code: string): Promise<string> {
+    if (!/^\d{6}$/.test(code)) return code;
+    const cached = this.names.get(code);
+    if (cached) return cached;
+    const d = await this.rest('/api/dostk/stkinfo', 'ka10001', {stk_cd: code});
+    const name = String(d.stk_nm ?? '').trim();
+    if (name) this.names.set(code, name);
+    return name || code;
   }
 
   async daily(code: string, baseDate: string): Promise<DailyRow[]> {

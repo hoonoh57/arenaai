@@ -65,3 +65,13 @@
 .bar-count{font-size:10px;color:#8fa79a}
 .dock-toggle{width:24px;height:24px;background:#1b2a24;border:1px solid #355044;color:#cfe3d3;border-radius:4px}
 .hts-var input{pointer-events:auto}
+
+.mode-btn{background:#1b2a24;border:1px solid #355044;color:#9db0a4;border-radius:4px;padding:3px 7px;font-size:11px}
+.mode-btn.on{background:#b9ef78;color:#152018;border-color:#b9ef78}
+.date-btn{position:relative;width:28px;height:28px;display:grid;place-items:center;cursor:pointer;overflow:hidden}
+.date-btn input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.ctx-menu{position:fixed;z-index:50;background:#15241c;border:1px solid #3a5344;border-radius:6px;padding:6px;display:flex;flex-direction:column;min-width:140px}
+.ctx-menu button{background:none;border:0;color:#d5e6d8;text-align:left;padding:6px 8px}
+.ctx-menu button:hover{background:#24352c}
+.formula-pop{position:absolute;right:12px;top:48px;z-index:40;background:#15241c;border:1px solid #3a5344;padding:10px;border-radius:6px;width:200px}
+.dock-group small{color:#6f857c}

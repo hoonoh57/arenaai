@@ -232,8 +232,23 @@ export class DemandBridge {
         value,
       });
     }
-    if (!items.length) return {ranking: [], selected: [], warnings};
-    const ranking = rank(items, config.weights, config.count);
+    const scored = items.length ? rank(items, config.weights, config.count) : [];
+    const scoredCodes = new Set(scored.map((stock) => stock.code));
+    const waiting: Stock[] = [];
+    for (const code of codes) {
+      if (scoredCodes.has(code) || waiting.length + scored.length >= config.count) continue;
+      waiting.push({
+        code,
+        name: this.names.get(code) ?? code,
+        price: this.freshQuote(code)?.price ?? this.captureSnapshot.get(code)?.price ?? 0,
+        change: this.freshQuote(code)?.changePct ?? this.captureSnapshot.get(code)?.change ?? 0,
+        strength: this.freshQuote(code)?.strength ?? 0,
+        value: this.freshQuote(code)?.cumValue ?? 0,
+        score: -1,
+      });
+    }
+    const ranking = [...scored, ...waiting];
+    if (!ranking.length) return {ranking: [], selected: [], warnings};
     const wanted = (config.chartCodes ?? []).filter((code) => /^\d{6}$/.test(code));
     const byCode = new Map(ranking.map((stock) => [stock.code, stock]));
     const selected = wanted.map((code) => byCode.get(code)).filter((stock): stock is Stock => Boolean(stock));

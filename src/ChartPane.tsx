@@ -5,14 +5,22 @@ import type {ChildWindow, VirtualDesk} from '../shared/desk';
 import {Chart} from './ChartView';
 
 const TF = [
+  {id: 'T1', label: '1틱'},
+  {id: 'T3', label: '3틱'},
+  {id: 'T5', label: '5틱'},
+  {id: 'T10', label: '10틱'},
+  {id: 'T30', label: '30틱'},
   {id: '1', label: '1분'},
   {id: '3', label: '3분'},
   {id: '5', label: '5분'},
   {id: '10', label: '10분'},
   {id: '15', label: '15분'},
   {id: '30', label: '30분'},
+  {id: '45', label: '45분'},
   {id: '60', label: '60분'},
   {id: 'D', label: '일봉'},
+  {id: 'W', label: '주봉'},
+  {id: 'M', label: '월봉'},
 ];
 
 async function post(path: string, body?: unknown) {
@@ -58,18 +66,23 @@ export function ChartPane({
   const [nextKey, setNextKey] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [viewCount, setViewCount] = useState(win.visibleBars || 200);
+  const [overlay, setOverlay] = useState<Candle[]>([]);
+  const [mode, setMode] = useState<'replace' | 'overlay'>((win as {compareMode?: 'replace' | 'overlay'}).compareMode || 'replace');
+  const [menu, setMenu] = useState<{x: number; y: number} | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   const timeframe = win.timeframe || '1';
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
   const formulaOpen = win.formulaOpen !== false;
-  const enabled = new Set(win.enabledFormulas ?? formulas.filter((f) => f.enabled && f.kind !== 'function').map((f) => f.id));
+  const enabled = new Set(win.enabledFormulas ?? formulas.filter((f) => f.enabled).map((f) => f.id));
 
   useEffect(() => setCodeText(code), [code]);
   useEffect(() => {
     if (rankingName) setName(rankingName);
   }, [rankingName]);
 
-  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean} = {}) => {
+  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean; overlay?: boolean} = {}) => {
     const useCode = opts.code ?? codeText;
     if (!/^\d{6}$/.test(useCode)) return;
     setBusy(true);
@@ -80,8 +93,9 @@ export function ChartPane({
         baseDate: opts.baseDate ?? baseDate,
         nextKey: opts.append ? nextKey : '',
       });
-      setName(d.name || useCode);
-      setBars((prev) => (opts.append ? mergeBars(prev, d.candles || []) : d.candles || []));
+      setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
+      if (opts.overlay) setOverlay(d.candles || []);
+      else setBars((prev) => (opts.append ? mergeBars(prev, d.candles || []) : d.candles || []));
       setHasMore(Boolean(d.hasMore));
       setNextKey(d.nextKey || '');
     } catch (e) {
@@ -98,20 +112,25 @@ export function ChartPane({
   const commitCode = (value: string) => {
     const next = value.replace(/\D/g, '').slice(0, 6);
     setCodeText(next);
-    if (next.length === 6 || next === '') {
-      patchWin({code: next || undefined});
-      if (!win.locked) onCommonCode?.(next);
+    if (next.length !== 6 && next !== '') return;
+    if (mode === 'overlay' && next.length === 6) {
+      void load({code: next, overlay: true});
+      patchWin({overlayCode: next} as Partial<ChildWindow>);
+      return;
     }
+    patchWin({code: next || undefined});
+    if (!win.locked) onCommonCode?.(next);
   };
 
-  const shown = bars.slice(Math.max(0, bars.length - visibleBars));
-  const applied = formulas.map((f) => (f.kind === 'function' ? f : {...f, enabled: enabled.has(f.id)}));
+  const applied = formulas.map((f) => ({...f, enabled: enabled.has(f.id)}));
   const groups = [
     {kind: 'indicator', label: '지표'},
     {kind: 'signal', label: '신호'},
     {kind: 'highlight', label: '강세'},
-    {kind: 'system', label: '전략'},
+    {kind: 'system', label: '시스템트레이딩'},
+    {kind: 'function', label: '기타(함수)'},
   ] as const;
+  const editor = formulas.find((f) => f.id === editId);
 
   return (
     <div className={'chart-work' + (formulaOpen ? ' dock-on' : '')}>
@@ -131,11 +150,15 @@ export function ChartPane({
                     else next.add(f.id);
                     patchWin({enabledFormulas: [...next]});
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setEditId(f.id);
+                  }}
                 />
                 <span style={{color: f.color || '#cfe3d3'}}>{f.name}</span>
               </label>
             ))}
-            {!formulas.some((f) => f.kind === g.kind) && <small>없음</small>}
+            {!formulas.some((f) => f.kind === g.kind) && <small>수식 관리자에서 추가</small>}
           </div>
         ))}
       </aside>
@@ -144,27 +167,27 @@ export function ChartPane({
           <button className="dock-toggle" title="수식 탭" onClick={() => patchWin({formulaOpen: !formulaOpen})}>
             {formulaOpen ? '⟨' : '⟩'}
           </button>
+          <button className={'mode-btn' + (mode === 'replace' ? ' on' : '')} title="현재 종목 교체" onClick={() => setMode('replace')}>
+            전
+          </button>
+          <button className={'mode-btn' + (mode === 'overlay' ? ' on' : '')} title="비교 종목 오버레이" onClick={() => setMode('overlay')}>
+            추
+          </button>
           <input className="code-in" value={codeText} maxLength={6} placeholder="종목" onChange={(e) => commitCode(e.target.value)} />
-          <span className="chart-name">{name || '종목명'}</span>
-          <select
-            value={timeframe}
-            onChange={(e) => {
-              patchWin({timeframe: e.target.value});
-            }}
-          >
+          <span className="chart-name">{name || codeText || '종목명'}</span>
+          <select value={timeframe} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}
               </option>
             ))}
           </select>
-          <input
-            type="date"
-            value={baseDate}
-            onChange={(e) => patchWin({baseDate: e.target.value})}
-          />
+          <label className="date-btn" title="기준 일자">
+            📅
+            <input type="date" value={baseDate} onChange={(e) => patchWin({baseDate: e.target.value})} />
+          </label>
           <span className="bar-count">
-            {shown.length}/{bars.length}
+            {viewCount}/{bars.length}
           </span>
           <input
             type="number"
@@ -182,10 +205,65 @@ export function ChartPane({
             조회
           </button>
         </div>
-        {shown.length ? (
-          <Chart data={shown} formulas={applied} chartHeight={Math.max(160, (win.h || 380) - 72)} grid={grid} logScale={logScale} />
+        {bars.length ? (
+          <Chart
+            data={bars}
+            overlay={overlay}
+            formulas={applied}
+            chartHeight={Math.max(160, (win.h || 380) - 72)}
+            grid={grid}
+            logScale={logScale}
+            visibleHint={visibleBars}
+            onVisibleCount={setViewCount}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({x: e.clientX, y: e.clientY});
+            }}
+          />
         ) : (
           <div className="empty-chart">{busy ? '조회 중…' : '종목코드를 입력하고 조회하세요. 가상 시세는 만들지 않습니다.'}</div>
+        )}
+        {menu && (
+          <div className="ctx-menu" style={{left: menu.x, top: menu.y}} onMouseLeave={() => setMenu(null)}>
+            <button onClick={() => patchWin({formulaOpen: true})}>수식 탭</button>
+            <button onClick={() => patchWin({timeframe: '1'})}>1분봉</button>
+            <button onClick={() => patchWin({timeframe: 'D'})}>일봉</button>
+            <button onClick={() => patchWin({timeframe: 'W'})}>주봉</button>
+            <button onClick={() => patchWin({timeframe: 'M'})}>월봉</button>
+            <button onClick={() => setOverlay([])}>추종목 제거</button>
+            <button onClick={() => setMenu(null)}>닫기</button>
+          </div>
+        )}
+        {editor && editor.kind !== 'function' && (
+          <div className="formula-pop">
+            <b>{editor.name}</b>
+            <label>
+              삭제
+              <button
+                onClick={() => {
+                  const next = new Set(enabled);
+                  next.delete(editor.id);
+                  patchWin({enabledFormulas: [...next]});
+                  setEditId(null);
+                }}
+              >
+                차트에서 제거
+              </button>
+            </label>
+            {Object.entries(editor.variables || {}).map(([key, value]) => (
+              <label key={key}>
+                {key}
+                <input defaultValue={value} onBlur={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) {
+                    /* variables live on the shared formula set; open 수식 관리자 to persist */
+                    setNotice('지표변수 저장은 수식 관리자에서 합니다.');
+                  }
+                }} />
+              </label>
+            ))}
+            <button onClick={() => setEditId(null)}>닫기</button>
+          </div>
         )}
       </div>
     </div>
