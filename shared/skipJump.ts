@@ -118,6 +118,45 @@ export function ma120BreakSegments(candles: Candle[]): Ma120BreakSeg[] {
   return segs;
 }
 
+/**
+ * 돌파 봉에서 SMA120 기울기를 고정하고 이탈까지 연장만 한다. 이후 봉으로 다시 맞추지 않음.
+ */
+export function ma120FrozenSegments(candles: Candle[]): Ma120BreakSeg[] {
+  const n = candles.length;
+  if (n < 121) return [];
+  const segs: Ma120BreakSeg[] = [];
+  let start = -1;
+  let slope = 0;
+  let intercept = 0;
+  const push = (from: number, to: number, live: boolean) => {
+    if (to < from) return;
+    const points = [];
+    for (let i = from; i <= to; i++) {
+      points.push({time: candles[i].time, value: intercept + slope * (i - from), slope});
+    }
+    segs.push({start: from, end: to, live, slope, intercept, points});
+  };
+  for (let i = 120; i < n; i++) {
+    const above = aboveMa120(candles, i);
+    const prevAbove = aboveMa120(candles, i - 1);
+    if (start < 0) {
+      if ((above && !prevAbove) || (i === 120 && above)) {
+        start = i;
+        const win = ma120Window(candles, i, 40);
+        slope = win.length >= 4 ? linreg(win).slope : 0;
+        intercept = smaAt(candles, i, 120);
+      }
+      continue;
+    }
+    if (!above && prevAbove) {
+      push(start, i - 1, false);
+      start = -1;
+    }
+  }
+  if (start >= 0) push(start, n - 1, true);
+  return segs;
+}
+
 /** 차트: 구간별 고정 직선. 마지막 인자 호환용. */
 export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, _look = 0): {time: number; value: number; slope: number}[] {
   const segs = ma120BreakSegments(at + 1 < candles.length ? candles.slice(0, at + 1) : candles);
