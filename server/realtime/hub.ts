@@ -81,6 +81,7 @@ export type HubStatus = {
   connected: boolean;
   reconnects: number;
   lastFrameAt: number | null;
+  lastDataAt: number | null;
   lastError: string | null;
   subscriptions: number;
   subscriptionsByType: Record<string, number>;
@@ -89,6 +90,11 @@ export type HubStatus = {
   duplicatesDropped: number;
   caps: RealtimeLimits & {verified: false};
   lastLoginAt: number | null;
+  silentMs: number | null;
+  dataSilentMs: number | null;
+  warnAfterMs: number;
+  emergency: boolean;
+  link: 'ok' | 'warn' | 'dead';
 };
 
 export type SimulatedEvent = {time: number; code: string; side: string; price: number};
@@ -118,6 +124,7 @@ export class RealtimeHub {
   private readonly loginTimeoutMs: number;
   private readonly requestTimeoutMs: number;
   private readonly staleMs: number;
+  private readonly warnMs: number;
   private url: string;
   private readonly debounceMs: number;
   private readonly pending = new Map<string, {resolve: (frame: RealtimeFrame) => void; reject: (error: Error) => void; timer: any}>();
@@ -131,6 +138,7 @@ export class RealtimeHub {
   private attempt = 0;
   private reconnects = 0;
   private lastFrameAt: number | null = null;
+  private lastDataAt: number | null = null;
   private lastLoginAt: number | null = null;
   private lastError: string | null = null;
   private candlesRefreshed = 0;
@@ -156,7 +164,8 @@ export class RealtimeHub {
     this.reconnectMaxMs = deps.reconnectMaxMs ?? 30000;
     this.loginTimeoutMs = deps.loginTimeoutMs ?? 10000;
     this.requestTimeoutMs = deps.requestTimeoutMs ?? 15000;
-    this.staleMs = deps.staleMs ?? 60000;
+    this.staleMs = deps.staleMs ?? 30_000;
+    this.warnMs = Math.min(this.staleMs, 30_000);
     this.url = deps.url;
     this.debounceMs = deps.candleRefreshDebounceMs ?? 2000;
     this.dedup = new KeyedDedup({ttlMs: 5000, max: 20000});
@@ -225,11 +234,20 @@ export class RealtimeHub {
   status(): HubStatus {
     const byType: Record<string, number> = {};
     for (const sub of this.subscriptions.values()) byType[sub.type] = (byType[sub.type] ?? 0) + 1;
+    const now = this.now();
+    const silentMs = this.lastFrameAt === null ? (this.lastLoginAt ? now - this.lastLoginAt : null) : now - this.lastFrameAt;
+    const dataSilentMs = this.lastDataAt === null ? null : now - this.lastDataAt;
+    const warnAfterMs = this.warnMs;
+    let link: 'ok' | 'warn' | 'dead' = 'dead';
+    if (this.state === 'ready' && silentMs !== null && silentMs < warnAfterMs) link = silentMs > warnAfterMs / 2 ? 'warn' : 'ok';
+    else if (this.state === 'connecting' || this.state === 'logging-in' || this.state === 'reconnecting') link = 'warn';
+    const emergency = this.state === 'closed' || (silentMs !== null && silentMs >= warnAfterMs);
     return {
       state: this.state,
       connected: this.state === 'ready',
       reconnects: this.reconnects,
       lastFrameAt: this.lastFrameAt,
+      lastDataAt: this.lastDataAt,
       lastError: this.lastError,
       subscriptions: this.subscriptions.size,
       subscriptionsByType: byType,
@@ -238,6 +256,11 @@ export class RealtimeHub {
       duplicatesDropped: this.duplicatesDropped,
       caps: {...this.caps.limits, verified: false},
       lastLoginAt: this.lastLoginAt,
+      silentMs,
+      dataSilentMs,
+      warnAfterMs,
+      emergency,
+      link,
     };
   }
 
@@ -434,6 +457,7 @@ export class RealtimeHub {
   }
 
   private handleReal(frame: RealtimeFrame): void {
+    this.lastDataAt = this.now();
     const today = kstDate(this.now());
     const receivedAt = this.now();
     for (const event of decodeEvents(frame)) {

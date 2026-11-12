@@ -27,6 +27,17 @@
 .hts-lights i.go{background:#6dcf6d;box-shadow:0 0 6px #6dcf6d}
 .hts-lights i.wait{background:#e0c35a}
 .hts-lights i.stop{background:#e05a5a;box-shadow:0 0 6px #e05a5a}
+.wss-pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #3a5344;color:#cfe6c8}
+.wss-pill i{width:8px;height:8px;border-radius:50%;background:#445}
+.wss-pill.ok{border-color:#3d6a40;color:#b7ea79}.wss-pill.ok i{background:#6dcf6d;box-shadow:0 0 6px #6dcf6d}
+.wss-pill.warn{border-color:#6a5a20;color:#e0c35a}.wss-pill.warn i{background:#e0c35a}
+.wss-pill.dead{border-color:#8e555b;color:#ffd6d6;background:#3a1c20}.wss-pill.dead i{background:#e05a5a;box-shadow:0 0 6px #e05a5a}
+.wss-pill.mini{font-size:10px;padding:2px 6px}
+.wss-emergency{position:fixed;inset:0;z-index:80;background:rgba(8,12,10,.72);display:grid;place-items:center;color:#ffe4e4}
+.wss-emergency>div,.wss-emergency{padding:28px}
+.wss-emergency b{display:block;font-size:18px;margin-bottom:10px}
+.wss-emergency p{max-width:420px;line-height:1.5;color:#f0d0d0;margin:0 0 16px}
+.wss-emergency button{background:#ed6b72;color:#1a1010;border:0;border-radius:5px;padding:10px 16px;font-weight:700;cursor:pointer}
 .sys-trade{width:min(520px,94vw)!important;height:auto!important;max-height:90vh;padding:0 20px 20px;overflow:auto}
 .trade-tag{font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid #3a5344;color:#cfe6c8}
 .trade-tag.run{background:#8a2a32;color:#ffe4e4;border-color:#c45a60}

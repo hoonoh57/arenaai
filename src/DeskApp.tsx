@@ -52,7 +52,19 @@ type State = {
   formulas: Formula[];
   dataWarnings: Record<string, string>;
   realtime?: {
-    hub: {state: string; subscriptions: number; reconnects: number; duplicatesDropped: number; caps: {maxSubscriptions: number; verified: boolean}};
+    hub: {
+      state: string;
+      subscriptions: number;
+      reconnects: number;
+      duplicatesDropped: number;
+      caps: {maxSubscriptions: number; verified: boolean};
+      silentMs?: number | null;
+      dataSilentMs?: number | null;
+      warnAfterMs?: number;
+      emergency?: boolean;
+      link?: 'ok' | 'warn' | 'dead';
+      lastError?: string | null;
+    };
     watched: number;
     captured: number;
     rotation?: {skipped: number};
@@ -353,8 +365,17 @@ export function DeskApp() {
           </select>
         </label>
         <span className="hts-desk-name">{desk.number}. {desk.name}</span>
+        <span className={'wss-pill ' + (state.realtime?.hub.link || (state.realtime?.hub.state === 'ready' ? 'ok' : 'dead'))} title={state.realtime?.hub.lastError || '중앙관리자 실시간(WSS)'}>
+          <i />
+          {state.realtime?.hub.link === 'ok'
+            ? 'WSS 수신'
+            : state.realtime?.hub.link === 'warn'
+              ? 'WSS 지연'
+              : 'WSS 끊김'}
+          {typeof state.realtime?.hub.silentMs === 'number' ? ` ${Math.round(state.realtime.hub.silentMs / 1000)}초` : ''}
+        </span>
         <span className="hts-lights" title="중앙 관리자 신호등">
-          <i className={state.realtime?.hub.state === 'ready' ? 'go' : 'stop'} title={`실시간 ${state.realtime?.hub.state || '없음'}`} />
+          <i className={state.realtime?.hub.link === 'ok' ? 'go' : state.realtime?.hub.link === 'warn' ? 'wait' : 'stop'} title={`실시간 ${state.realtime?.hub.state || '없음'}`} />
           <i className={state.busy || !state.config.condition ? 'wait' : 'go'} title={state.config.condition ? '조건검색' : '조건식 없음'} />
           <i className={state.risk?.blocked ? 'stop' : state.config.running ? 'go' : 'wait'} title={state.config.running ? '모의매매' : '대기'} />
         </span>
@@ -450,6 +471,20 @@ export function DeskApp() {
             ))}
         </div>
       </div>
+      {state.realtime?.hub.emergency && (
+        <div className="wss-emergency">
+          <div>
+            <b>실시간(WSS) 수신 중단</b>
+            <p>
+              중앙관리자가 {Math.round((state.realtime.hub.warnAfterMs || 30000) / 1000)}초 이상 시세를 받지 못했습니다.
+              {state.realtime.hub.lastError ? ` (${state.realtime.hub.lastError})` : ''} 차트·신호는 멈춘 상태입니다. 앱을 다시 시작하세요.
+            </p>
+            <button type="button" onClick={() => window.location.reload()}>
+              앱 다시 시작
+            </button>
+          </div>
+        </div>
+      )}
       {(notice || state.error) && (
         <div className="notice" onClick={() => setNotice('')}>
           {notice || state.error} ×
@@ -608,6 +643,7 @@ function Pane(props: {
         setNotice={props.setNotice}
         onReload={props.load}
         onCommonCode={props.onCommonCode}
+        wssLink={state.realtime?.hub.link}
         patternFilters={state.config.patternFilters}
         delayContext={{
           skip001N: state.config.skip001N ?? 1.2,

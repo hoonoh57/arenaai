@@ -71,6 +71,7 @@ export function ChartPane({
   onCommonCode,
   patternFilters,
   delayContext,
+  wssLink,
 }: {
   win: ChildWindow;
   desk: VirtualDesk;
@@ -85,6 +86,7 @@ export function ChartPane({
   onCommonCode?: (code: string) => void;
   patternFilters?: import('../shared/patternFilters').FilterEnabled;
   delayContext?: import('../shared/patternFilters').DelayContext;
+  wssLink?: 'ok' | 'warn' | 'dead';
 }) {
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
@@ -279,6 +281,9 @@ export function ChartPane({
           </button>
           <input className="code-in" value={codeText} maxLength={6} placeholder="종목" onChange={(e) => commitCode(e.target.value)} />
           <span className="chart-name">{name || codeText || '종목명'}</span>
+          <span className={'wss-pill mini ' + (wssLink || 'dead')} title="중앙관리자 실시간 수신">
+            {wssLink === 'ok' ? '수신' : wssLink === 'warn' ? '지연' : '끊김'}
+          </span>
           <select value={TF.some((t) => t.id === timeframe) ? timeframe : timeframe.startsWith('T') ? timeframe : '1'} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (
               <option key={t.id} value={t.id}>
