@@ -51,6 +51,7 @@ export function Chart({
   onMoveIndicator,
   viewState,
   onViewState,
+  seriesKey,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -79,6 +80,7 @@ export function Chart({
   onMoveIndicator?: (id: string, slot: number) => void;
   viewState?: {from?: number; to?: number; paneStretch?: number[]; magnet?: boolean; selectedPane?: number};
   onViewState?: (s: {from: number; to: number; paneStretch?: number[]}) => void;
+  seriesKey?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -106,6 +108,16 @@ export function Chart({
   const overlayRef = useRef(overlay);
   const overlaySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const scaleLock = useRef(false);
+  const seriesKeyRef = useRef(seriesKey);
+  const fitScale = useRef(false);
+  const skipSync = useRef(false);
+  if (seriesKey && seriesKey !== seriesKeyRef.current) {
+    seriesKeyRef.current = seriesKey;
+    fitScale.current = true;
+    skipSync.current = true;
+    rangeRef.current = null;
+    meta.current = {len: 0, first: 0};
+  }
   const logRef = useRef(logScale);
   const gridRef = useRef(grid);
   const drawToolRef = useRef(drawTool);
@@ -177,7 +189,7 @@ export function Chart({
   };
 
   const syncAllPriceScales = () => {
-    if (scaleLock.current) return;
+    if (scaleLock.current || skipSync.current) return;
     type ScaleVis = {
       getVisibleRange?: () => {from: number; to: number} | null;
       setVisibleRange?: (r: {from: number; to: number}) => void;
@@ -263,6 +275,22 @@ export function Chart({
     const formulas = formulasRef.current;
     const overlay = overlayRef.current;
     if (!chart || !series || !bars.length) return;
+    if (fitScale.current) {
+      fitScale.current = false;
+      rangeRef.current = null;
+      meta.current = {len: 0, first: 0};
+      try {
+        const right = chart.priceScale('right') as {setAutoScale?: (on: boolean) => void; setVisibleRange?: (r: {from: number; to: number}) => void};
+        right.setAutoScale?.(true);
+        overlaySeriesRef.current?.priceScale()?.setAutoScale?.(true);
+      } catch {
+        /* fit */
+      }
+      skipSync.current = true;
+      window.setTimeout(() => {
+        skipSync.current = false;
+      }, 200);
+    }
     const prepend = meta.current.first !== 0 && bars[0].time < meta.current.first;
     const added = prepend ? Math.max(0, bars.length - meta.current.len) : 0;
     if (rangeRef.current && added) {

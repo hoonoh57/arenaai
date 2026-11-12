@@ -397,6 +397,7 @@ export function ChartPane({
             drawings={win.drawings || []}
             drawTool={drawTool}
             magnet={magnet}
+            seriesKey={`${code}|${timeframe}|${baseDate}`}
             viewState={win.chartView}
             onViewState={(s) => {
               patchWin({chartView: {...(win.chartView || {}), ...s, magnet, selectedPane: selPane}});
