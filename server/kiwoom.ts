@@ -62,8 +62,9 @@ export function hasMorningSession(candles: Candle[], hour = 8): boolean {
   });
 }
 
-function mergeCandlePages(a: Candle[], b: Candle[]): Candle[] {
-  return [...a, ...b].sort((x, y) => x.time - y.time).filter((x, i, arr) => i === 0 || x.time !== arr[i - 1].time);
+function mergeCandlePages(older: Candle[], newer: Candle[]): Candle[] {
+  const seen = new Set(newer.map((c) => c.time));
+  return [...older.filter((c) => !seen.has(c.time)), ...newer];
 }
 
 export function parseCandles(rows: unknown): Candle[] {
@@ -78,7 +79,9 @@ export function parseCandles(rows: unknown): Candle[] {
       /* invalid rows must not become fabricated candles */
     }
   }
-  return result.sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
+  /* ka10080는 최근→과거. 시간순 그리려면 reverse만. sort 금지. */
+  if (result.length >= 2 && result[0].time > result[result.length - 1].time) result.reverse();
+  return result.filter((x, i, a) => i === 0 || x.time !== a[i - 1].time);
 }
 
 type DailyRow = PreviousDay;
@@ -330,7 +333,7 @@ export class Kiwoom {
     return parseCandles(d[table]);
   }
 
-  async chartPage(input: {code: string; timeframe: string; baseDate?: string; nextKey?: string}): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
+  async chartPage(input: {code: string; timeframe: string; baseDate?: string; nextKey?: string; singlePage?: boolean}): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
     if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
     if (input.timeframe === 'D' || input.timeframe === 'W' || input.timeframe === 'M') {
@@ -344,11 +347,12 @@ export class Kiwoom {
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
     const pullMore = async (candles: Candle[], hasMore: boolean, nextKey: string, load: (ex: {contYn?: string; nextKey?: string}) => Promise<Candle[]>): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> => {
+      if (input.singlePage || input.nextKey) return {candles, hasMore, nextKey};
       let bars = candles;
       let more = hasMore;
       let key = nextKey;
       let pages = 0;
-      while (!input.nextKey && !hasMorningSession(bars) && more && key && pages < 5) {
+      while (!hasMorningSession(bars) && more && key && pages < 5) {
         const older = await load({contYn: 'Y', nextKey: key});
         bars = mergeCandlePages(older, bars);
         more = this.lastContinuation.contYn === 'Y';

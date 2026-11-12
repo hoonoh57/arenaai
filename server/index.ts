@@ -366,40 +366,8 @@ app.post('/api/chart', async (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
-    const localBars = !nextKey ? loadLocalBars(code, timeframe, {chart: true}) : [];
-    const liveBars = !nextKey && (timeframe === '1' || timeframe === 'D') ? cache.candles(code) : [];
-    const mergeByTime = (...lists: Candle[][]) => {
-      const map = new Map<number, Candle>();
-      for (const list of lists) for (const c of list) map.set(c.time, c);
-      return [...map.values()].sort((a, b) => a.time - b.time);
-    };
-    let candles = mergeByTime(localBars, liveBars);
-    const stale = Date.now() / 1000 - (candles.at(-1)?.time ?? 0) > 120;
-    if (!nextKey && stale) {
-      try {
-        const page = await api.chartPage({code, timeframe, baseDate, nextKey: undefined});
-        candles = mergeByTime(candles, page.candles);
-        if (page.candles.length) cache.mergeCandles(code, page.candles);
-      } catch {
-        /* 오늘 봉 1회 보충 실패 시 공백 신호는 차단 */
-      }
-    }
-    if (candles.length && !nextKey) {
-      if (req.body?.withStrength) {
-        try {
-          candles = await api.attachStrength(code, timeframe, candles);
-        } catch {
-          /* keep */
-        }
-      }
-      const listed = ranking.find((s) => s.code === code);
-      const fetched = await api.stockName(code).catch(() => '');
-      const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
-      res.json({code, name, candles, hasMore: false, nextKey: '', timeframe});
-      return;
-    }
-    const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
-    candles = mergeByTime(candles, page.candles);
+    const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true});
+    let candles = page.candles;
     if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
     if (req.body?.withStrength) {
       try {

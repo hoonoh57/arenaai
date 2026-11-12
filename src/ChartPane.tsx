@@ -34,10 +34,9 @@ async function post(path: string, body?: unknown) {
   return d;
 }
 
-function mergeBars(oldBars: Candle[], incoming: Candle[]): Candle[] {
-  const map = new Map<number, Candle>();
-  for (const bar of [...oldBars, ...incoming]) map.set(bar.time, bar);
-  return [...map.values()].sort((a, b) => a.time - b.time);
+function mergeBars(oldBars: Candle[], olderPage: Candle[]): Candle[] {
+  const seen = new Set(oldBars.map((b) => b.time));
+  return [...olderPage.filter((b) => !seen.has(b.time)), ...oldBars];
 }
 
 export function ChartPane({

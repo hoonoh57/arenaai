@@ -11,7 +11,6 @@ export function clearBarCache() {
 const CACHE_MAX = 400;
 const MINUTE_TAIL_BYTES = 96 * 1024;
 const MINUTE_MAX_BARS = 800;
-const CHART_MINUTE_BARS = 2500;
 const BAR_MAGIC = 'BAR1';
 const BAR_HDR = 8;
 const BAR_REC = 56;
@@ -147,27 +146,26 @@ export function listLocalCodes(tf: 'D' | '1' = 'D'): string[] {
   return [...new Set(names)];
 }
 
-export function loadLocalBars(code: string, tf: string, opts?: {chart?: boolean}): Candle[] {
+export function loadLocalBars(code: string, tf: string): Candle[] {
   if (!/^\d{6}$/.test(code)) return [];
   const native = tf === 'D' || tf === 'W' || tf === 'M' ? 'D' : '1';
   const file = barPath(native, code);
   if (!file) return [];
   const mtimeMs = statSync(file).mtimeMs;
-  const minuteCap = opts?.chart ? CHART_MINUTE_BARS : MINUTE_MAX_BARS;
-  const cacheKey = `${file}:${native}:${minuteCap}`;
+  const cacheKey = `${file}:${native}`;
   const hit = barCache.get(cacheKey);
   let bars: Candle[];
   if (hit && hit.mtimeMs === mtimeMs) bars = hit.bars;
   else {
     const isBar = file.endsWith('.bar');
     if (isBar) {
-      const raw = native === '1' ? readBarTail(file, minuteCap) : readFileSync(file);
+      const raw = native === '1' ? readBarTail(file, MINUTE_MAX_BARS) : readFileSync(file);
       bars = parseBarBinary(raw);
     } else {
-      const raw = native === '1' ? readCsvTail(file, opts?.chart ? 400 * 1024 : MINUTE_TAIL_BYTES) : readFileSync(file, 'utf8');
+      const raw = native === '1' ? readCsvTail(file, MINUTE_TAIL_BYTES) : readFileSync(file, 'utf8');
       bars = parseBarFile(raw);
     }
-    if (native === '1' && bars.length > minuteCap) bars = bars.slice(-minuteCap);
+    if (native === '1' && bars.length > MINUTE_MAX_BARS) bars = bars.slice(-MINUTE_MAX_BARS);
     cacheSet(cacheKey, {mtimeMs, bars});
   }
   if (tf === 'D' || tf === '1' || tf.startsWith('T')) return bars;
