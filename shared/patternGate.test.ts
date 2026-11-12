@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {judgePattern, sessionSlice} from './patternGate';
+import {delayedEntry, judgePattern, sessionSlice} from './patternGate';
 import type {Candle} from '../server/core';
 
 const t0 = Date.parse('2026-11-12T00:00:00+09:00') / 1000;
@@ -40,4 +40,22 @@ test('긴 횡보 뒤 양봉 돌파는 가점', () => {
   const v = judgePattern(c);
   assert.ok(v.score >= 65, String(v.score + v.reasons.join(',')));
   assert.equal(v.allow, true);
+});
+
+test('건너뜀 뒤 거래량·봉 급증이면 이평 없이 지연 진입', () => {
+  const c = bars(40, (i) => 100 + Math.sin(i) * 0.12);
+  for (const b of c) b.volume = 100;
+  const last = c[c.length - 1];
+  last.open = 100;
+  last.close = 103;
+  last.high = 103.4;
+  last.low = 99.8;
+  last.volume = 400;
+  last.strength = 180;
+  for (const b of c.slice(0, -1)) b.strength = 90;
+  const sig = (i: number) => i === 20;
+  assert.equal(judgePattern(c, 20).allow, false);
+  const late = delayedEntry(c, c.length - 1, sig);
+  assert.equal(late?.allow, true);
+  assert.equal(late?.delayed, true);
 });

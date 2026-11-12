@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
-import {judgePattern} from '../shared/patternGate';
+import {delayedEntry, judgePattern} from '../shared/patternGate';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
@@ -223,13 +223,17 @@ function currentEvaluator() {
     if ((config.tradeByCode[code] ?? 'wait') !== 'run') return null;
     const system = strategyFor(code);
     if (!system) return null;
-    const buy = evaluate(system.expression, closed, system.variables, formulas).at(-1);
+    const buys = evaluate(system.expression, closed, system.variables, formulas);
+    const buyFlag = Boolean(buys.at(-1));
     const sell = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas).at(-1) : false;
-    if (buy) {
-      const v = judgePattern(closed);
+    const at = closed.length - 1;
+    if (buyFlag) {
+      const v = judgePattern(closed, at);
       if (!v.allow) return {buy: false, sell: Boolean(sell)};
+      return {buy: true, sell: Boolean(sell)};
     }
-    return {buy: Boolean(buy), sell: Boolean(sell)};
+    const late = delayedEntry(closed, at, (i) => Boolean(buys[i]));
+    return {buy: Boolean(late?.allow), sell: Boolean(sell)};
   };
 }
 

@@ -5,6 +5,7 @@ export type PatternVerdict = {
   allow: boolean;
   tag: string;
   reasons: string[];
+  delayed?: boolean;
 };
 
 const ENTER_MIN = 65;
@@ -106,7 +107,76 @@ export function judgePattern(candles: Candle[], at = candles.length - 1): Patter
   return {score, allow, tag, reasons};
 }
 
+function mean(xs: number[]): number {
+  return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+}
+
+function median(xs: number[]): number {
+  if (!xs.length) return 0;
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+/** 직전 횡보 대비 거래량·체결강도·봉 몸통·돌파가 급증했는지. */
+export function measureSurge(session: Candle[]): {ok: boolean; parts: string[]; bonus: number} {
+  if (session.length < 12) return {ok: false, parts: [], bonus: 0};
+  const last = session[session.length - 1];
+  const prev = session.slice(-16, -1);
+  const avgRange = mean(prev.map((b) => b.high - b.low));
+  const lastRange = last.high - last.low;
+  const body = last.open > 0 ? (last.close - last.open) / last.open : 0;
+  const vols = prev.map((b) => b.volume ?? 0).filter((v) => v > 0);
+  const volOk = Boolean(last.volume && vols.length && last.volume >= 2 * median(vols));
+  const rangeOk = avgRange > 0 && lastRange >= 2 * avgRange;
+  const strs = prev.map((b) => b.strength).filter((s): s is number => typeof s === 'number' && s > 0);
+  const strOk = typeof last.strength === 'number' && strs.length >= 3 && last.strength >= 1.25 * mean(strs);
+  const broke = last.close > Math.max(...prev.slice(-5).map((b) => b.high));
+  const retOk = body >= 0.012 || broke;
+  const parts: string[] = [];
+  if (volOk) parts.push('거래량급증');
+  if (strOk) parts.push('강도급증');
+  if (rangeOk) parts.push('변동급증');
+  if (retOk) parts.push('봉급등');
+  const ok = parts.length >= 2 || (retOk && (volOk || rangeOk));
+  return {ok, parts, bonus: Math.min(25, parts.length * 8)};
+}
+
+/**
+ * 횡보에서 이평 신호를 한 번 건너뛴 뒤, 급증이 나오면 재돌파 없이 지연 진입.
+ * 급등 후 내리막 횡보 금지구간에는 지연 진입을 주지 않는다.
+ */
+export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean): PatternVerdict | null {
+  if (at < 1 || at >= candles.length) return null;
+  const now = judgePattern(candles, at);
+  if (now.tag === '급등후횡보') return null;
+  let lastSkip = -1;
+  for (let i = 0; i < at; i++) {
+    if (!hadSignal(i)) continue;
+    const j = judgePattern(candles, i);
+    if (j.tag === '급등후횡보') {
+      lastSkip = -1;
+      continue;
+    }
+    if (!j.allow) lastSkip = i;
+    else lastSkip = -1;
+  }
+  if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;
+  if (hadSignal(at)) return null;
+  const surge = measureSurge(sessionSlice(candles, at));
+  if (!surge.ok) return null;
+  const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
+  return {
+    score,
+    allow: true,
+    delayed: true,
+    tag: '지연확인',
+    reasons: [`건너뜀 후 ${surge.parts.join('·')}`],
+  };
+}
+
 export function patternMarkerText(side: 'buy' | 'skip', v: PatternVerdict): string {
+  if (v.delayed) return `지연매수${v.score} ${v.tag}`;
   if (side === 'skip') return `건너뜀${v.score} ${v.tag}`;
   return `매수${v.score} ${v.tag}`;
 }

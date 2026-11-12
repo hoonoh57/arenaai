@@ -16,7 +16,7 @@ import {
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
-import {judgePattern, patternMarkerText} from '../shared/patternGate';
+import {delayedEntry, judgePattern, patternMarkerText} from '../shared/patternGate';
 import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
@@ -151,12 +151,17 @@ export function Chart({
       }
       if (f.kind === 'signal' || f.kind === 'system') {
         const exits = f.kind === 'system' ? evaluate(f.exitExpression, bars, f.variables, formulas) : [];
+        let lastSkip = -1;
+        let delayedUsed = false;
         bars.forEach((c, i) => {
           if (c.time + 60 > Math.floor(Date.now() / 1000)) return;
           if (values[i] && exits[i]) return;
           if (values[i]) {
             if (f.kind === 'system') {
               const v = judgePattern(bars, i);
+              if (v.allow) lastSkip = -1;
+              else if (v.tag !== '급등후횡보') lastSkip = i;
+              else lastSkip = -1;
               markers.push({
                 time: c.time as UTCTimestamp,
                 position: 'belowBar',
@@ -165,6 +170,19 @@ export function Chart({
                 text: patternMarkerText(v.allow ? 'buy' : 'skip', v),
               });
             } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
+          } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {
+            const late = delayedEntry(bars, i, (j) => Boolean(values[j]));
+            if (late?.allow) {
+              delayedUsed = true;
+              lastSkip = -1;
+              markers.push({
+                time: c.time as UTCTimestamp,
+                position: 'belowBar',
+                shape: 'arrowUp',
+                color: f.color,
+                text: patternMarkerText('buy', late),
+              });
+            }
           }
           if (exits[i]) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: '매도'});
         });
