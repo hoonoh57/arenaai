@@ -157,7 +157,6 @@ export function Chart({
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
       const values = evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
-        if ((f.id === 'cntrstr' || f.expression === 'STRENGTH') && strengthReady === false) continue;
         let paneIndex = 0;
         if (f.pane === 'separate') {
           const panes = (chart as unknown as {panes?: () => {paneIndex: () => number}[]}).panes?.() || [];

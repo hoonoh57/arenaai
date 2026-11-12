@@ -287,7 +287,7 @@ export function ChartPane({
         </div>
         {bars.length ? (
           <Chart
-            data={strengthReady ? bars : bars.map((c) => ({...c, strength: undefined}))}
+            data={bars}
             overlay={overlay}
             formulas={applied}
             patternFilters={patternFilters}

@@ -144,10 +144,15 @@ export function strengthSyncStatus(candles: StrengthBar[]): StrengthSync {
   const nxt = detectNxtSession(candles);
   const last = candles[candles.length - 1];
   const openSec = sessionOpenSec(last.time, nxt);
-  const win = candles.filter((c) => c.time + 60 >= openSec && c.time <= last.time);
+  const p = kstParts(last.time);
+  const closeMs = Date.parse(`${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}T15:30:00+09:00`);
+  const closeSec = Number.isFinite(closeMs) ? closeMs / 1000 : last.time;
+  const endSec = Math.min(last.time, closeSec);
+  const win = candles.filter((c) => c.time + 60 >= openSec && c.time <= endSec);
   const have = win.filter((c) => typeof c.strength === 'number' && Number.isFinite(c.strength) && c.strength > 0).length;
   const priceToOpen = win.some((c) => c.time <= openSec + 120);
-  const lastHas = typeof last.strength === 'number' && last.strength > 0;
+  const lastInWin = win[win.length - 1];
+  const lastHas = lastInWin ? typeof lastInWin.strength === 'number' && lastInWin.strength > 0 : false;
   const ready = priceToOpen && lastHas && win.length > 0 && have >= Math.max(3, Math.ceil(win.length * 0.6));
   return {ready, nxt, openSec, need: win.length, have, priceToOpen};
 }
