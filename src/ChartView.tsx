@@ -137,16 +137,20 @@ export function Chart({
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
     }
-    if (yModeRef.current !== 'percent') {
+    {
+      const last = bars[bars.length - 1];
+      const maNow = bars.length >= 120 ? bars.slice(-120).reduce((s, c) => s + c.close, 0) / 120 : 0;
+      const above = Boolean(last && maNow > 0 && last.close >= maNow);
       const trend = ma120TrendPoints(bars);
       if (trend.length) {
         const up = trend[trend.length - 1].slope > 0;
         const tLine = chart.addSeries(LineSeries, {
-          color: up ? '#5d96e8' : '#ed6b72',
-          lineWidth: 2,
-          title: up ? '120추세+' : '120추세-',
+          color: above && up ? '#7ec8e3' : up ? '#5d96e8' : '#ed6b72',
+          lineWidth: above ? 3 : 2,
+          lineStyle: above ? LineStyle.Solid : LineStyle.Dashed,
+          title: above ? (up ? '120돌파추세+' : '120위추세-') : up ? '120추세+' : '120추세-',
           priceLineVisible: false,
-          lastValueVisible: false,
+          lastValueVisible: true,
           priceScaleId: 'right',
         });
         tLine.setData(trend.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));

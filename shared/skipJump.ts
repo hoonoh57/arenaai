@@ -64,8 +64,9 @@ export function ma120Window(candles: Candle[], at: number, look = 40): number[] 
 }
 
 /** 차트에 그릴 120이평 직선 추세. */
-export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, look = 40): {time: number; value: number; slope: number}[] {
-  const from = Math.max(119, at - look + 1);
+export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, look = 0): {time: number; value: number; slope: number}[] {
+  const span = look > 0 ? look : at + 1;
+  const from = Math.max(119, at - span + 1);
   const ys: number[] = [];
   const xs: number[] = [];
   for (let i = from; i <= at; i++) {
