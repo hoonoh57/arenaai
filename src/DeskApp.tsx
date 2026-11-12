@@ -124,6 +124,7 @@ export function DeskApp() {
 
   useEffect(() => {
     void load();
+    void post('/api/conditions').then(() => load()).catch(() => {});
     const t = setInterval(load, 3000);
     return () => clearInterval(t);
   }, []);
@@ -338,8 +339,8 @@ export function DeskApp() {
           <i className={state.busy || !state.config.condition ? 'wait' : 'go'} title={state.config.condition ? '조건검색' : '조건식 없음'} />
           <i className={state.risk?.blocked ? 'stop' : state.config.running ? 'go' : 'wait'} title={state.config.running ? '모의매매' : '대기'} />
         </span>
-        <span className="mode">
-          <i /> {state.mode === 'mock' ? '모의 조회·주문' : '실전 조회(주문 없음)'}
+        <span className={'mode' + (state.config.running ? ' trading' : '')}>
+          <i /> {state.config.running ? '자동매매 중' : state.mode === 'mock' ? '모의 조회·주문' : '실전 조회(주문 없음)'}
         </span>
       </header>
       <div className="hts-workspace">

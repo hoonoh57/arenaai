@@ -449,7 +449,6 @@ export class RealtimeHub {
           const bar = this.cache.applyLiveQuote(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined);
           if (bar === 'new') this.evaluateSignals(quote.code);
         }
-        this.maybeRefreshCandles(quote, today);
         continue;
       }
       if (event.type === '0g') {

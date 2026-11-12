@@ -16,7 +16,7 @@ import {loadDesks, saveDesks} from './desks';
 import {backtest} from '../shared/backtest';
 import {barReturn, DAY_HOLD_PRESETS, HOLD_PRESETS, indexAtOrBefore, maxReturnFrom, parseSearchAt, returnAfterBars, returnAfterMinutes, summarizeVerify, type VerifyRow} from '../shared/verify';
 import {AuditLog} from './realtime/audit';
-import {appendAuditFile, loadAppConfig, readAuditFiles, saveAppConfig, listAuditDays} from './appState';
+import {appendAuditFile, loadAppConfig, readAuditFiles, saveAppConfig, listAuditDays, setTradeSession} from './appState';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
 import {RealtimeHub, type WsLike} from './realtime/hub';
@@ -174,6 +174,7 @@ let config: AppConfig = {
   tradeSlots: Number.isInteger(savedCfg.tradeSlots) ? savedCfg.tradeSlots as number : 4,
   lockedCodes: Array.isArray(savedCfg.lockedCodes) ? savedCfg.lockedCodes.filter((c): c is string => typeof c === 'string' && /^\d{6}$/.test(c)) : [],
 };
+setTradeSession(config.running && config.tradeMode === 'auto');
 
 function bridgeCfg() {
   return {seq: config.condition, count: config.count, weights: config.weights, chartCodes: config.chartCodes};
@@ -252,7 +253,9 @@ async function followTopCharts(): Promise<void> {
   const held = new Set([...snap.holdings.map((h) => h.code), ...snap.working.map((o) => o.code), ...config.lockedCodes]);
   const keep = config.chartCodes.filter((c) => held.has(c));
   const ranked = ranking.filter((s) => Number.isFinite(s.score) && s.score >= 0 && !held.has(s.code)).map((s) => s.code);
-  const fill = ranked.slice(0, Math.max(0, slots - keep.length));
+  const captured = bridge.capturedList().map((r) => r.code).filter((c) => !held.has(c));
+  const pool = ranked.length ? ranked : captured;
+  const fill = pool.slice(0, Math.max(0, slots - keep.length));
   const top = [...keep, ...fill];
   if (!top.length) return;
   if (top.join(',') === config.chartCodes.join(',')) return;
@@ -271,6 +274,7 @@ async function followTopCharts(): Promise<void> {
     ranking = result.ranking;
     updatedAt = Date.now();
     for (const code of fill) {
+      if (cache.candles(code).length) continue;
       try {
         await bridge.refreshChart(code);
       } catch (e) {
@@ -313,6 +317,7 @@ async function applyConfig(next: typeof config): Promise<void> {
     hub.orderQty = config.orderQty;
     syncSignals();
     saveAppConfig(config);
+    setTradeSession(config.running && config.tradeMode === 'auto');
     const result = await bridge.apply(bridgeCfg());
     applyRanking(result);
     error = '';
@@ -913,22 +918,27 @@ server.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => {
  * selected codes' candles are refreshed (governed REST) on a slow timer or when a tick
  * shows a new minute has started.
  */
+async function restoreConditions(): Promise<void> {
+  try {
+    conditions = await bridge.loadConditions();
+    audit.record('state', '조건식 목록을 자동 조회했습니다.', {count: conditions.length});
+    if (!config.condition || !conditions.some((c) => c.seq === config.condition)) return;
+    await applyConfig({...config});
+  } catch (e) {
+    error = e instanceof Error ? e.message : '조건식 복원 실패';
+  }
+}
+
 void (async () => {
+  hub.onReady(() => {
+    void restoreConditions();
+  });
   try {
     await hub.start();
   } catch (e) {
     error = e instanceof Error ? e.message : '실시간 연결 실패';
   }
-  hub.onReady(async () => {
-    try {
-      conditions = await bridge.loadConditions();
-      audit.record('state', '조건식 목록을 자동 조회했습니다.', {count: conditions.length});
-      if (!config.condition || !conditions.some((c) => c.seq === config.condition)) return;
-      await applyConfig({...config});
-    } catch (e) {
-      error = e instanceof Error ? e.message : '조건식 복원 실패';
-    }
-  });
+  if (hub.isReady && !conditions.length) await restoreConditions();
 })();
 
 /**
@@ -940,13 +950,6 @@ async function maintenanceTick(): Promise<void> {
   try {
     const result = await bridge.syncSubscriptions(bridgeCfg());
     applyRanking(result);
-    for (const code of config.chartCodes) {
-      try {
-        await bridge.refreshChart(code);
-      } catch (e) {
-        cache.setWarning(code, e instanceof Error ? e.message : '분봉 갱신 실패');
-      }
-    }
     error = '';
   } catch (e) {
     error = e instanceof Error ? e.message : '주기 유지보수 실패';

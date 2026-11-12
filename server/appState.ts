@@ -25,8 +25,13 @@ function stamp(at: number): string {
   return kst.toISOString().slice(0, 10).replace(/-/g, '');
 }
 
+let tradeSession = false;
+export function setTradeSession(on: boolean): void {
+  tradeSession = on;
+}
+
 export function isTradeLog(category: string): boolean {
-  return category === 'order' || category === 'signal' || category === 'position';
+  return tradeSession || category === 'order' || category === 'signal' || category === 'position';
 }
 
 export function appendAuditFile(entry: AuditEntry): void {
