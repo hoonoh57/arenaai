@@ -250,15 +250,18 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
   const session = sessionSlice(candles, at);
   const surge = confirmAfterSkip(session, candles[lastSkip], nextBar);
   if (!surge.ok) return null;
-  if (delay?.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE) {
-    const last = session[session.length - 1];
-    const skipPx = candles[lastSkip];
-    const move = skipPx.close > 0 ? Math.abs(last.close - skipPx.close) / skipPx.close : 0;
-    if (move < (delay.maAvgLoserRange || 0.01) * (delay.skip001N ?? 1.2)) return null;
-  }
-  if (filterOn(filters, 'skip001')) {
-    const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
-    if (surge.quality < need) return null;
+  /* 건너뜀 바로 다음 봉은 확인 피처만. KPI×N은 그 이후 봉에만. */
+  if (!nextBar) {
+    if (delay?.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE) {
+      const last = session[session.length - 1];
+      const skipPx = candles[lastSkip];
+      const move = skipPx.close > 0 ? Math.abs(last.close - skipPx.close) / skipPx.close : 0;
+      if (move < (delay.maAvgLoserRange || 0.01) * (delay.skip001N ?? 1.2)) return null;
+    }
+    if (filterOn(filters, 'skip001')) {
+      const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
+      if (surge.quality < need) return null;
+    }
   }
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
   const recross = hadSignal(at);
