@@ -37,7 +37,7 @@ export function parseStrengthTicks(rows: unknown, hintSec: number): StrengthTick
     const strText = String(r.cntr_str ?? '').trim().replace(/,/g, '');
     const qty = /^[+-]?\d+(\.\d+)?$/.test(qtyText) ? Number(qtyText) : 0;
     const strength = /^[+-]?\d+(\.\d+)?$/.test(strText) ? Math.abs(Number(strText)) : NaN;
-    if (!Number.isFinite(time) || !Number.isFinite(strength)) continue;
+    if (!Number.isFinite(time) || !Number.isFinite(strength) || strength <= 0) continue;
     out.push({time, qty, strength});
   }
   if (out.length >= 2 && out[0].time > out[out.length - 1].time) out.reverse();

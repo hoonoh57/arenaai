@@ -461,10 +461,18 @@ app.post('/api/chart', async (req, res) => {
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
     const strengthNextKey = typeof req.body?.strengthNextKey === 'string' ? req.body.strengthNextKey : '';
     const withStrength = Boolean(req.body?.withStrength);
-    const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
-    const page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
-    let candles = page.candles;
-    if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
+    const strengthOnly = Boolean(req.body?.strengthOnly);
+    let candles: Candle[] = [];
+    let page = {candles: [] as Candle[], hasMore: false, nextKey: ''};
+    if (!strengthOnly) {
+      const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
+      page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
+      candles = page.candles;
+      if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
+    } else {
+      candles = cache.candles(code);
+      if (!candles.length) candles = loadLocalBars(code, timeframe === 'D' || timeframe === 'W' || timeframe === 'M' ? timeframe : '1');
+    }
     let strengthHasMore = false;
     let strengthKey = '';
     let strengthReady = false;

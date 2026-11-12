@@ -73,6 +73,13 @@ export function reachedSessionOpen(times: number[], lastSec: number, hour: numbe
   });
 }
 
+const strengthBuf = new Map<string, {ticks: StrengthTick[]; nextKey: string; reached: boolean; nxt: boolean}>();
+
+function strengthBufKey(code: string, lastSec: number): string {
+  const p = kstClock(lastSec);
+  return `${code}|${p.day}`;
+}
+
 function mergeTicks(older: StrengthTick[], newer: StrengthTick[]): StrengthTick[] {
   const seen = new Set(newer.map((t) => `${t.time}:${t.qty}`));
   return [...older.filter((t) => !seen.has(`${t.time}:${t.qty}`)), ...newer];
@@ -477,27 +484,22 @@ export class Kiwoom {
     if (!candles.length) return {candles, hasMore: false, nextKey: '', ready: false, nxt: false};
     const daily = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
     const hint = candles[candles.length - 1].time;
-    let page = await this.strengthPage({code, daily, hintSec: hint, nextKey: nextKey || undefined});
-    let ticks = page.ticks;
-    if (!daily && !nextKey) {
-      const hour = page.unified ? 8 : 9;
-      const minute = page.unified ? 30 : 0;
-      let n = 1;
-      while (!reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute) && page.hasMore && page.nextKey && n < 2) {
-        try {
-          const older = await this.strengthPage({code, daily, hintSec: ticks[0]?.time ?? hint, nextKey: page.nextKey});
-          ticks = mergeTicks(older.ticks, ticks);
-          page = older;
-          n += 1;
-        } catch {
-          break;
-        }
-      }
+    const bufKey = strengthBufKey(code, hint);
+    const prev = strengthBuf.get(bufKey);
+    const useKey = nextKey || prev?.nextKey || '';
+    let page: {ticks: StrengthTick[]; hasMore: boolean; nextKey: string; unified: boolean};
+    try {
+      page = await this.strengthPage({code, daily, hintSec: prev?.ticks[0]?.time ?? hint, nextKey: useKey || undefined});
+    } catch {
+      const aligned0 = prev ? alignStrengthToCandles(candles, correctSmallLotStrength(prev.ticks), timeframe) : candles;
+      return {candles: aligned0, hasMore: Boolean(prev && !prev.reached), nextKey: prev?.nextKey || '', ready: Boolean(prev?.reached), nxt: Boolean(prev?.nxt)};
     }
-    const nxt = page.unified || hasMorningSession(candles);
+    let ticks = mergeTicks(page.ticks, prev?.ticks || []);
+    const nxt = page.unified || prev?.nxt || hasMorningSession(candles);
     const hour = nxt ? 8 : 9;
     const minute = nxt ? 30 : 0;
     const reached = daily || reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute);
+    strengthBuf.set(bufKey, {ticks, nextKey: page.nextKey, reached, nxt});
     const aligned = alignStrengthToCandles(candles, correctSmallLotStrength(ticks), timeframe);
     const sync = strengthSyncStatus(aligned);
     return {

@@ -83,6 +83,7 @@ export function ChartPane({
   const [hasMore, setHasMore] = useState(false);
   const [strengthReady, setStrengthReady] = useState(false);
   const [strengthNxt, setStrengthNxt] = useState(false);
+  const [strengthHasMore, setStrengthHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [viewCount, setViewCount] = useState(win.visibleBars || 200);
   const [overlay, setOverlay] = useState<Candle[]>([]);
@@ -101,7 +102,7 @@ export function ChartPane({
     if (rankingName) setName(rankingName);
   }, [rankingName]);
 
-  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean; overlay?: boolean; force?: boolean} = {}) => {
+  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean; overlay?: boolean; force?: boolean; strengthOnly?: boolean} = {}) => {
     const useCode = opts.code ?? codeText;
     if (!/^\d{6}$/.test(useCode)) return;
     const coolKey = `${useCode}|${opts.timeframe ?? timeframe}|${opts.baseDate ?? baseDate}|${opts.append ? 'a' : '1'}`;
@@ -112,15 +113,18 @@ export function ChartPane({
         code: useCode,
         timeframe: opts.timeframe ?? timeframe,
         baseDate: opts.baseDate ?? baseDate,
-        nextKey: opts.append ? nextKey : '',
-        strengthNextKey: opts.append ? strengthNextKey : '',
+        nextKey: opts.append && !opts.strengthOnly ? nextKey : '',
+        strengthNextKey: opts.strengthOnly || opts.append ? strengthNextKey : '',
         withStrength: enabled.has('cntrstr') && (opts.timeframe ?? timeframe) !== 'D' && (opts.timeframe ?? timeframe) !== 'W' && (opts.timeframe ?? timeframe) !== 'M',
+        strengthOnly: Boolean(opts.strengthOnly),
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
       if (opts.overlay) setOverlay(next);
-      else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
-      setHasMore(Boolean(d.hasMore) || Boolean(d.strengthHasMore));
+      else if (!opts.strengthOnly) setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
+      else if (next.length) setBars(next);
+      setHasMore(Boolean(d.hasMore));
+      setStrengthHasMore(Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');
       setStrengthNextKey(d.strengthNextKey || '');
       setStrengthReady(Boolean(d.strengthReady));
