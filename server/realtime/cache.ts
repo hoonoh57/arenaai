@@ -170,6 +170,50 @@ export class SharedCache {
     return result;
   }
 
+  /** 틱·분 페이지에 체결을 붙인다. 창이 연 종목만 키가 있다. */
+  applyLiveTick(code: string, time: number, price: number, volume?: number): void {
+    if (!(price > 0) || !Number.isFinite(time)) return;
+    const t = Math.max(1, Math.floor(time));
+    let changed = false;
+    for (const [key, bars] of this.pagesByKey) {
+      if (!key.startsWith(`${code}|`) || !bars.length) continue;
+      const tf = key.split('|')[1] || '';
+      if (tf.startsWith('T')) {
+        const last = bars[bars.length - 1];
+        if (last && last.time === t && last.close === price) {
+          bars[bars.length - 1] = {
+            ...last,
+            high: Math.max(last.high, price),
+            low: Math.min(last.low, price),
+            volume: typeof last.volume === 'number' || typeof volume === 'number' ? (last.volume || 0) + (volume || 0) : last.volume,
+          };
+        } else {
+          bars.push({time: t, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {})});
+          if (bars.length > 4000) bars.splice(0, bars.length - 3500);
+        }
+        changed = true;
+        continue;
+      }
+      if (tf === '1' || tf === '3' || tf === '5' || tf === '10' || tf === '15' || tf === '30' || tf === '45' || tf === '60') {
+        const bucket = Math.floor(t / 60) * 60;
+        const last = bars[bars.length - 1];
+        if (last && last.time === bucket) {
+          bars[bars.length - 1] = {
+            ...last,
+            close: price,
+            high: Math.max(last.high, price),
+            low: Math.min(last.low, price),
+          };
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.candleVersion += 1;
+      this.emit({kind: 'chart-page', code, lastTime: t});
+    }
+  }
+
   clearCandles(code?: string): void {
     if (code) this.candlesByCode.delete(code);
     else this.candlesByCode.clear();

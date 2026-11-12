@@ -32,7 +32,7 @@
 .wss-pill.ok{border-color:#3d6a40;color:#b7ea79}.wss-pill.ok i{background:#6dcf6d;box-shadow:0 0 6px #6dcf6d}
 .wss-pill.warn{border-color:#6a5a20;color:#e0c35a}.wss-pill.warn i{background:#e0c35a}
 .wss-pill.dead{border-color:#8e555b;color:#ffd6d6;background:#3a1c20}.wss-pill.dead i{background:#e05a5a;box-shadow:0 0 6px #e05a5a}
-.wss-pill.mini{font-size:10px;padding:2px 6px}
+.wss-pill.mini{font-size:10px;padding:2px 6px;margin-left:auto;flex-shrink:0}
 .wss-emergency{position:fixed;inset:0;z-index:80;background:rgba(8,12,10,.72);display:grid;place-items:center;color:#ffe4e4}
 .wss-emergency>div,.wss-emergency{padding:28px}
 .wss-emergency b{display:block;font-size:18px;margin-bottom:10px}

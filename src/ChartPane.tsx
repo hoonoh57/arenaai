@@ -110,6 +110,7 @@ export function ChartPane({
   const [magnet, setMagnet] = useState(win.chartView?.magnet !== false);
   const [varPatch, setVarPatch] = useState<Record<string, Record<string, number>>>({});
   const [selPane, setSelPane] = useState(win.chartView?.selectedPane || 0);
+  const [liveWss, setLiveWss] = useState(wssLink || 'dead');
   const viewTimer = useRef(0);
   const paneById = win.indicatorPanes || {};
   const timeframe = win.timeframe || '1';
@@ -191,6 +192,38 @@ export function ChartPane({
     setBars(cached.length ? cached : []);
     if (cached.length) return;
     void load({code, force: true});
+  }, [code, timeframe, baseDate]);
+
+  useEffect(() => {
+    if (!/^\d{6}$/.test(code)) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const q = new URLSearchParams({code, timeframe, baseDate});
+        const d = await fetch(`/api/live-bars?${q}`).then((r) => r.json());
+        if (stop) return;
+        if (d.wss?.link) setLiveWss(d.wss.link);
+        if (Array.isArray(d.candles) && d.candles.length) {
+          setBars((prev) => {
+            const next = d.candles as Candle[];
+            if (!prev.length) return next;
+            const a = next[next.length - 1];
+            const b = prev[prev.length - 1];
+            if (a && b && a.time === b.time && a.close === b.close && next.length === prev.length) return prev;
+            return next;
+          });
+        }
+      } catch {
+        /* hub */
+      }
+    };
+    const ms = timeframe.startsWith('T') ? 400 : 1000;
+    const id = window.setInterval(pull, ms);
+    void pull();
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
   }, [code, timeframe, baseDate]);
 
 
@@ -281,8 +314,8 @@ export function ChartPane({
           </button>
           <input className="code-in" value={codeText} maxLength={6} placeholder="종목" onChange={(e) => commitCode(e.target.value)} />
           <span className="chart-name">{name || codeText || '종목명'}</span>
-          <span className={'wss-pill mini ' + (wssLink || 'dead')} title="중앙관리자 실시간 수신">
-            {wssLink === 'ok' ? '수신' : wssLink === 'warn' ? '지연' : '끊김'}
+          <span className={'wss-pill mini ' + (liveWss || wssLink || 'dead')} title="중앙관리자 실시간 수신(이 창은 허브 시세만 표시)">
+            {(liveWss || wssLink) === 'ok' ? 'WSS 수신' : (liveWss || wssLink) === 'warn' ? 'WSS 지연' : 'WSS 끊김'}
           </span>
           <select value={TF.some((t) => t.id === timeframe) ? timeframe : timeframe.startsWith('T') ? timeframe : '1'} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (

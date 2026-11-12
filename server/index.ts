@@ -189,8 +189,26 @@ let config: AppConfig = {
 };
 setTradeSession(config.running && config.tradeMode === 'auto');
 
+function deskChartCodes(): string[] {
+  try {
+    const codes: string[] = [];
+    for (const d of loadDesks().desks) {
+      if (/^\d{6}$/.test(d.vars.code)) codes.push(d.vars.code);
+      for (const w of d.windows) {
+        if (w.kind !== 'chart' && w.kind !== 'multi-chart') continue;
+        const c = w.locked ? w.code : w.code || d.vars.code;
+        if (c && /^\d{6}$/.test(c)) codes.push(c);
+      }
+    }
+    return [...new Set(codes)];
+  } catch {
+    return [];
+  }
+}
+
 function bridgeCfg() {
-  return {seq: config.condition, count: config.count, weights: config.weights, chartCodes: config.chartCodes};
+  const chartCodes = [...new Set([...config.chartCodes, ...deskChartCodes()])];
+  return {seq: config.condition, count: config.count, weights: config.weights, chartCodes};
 }
 
 function normalizeChartCodes(raw: unknown): string[] {
@@ -596,10 +614,23 @@ app.get('/api/desks', (_req, res) => {
 app.put('/api/desks', (req, res) => {
   try {
     const workspace = saveDesks(req.body);
+    if (config.condition) void bridge.syncSubscriptions(bridgeCfg()).catch(() => undefined);
     res.json(workspace);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '가상화면 저장 실패'});
   }
+});
+app.get('/api/live-bars', (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const timeframe = typeof req.query.timeframe === 'string' ? req.query.timeframe : '1';
+  const baseDate = typeof req.query.baseDate === 'string' ? req.query.baseDate : '';
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({error: '종목코드'});
+  const hub = bridge.status().hub;
+  res.json({
+    candles: cache.chartPage(code, timeframe, baseDate),
+    quote: cache.getQuote(code) || null,
+    wss: {link: hub.link, silentMs: hub.silentMs, emergency: hub.emergency, state: hub.state},
+  });
 });
 app.post('/api/tr', async (req, res) => {
   const id = req.body?.id;
