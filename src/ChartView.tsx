@@ -156,8 +156,15 @@ export function Chart({
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
       const values = evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
+        const sample = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0);
+        const px = bars.map((c) => c.close).filter((c) => c > 0).sort((a, b) => a - b);
+        const mid = (xs: number[]) => (xs.length ? xs[Math.floor(xs.length / 2)] : 0);
+        const mv = Math.abs(mid([...sample].sort((a, b) => a - b)));
+        const mp = mid(px);
+        const priceLike = mv > 0 && mp > 0 && mv > mp * 0.2 && mv < mp * 4;
+        const separate = f.pane === 'separate' || !priceLike;
         let paneIndex = 0;
-        if (f.pane === 'separate') {
+        if (separate) {
           const panes = (chart as unknown as {panes?: () => {paneIndex: () => number}[]}).panes?.() || [];
           paneIndex = panes.length > 1 ? 1 : chart.addPane().paneIndex();
         }
@@ -169,8 +176,8 @@ export function Chart({
             title: f.id,
             color: lineSpec.color,
             priceLineVisible: false,
-            lastValueVisible: f.pane === 'separate',
-            priceScaleId: f.pane === 'separate' ? `ind-${f.id}` : 'right',
+            lastValueVisible: separate,
+            priceScaleId: separate ? `ind-${f.id}` : 'right',
           };
           const line =
             lineSpec.type === 'histogram'
@@ -179,14 +186,14 @@ export function Chart({
           const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
           const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
-          const overlayPx = f.pane !== 'separate' && lineSpec.type !== 'histogram';
+          const overlayPx = !separate && lineSpec.type !== 'histogram';
           line.setData(vals.map((value, i) => {
-            const gap = value === null || value === 0 || (f.id === 'cntrstr' && value === 50);
+            const gap = value === null || (f.id === 'cntrstr' && (value === 0 || value === 50));
             if (gap) return {time: bars[i].time as UTCTimestamp};
             const v = overlayPx ? ax(value) : value;
             return {time: bars[i].time as UTCTimestamp, value: v, color: colors[i]};
           }));
-          if (f.pane === 'separate') {
+          if (separate) {
             try {
               line.priceScale().applyOptions({mode: PriceScaleMode.Normal, autoScale: true});
             } catch {

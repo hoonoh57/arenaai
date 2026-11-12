@@ -4,6 +4,12 @@ import {evaluate,validateFormula,defaults,seriesColors} from '../shared/formula'
 import {validateSet} from './formulas';
 const candles=[1,2,3,4,3,2,1,4,5].map((close,time)=>({time:time*60,open:close,high:close,low:close,close}));
 test('이동평균, 참조, 산술, 논리 및 교차를 확정 시점까지 계산',()=>{assert.deepEqual(evaluate('SMA(CLOSE, 3)',candles),[null,null,2,3,10/3,3,2,7/3,10/3]);assert.deepEqual(evaluate('REF(CLOSE, 1)',candles),[null,1,2,3,4,3,2,1,4]);assert.deepEqual(evaluate('CROSSUP(CLOSE, SMA(CLOSE, 3))',candles),[null,null,null,0,0,0,0,1,0]);assert.equal(evaluate('CLOSE > 3 && OPEN == CLOSE',candles)[3],1);assert.equal(evaluate('CLOSE / 0',candles)[0],null);});
+test('모멘텀은 기간 전 종가 대비 비율·차이',()=>{
+  const mom=evaluate('C / C(2) * 100',candles);
+  assert.equal(mom[0],null);assert.equal(mom[1],null);
+  assert.ok(Math.abs(mom[3]!-(4/2*100))<1e-9);
+  assert.deepEqual(evaluate('MOM(C, 2)',candles),[null,null,2,2,0,-2,-2,2,4]);
+});
 test('EMA 초기화와 데이터 부족',()=>{assert.deepEqual(evaluate('EMA(CLOSE, 3)',candles).slice(0,4),[null,null,2,3]);assert.deepEqual(evaluate('SMA(CLOSE, 20)',candles),Array(9).fill(null));});
 test('임의 코드 실행 및 범위 밖 기간 거부',()=>{for(const expression of ['globalThis.process','constructor(1)','SMA(CLOSE, 0)','SMA(CLOSE, CLOSE)','CLOSE[0]'])assert.throws(()=>evaluate(expression,candles),expression);});
 test('수식 세트 유효성 및 중복 시스템 방지',()=>{defaults.forEach(f=>validateFormula(f));assert.equal(validateSet(defaults).length,defaults.length);assert.throws(()=>validateSet([...defaults,{...defaults[2],id:'another'}]));assert.throws(()=>validateSet([...defaults,defaults[0]]));});

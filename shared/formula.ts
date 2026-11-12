@@ -33,6 +33,7 @@ export const defaults:Formula[]=[
  {id:'donchian',name:'돈치안 고가',kind:'indicator',expression:'DCHIGH(20)',exitExpression:'',enabled:false,color:'#ed6b72',extraLines:[{name:'저가',expression:'DCLOW(20)',color:'#5d96e8',visible:true}]},
  {id:'tsi',name:'TSI',kind:'indicator',expression:'TSI(25, 13)',exitExpression:'',enabled:false,color:'#7ec8e3',pane:'separate'},
  {id:'mfi',name:'MFI',kind:'indicator',expression:'MFI(14)',exitExpression:'',enabled:false,color:'#d48ad4',pane:'separate'},
+ {id:'momentum',name:'모멘텀',kind:'indicator',expression:'C / C(기간) * 100',exitExpression:'',enabled:false,color:'#a8ec6a',variables:{기간:10},pane:'separate',baselines:[{value:100,color:'#718395',style:'dashed'}],description:'키움 모멘텀. C/C(기간)*100. 100선 위면 기간 전보다 상승. 별도 패널.'},
  {id:'cntrstr',name:'체결강도',kind:'indicator',expression:'STRENGTH',exitExpression:'',enabled:false,color:'#e8bd64',pane:'separate',primaryLine:{type:'line',width:2},baselines:[{value:100,color:'#718395',style:'dashed'},{value:50,color:'#5d96e8',style:'dotted'}],extraLines:[{name:'5이평',expression:'SMA(STRENGTH, 5)',color:'#8c83ec',visible:true,width:1},{name:'20이평',expression:'SMA(STRENGTH, 20)',color:'#6ab0c8',visible:true,width:1},{name:'60이평',expression:'SMA(STRENGTH, 60)',color:'#ed6b72',visible:true,width:1}],description:'체결강도와 5·20·60 이평. 빈 봉은 최대 2봉만 직전 값으로 잇고, 그 이상은 그리지 않는다.'}
 ];
 type Val=number|null;
