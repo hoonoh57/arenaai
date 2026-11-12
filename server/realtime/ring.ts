@@ -72,6 +72,26 @@ export class CandleRing {
     return this.ring.last()?.time ?? null;
   }
 
+  /** 진행 중 1분봉만 0B 체결가로 갱신. 과거 봉을 만들지 않는다. */
+  applyQuote(time: number, price: number, volume?: number): 'update' | 'new' | 'none' {
+    if (!Number.isFinite(time) || !(price > 0)) return 'none';
+    const bucket = Math.floor(time / 60) * 60;
+    const last = this.ring.last();
+    if (!last) return 'none';
+    if (last.time === bucket) {
+      last.high = Math.max(last.high, price);
+      last.low = Math.min(last.low, price);
+      last.close = price;
+      if (typeof volume === 'number' && volume > 0) last.volume = (last.volume || 0) + volume;
+      return 'update';
+    }
+    if (bucket > last.time) {
+      this.ring.push({time: bucket, open: price, high: price, low: price, close: price, ...(volume ? {volume} : {})});
+      return 'new';
+    }
+    return 'none';
+  }
+
   clear(): void {
     this.ring.clear();
   }

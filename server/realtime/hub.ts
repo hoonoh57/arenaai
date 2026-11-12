@@ -445,6 +445,10 @@ export class RealtimeHub {
         for (const fill of this.book.onQuote(quote.code, quote.price)) {
           this.pushEvent({time: fill.fillAt ?? receivedAt, code: fill.code, side: fill.side === 'buy' ? '모의 매수 체결' : '모의 매도 체결', price: fill.fillPrice ?? quote.price});
         }
+        if (quote.time !== null) {
+          const bar = this.cache.applyLiveQuote(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined);
+          if (bar === 'new') this.evaluateSignals(quote.code);
+        }
         this.maybeRefreshCandles(quote, today);
         continue;
       }
@@ -532,8 +536,14 @@ export class RealtimeHub {
       this.audit.record('signal', '동시 매수/매도 신호를 무시했습니다.', {code, barTime: last.time});
       return;
     }
-    if (result.buy) this.applySignal(code, last, 'buy');
-    if (result.sell) this.applySignal(code, last, 'sell');
+    if (result.buy) {
+      this.audit.record('signal', '매수 신호', {code, barTime: last.time, price: last.close});
+      this.applySignal(code, last, 'buy');
+    }
+    if (result.sell) {
+      this.audit.record('signal', '매도 신호', {code, barTime: last.time, price: last.close});
+      this.applySignal(code, last, 'sell');
+    }
   }
 
   private applySignal(code: string, bar: Candle, side: 'buy' | 'sell'): void {

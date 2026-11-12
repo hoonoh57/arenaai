@@ -706,6 +706,7 @@ function Pane(props: {
               </div>
               <StockMiniChart
                 code={s.code}
+                lastPrice={s.price}
                 cached={state.candles[s.code] || []}
                 formulas={props.formulasFor(s.code)}
                 height={cellH}
@@ -755,6 +756,7 @@ function Pane(props: {
 
 function StockMiniChart({
   code,
+  lastPrice,
   cached,
   formulas,
   height,
@@ -765,6 +767,7 @@ function StockMiniChart({
   onContext,
 }: {
   code: string;
+  lastPrice?: number;
   cached: Candle[];
   formulas: Formula[];
   height: number;
@@ -782,6 +785,17 @@ function StockMiniChart({
       setWait(false);
     }
   }, [cached]);
+  useEffect(() => {
+    if (!(lastPrice && lastPrice > 0)) return;
+    setBars((prev) => {
+      if (!prev.length) return prev;
+      const last = prev[prev.length - 1];
+      if (last.close === lastPrice) return prev;
+      const next = prev.slice();
+      next[next.length - 1] = {...last, close: lastPrice, high: Math.max(last.high, lastPrice), low: Math.min(last.low, lastPrice)};
+      return next;
+    });
+  }, [lastPrice]);
   useEffect(() => {
     if (!/^\d{6}$/.test(code) || cached.length) return;
     let stop = false;
@@ -1421,7 +1435,11 @@ function LogsPane() {
             <small>{new Date(e.at).toLocaleTimeString('ko-KR')}</small> [{e.category}] {e.message}
           </div>
         ))}
-        {!entries.length && <div className="empty-activity">오늘 기록이 없습니다.</div>}
+        {!entries.length && (
+          <div className="empty-activity">
+            오늘 매매/시스템 파일 로그가 없습니다. 차트 화살표는 수식 표시이며, 자동매매가 켜지고 확정 1분봉에서 신호가 나야 여기에 남습니다.
+          </div>
+        )}
       </div>
     </div>
   );

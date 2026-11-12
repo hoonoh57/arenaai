@@ -120,6 +120,17 @@ export class SharedCache {
     return this.candlesByCode.get(code)?.lastTime() ?? null;
   }
 
+  applyLiveQuote(code: string, time: number, price: number, volume?: number): 'update' | 'new' | 'none' {
+    const ring = this.candlesByCode.get(code);
+    if (!ring) return 'none';
+    const result = ring.applyQuote(time, price, volume);
+    if (result !== 'none') {
+      this.candleVersion += 1;
+      this.emit({kind: 'candles', code, lastTime: ring.lastTime()});
+    }
+    return result;
+  }
+
   clearCandles(code?: string): void {
     if (code) this.candlesByCode.delete(code);
     else this.candlesByCode.clear();
