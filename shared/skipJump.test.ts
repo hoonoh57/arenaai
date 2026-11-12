@@ -14,6 +14,8 @@ function f(over: Partial<SkipFeat> = {}): SkipFeat {
     strengthAccel: 0,
     turnover: 1e7,
     vsMa120: -0.01,
+    vsMa5: 0.002,
+    prevRet: 0.002,
     ma120Slope: 0,
     maAlign: 1,
     slopeReady: true,

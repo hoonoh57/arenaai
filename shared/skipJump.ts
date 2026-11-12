@@ -12,6 +12,8 @@ export type SkipFeat = {
   strengthAccel: number;
   turnover: number;
   vsMa120: number;
+  vsMa5: number;
+  prevRet: number;
   ma120Slope: number;
   maAlign: number;
   slopeReady: boolean;
@@ -118,46 +120,7 @@ export function ma120BreakSegments(candles: Candle[]): Ma120BreakSeg[] {
   return segs;
 }
 
-/**
- * 돌파 봉에서 SMA120 기울기를 고정하고 이탈까지 연장만 한다. 이후 봉으로 다시 맞추지 않음.
- */
-export function ma120FrozenSegments(candles: Candle[]): Ma120BreakSeg[] {
-  const n = candles.length;
-  if (n < 121) return [];
-  const segs: Ma120BreakSeg[] = [];
-  let start = -1;
-  let slope = 0;
-  let intercept = 0;
-  const push = (from: number, to: number, live: boolean) => {
-    if (to < from) return;
-    const points = [];
-    for (let i = from; i <= to; i++) {
-      points.push({time: candles[i].time, value: intercept + slope * (i - from), slope});
-    }
-    segs.push({start: from, end: to, live, slope, intercept, points});
-  };
-  for (let i = 120; i < n; i++) {
-    const above = aboveMa120(candles, i);
-    const prevAbove = aboveMa120(candles, i - 1);
-    if (start < 0) {
-      if ((above && !prevAbove) || (i === 120 && above)) {
-        start = i;
-        const win = ma120Window(candles, i, 40);
-        slope = win.length >= 4 ? linreg(win).slope : 0;
-        intercept = smaAt(candles, i, 120);
-      }
-      continue;
-    }
-    if (!above && prevAbove) {
-      push(start, i - 1, false);
-      start = -1;
-    }
-  }
-  if (start >= 0) push(start, n - 1, true);
-  return segs;
-}
-
-/** 차트: 구간별 고정 직선. 마지막 인자 호환용. */
+/** 차트: 구간별 SMA120 OLS. */
 export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, _look = 0): {time: number; value: number; slope: number}[] {
   const segs = ma120BreakSegments(at + 1 < candles.length ? candles.slice(0, at + 1) : candles);
   const last = segs[segs.length - 1];
@@ -188,10 +151,10 @@ export function skipFeatAt(candles: Candle[], at: number): SkipFeat {
   const str2 = at > 1 ? candles[at - 2].strength ?? 0 : 0;
   const strengthAccel = str - 2 * str1 + str2;
   const win = ma120Window(candles, at, 40);
-  const regime = ma120RegimeAt(candles, at);
-  const slope = regime.inRegime ? regime.slope : linreg(win).slope;
+  const slope = linreg(win).slope;
   const mid = win[0] || ma120 || 1;
   const ma120Slope = mid > 0 ? slope / mid : 0;
+  const prev = at > 0 ? candles[at - 1].close : 0;
   return {
     close: c.close,
     high: c.high,
@@ -203,6 +166,8 @@ export function skipFeatAt(candles: Candle[], at: number): SkipFeat {
     strengthAccel,
     turnover: c.turnover ?? 0,
     vsMa120: ma120 > 0 ? (c.close - ma120) / ma120 : 0,
+    vsMa5: ma5 > 0 ? (c.close - ma5) / ma5 : 0,
+    prevRet: prev > 0 ? (c.close - prev) / prev : 0,
     ma120Slope,
     maAlign: align,
     slopeReady: win.length >= 8,
@@ -221,6 +186,8 @@ export function skipFeat(c: Candle, ma120: number): SkipFeat {
     strengthAccel: 0,
     turnover: c.turnover ?? 0,
     vsMa120: ma120 > 0 ? (c.close - ma120) / ma120 : 0,
+    vsMa5: 0,
+    prevRet: c.open > 0 ? (c.close - c.open) / c.open : 0,
     ma120Slope: 0,
     maAlign: 0,
     slopeReady: false,
@@ -242,6 +209,8 @@ export function failEnvelope(fails: SkipFeat[]): SkipFeat {
     strengthAccel: mx((f) => f.strengthAccel),
     turnover: mx((f) => f.turnover),
     vsMa120: mx((f) => f.vsMa120),
+    vsMa5: mx((f) => f.vsMa5),
+    prevRet: mx((f) => f.prevRet),
     ma120Slope: mx((f) => f.ma120Slope),
     maAlign: mx((f) => f.maAlign),
     slopeReady: fails.some((f) => f.slopeReady),
@@ -300,6 +269,17 @@ export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpRepo
     beats += 1;
     parts.push('120추세상승');
   }
+  if (now.prevRet > 0) {
+    beats += 1;
+    parts.push('직전대비+');
+  }
+  if (now.vsMa5 > 0) {
+    beats += 1;
+    parts.push('5이격+');
+  }
+  if (now.vsMa120 > 0 && now.vsMa5 > 0 && now.prevRet > 0) {
+    parts.push('상승이격');
+  }
   const jump =
     Math.log(Math.max(1e-6, volR)) +
     Math.log(Math.max(1e-6, strR)) +
@@ -308,8 +288,12 @@ export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpRepo
     Math.log(Math.max(1e-6, Math.max(retR, 0.5))) +
     (now.maAlign - env.maAlign) * 0.15 +
     Math.max(0, now.ma120Slope) * 400 +
-    Math.max(0, now.strengthAccel) * 0.01;
-  const ok = !belowMa120 && !slopeDown && beats >= 2 && jump >= need;
+    Math.max(0, now.strengthAccel) * 0.01 +
+    Math.max(0, now.prevRet) * 80 +
+    Math.max(0, now.vsMa5) * 40 +
+    Math.max(0, now.vsMa120) * 20;
+  const gapDown = now.vsMa5 < 0 || now.prevRet <= 0;
+  const ok = !belowMa120 && !slopeDown && !gapDown && beats >= 2 && jump >= need;
   return {ok, jump, beats, parts, belowMa120, slopeDown};
 }
 

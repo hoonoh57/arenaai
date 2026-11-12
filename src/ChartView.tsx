@@ -17,7 +17,7 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import {ma120BreakSegments, ma120FrozenSegments} from '../shared/skipJump';
+import {ma120BreakSegments} from '../shared/skipJump';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -147,21 +147,6 @@ export function Chart({
           lineWidth: seg.live ? 3 : 2,
           lineStyle: seg.live && up ? LineStyle.Solid : LineStyle.Dashed,
           title: seg.live ? (up ? '120돌파추세+' : '120위추세-') : up ? '120구간+' : '120구간-',
-          priceLineVisible: false,
-          lastValueVisible: seg.live,
-          priceScaleId: 'right',
-        });
-        tLine.setData(seg.points.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
-        extras.current.push(tLine);
-      }
-      for (const seg of ma120FrozenSegments(bars)) {
-        if (seg.points.length < 2) continue;
-        const up = seg.slope > 0;
-        const tLine = chart.addSeries(LineSeries, {
-          color: up ? '#f0c674' : '#c97b84',
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          title: up ? '120고정추세+' : '120고정추세-',
           priceLineVisible: false,
           lastValueVisible: seg.live,
           priceScaleId: 'right',
