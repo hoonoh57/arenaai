@@ -141,6 +141,12 @@ export function ChartPane({
     if (/^\d{6}$/.test(code)) void load({code});
   }, [code, timeframe, baseDate]);
 
+  useEffect(() => {
+    if (strengthReady || !strengthHasMore || busy) return;
+    const t = window.setTimeout(() => void load({strengthOnly: true, force: true}), 8000);
+    return () => window.clearTimeout(t);
+  }, [strengthReady, strengthHasMore, strengthNextKey, busy]);
+
   const commitCode = (value: string) => {
     const next = value.replace(/\D/g, '').slice(0, 6);
     setCodeText(next);
