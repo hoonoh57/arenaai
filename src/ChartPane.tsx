@@ -67,6 +67,7 @@ export function ChartPane({
   const [name, setName] = useState(rankingName || '');
   const [bars, setBars] = useState<Candle[]>(cached);
   const [nextKey, setNextKey] = useState('');
+  const [strengthNextKey, setStrengthNextKey] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [viewCount, setViewCount] = useState(win.visibleBars || 200);
@@ -96,13 +97,16 @@ export function ChartPane({
         timeframe: opts.timeframe ?? timeframe,
         baseDate: opts.baseDate ?? baseDate,
         nextKey: opts.append ? nextKey : '',
+        strengthNextKey: opts.append ? strengthNextKey : '',
+        withStrength: enabled.has('cntrstr'),
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
       if (opts.overlay) setOverlay(next);
       else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
-      setHasMore(Boolean(d.hasMore));
+      setHasMore(Boolean(d.hasMore) || Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');
+      setStrengthNextKey(d.strengthNextKey || '');
     } catch (e) {
       setNotice((e as Error).message);
     } finally {

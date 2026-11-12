@@ -40,7 +40,8 @@ export function parseStrengthTicks(rows: unknown, hintSec: number): StrengthTick
     if (!Number.isFinite(time) || !Number.isFinite(strength)) continue;
     out.push({time, qty, strength});
   }
-  return out.sort((a, b) => a.time - b.time).filter((x, i, a) => i === 0 || x.time !== a[i - 1].time || x.qty !== a[i - 1].qty);
+  if (out.length >= 2 && out[0].time > out[out.length - 1].time) out.reverse();
+  return out.filter((x, i, a) => i === 0 || x.time !== a[i - 1].time || x.qty !== a[i - 1].qty);
 }
 
 /** 1~10주 등 소량 연속 매수(또는 동일 방향)로 튀는 체결강도를 50으로 둔다. */

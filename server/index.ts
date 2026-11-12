@@ -19,6 +19,7 @@ import {AuditLog} from './realtime/audit';
 import {appendAuditFile, loadAppConfig, readAuditFiles, saveAppConfig, listAuditDays, setTradeSession} from './appState';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
+import {ChartGate} from './realtime/chartGate';
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
@@ -139,6 +140,7 @@ const bridge = new DemandBridge({
   maxSubscriptions: caps.limits.maxSubscriptions,
 });
 
+const chartGate = new ChartGate();
 const REFRESH_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
 type AppConfig = {
   condition: string;
@@ -366,12 +368,21 @@ app.post('/api/chart', async (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
-    const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true});
+    const strengthNextKey = typeof req.body?.strengthNextKey === 'string' ? req.body.strengthNextKey : '';
+    const withStrength = Boolean(req.body?.withStrength);
+    const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
+    const page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
     let candles = page.candles;
     if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
-    if (req.body?.withStrength) {
+    let strengthHasMore = false;
+    let strengthKey = '';
+    if (withStrength) {
       try {
-        candles = await api.attachStrength(code, timeframe, candles);
+        const sKey = chartGate.key({kind: 'strength', code, timeframe, next: strengthNextKey});
+        const attached = await chartGate.load(sKey, () => api.attachStrength(code, timeframe, candles, strengthNextKey || undefined));
+        candles = attached.candles;
+        strengthHasMore = attached.hasMore;
+        strengthKey = attached.nextKey;
       } catch {
         /* 체결강도는 선택. 가격 봉은 그대로 반환 */
       }
@@ -385,6 +396,8 @@ app.post('/api/chart', async (req, res) => {
       candles,
       hasMore: page.hasMore,
       nextKey: page.nextKey,
+      strengthHasMore,
+      strengthNextKey: strengthKey,
       timeframe,
     });
   } catch (e) {

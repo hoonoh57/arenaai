@@ -83,14 +83,8 @@ async function put(path: string, body: unknown) {
 
 const TOOLS: {kind: WindowKind; label: string}[] = WINDOW_KINDS.map((kind) => ({kind, label: KIND_TITLE[kind]}));
 
-let chartQueue: Promise<unknown> = Promise.resolve();
 function queuedChart(code: string, timeframe: string, withStrength = false) {
-  const run = chartQueue.then(() => post('/api/chart', {code, timeframe, withStrength}));
-  chartQueue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
+  return post('/api/chart', {code, timeframe, withStrength});
 }
 
 export function DeskApp() {

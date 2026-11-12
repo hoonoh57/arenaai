@@ -1,6 +1,6 @@
 import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
-import {correctSmallLotStrength, fillStrengthOnCandles, parseStrengthTicks, strengthPageBudget, type StrengthTick} from '../shared/strength';
+import {correctSmallLotStrength, fillStrengthOnCandles, parseStrengthTicks, type StrengthTick} from '../shared/strength';
 import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
 
 type ObjectRow = Record<string, unknown>;
@@ -432,24 +432,15 @@ export class Kiwoom {
    * 차트 봉 수만큼 ka10046(분·틱) / ka10047(일·주·월)을 연속조회해 봉 시각에 맞춘다.
    * 소량 연속 매수 이상치는 50으로 보정한다.
    */
-  async attachStrength(code: string, timeframe: string, candles: Candle[]): Promise<Candle[]> {
-    if (!candles.length) return candles;
+  async attachStrength(code: string, timeframe: string, candles: Candle[], nextKey?: string): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
+    if (!candles.length) return {candles, hasMore: false, nextKey: ''};
     const daily = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
-    const hint = candles[candles.length - 1].time;
-    const oldest = candles[0].time;
-    let nextKey = '';
-    let all: StrengthTick[] = [];
-    const pages = strengthPageBudget(candles.length);
-    let hintSec = hint;
-    for (let i = 0; i < pages; i++) {
-      const page = await this.strengthPage({code, daily, hintSec, nextKey: nextKey || undefined});
-      all = [...page.ticks, ...all].sort((a, b) => a.time - b.time);
-      if (all.length) hintSec = Math.min(hintSec, all[0].time);
-      nextKey = page.nextKey;
-      if (all.some((t) => t.time <= oldest) || !page.hasMore || !nextKey) break;
-    }
-    const unique = all.filter((x, i, a) => i === 0 || x.time !== a[i - 1].time || x.qty !== a[i - 1].qty);
-    return fillStrengthOnCandles(candles, correctSmallLotStrength(unique), timeframe);
+    const page = await this.strengthPage({code, daily, hintSec: candles[candles.length - 1].time, nextKey: nextKey || undefined});
+    return {
+      candles: fillStrengthOnCandles(candles, correctSmallLotStrength(page.ticks), timeframe),
+      hasMore: page.hasMore,
+      nextKey: page.nextKey,
+    };
   }
 }
 
