@@ -47,6 +47,15 @@ function mergeBars(oldBars: Candle[], olderPage: Candle[]): Candle[] {
   return [...olderPage.filter((b) => !seen.has(b.time)), ...oldBars];
 }
 
+function mergeStrengthOnto(price: Candle[], withStr: Candle[]): Candle[] {
+  if (!price.length) return withStr;
+  const map = new Map(withStr.map((c) => [c.time, c.strength]));
+  return price.map((c) => {
+    const s = map.get(c.time);
+    return typeof s === 'number' && s > 0 ? {...c, strength: s} : c;
+  });
+}
+
 export function ChartPane({
   win,
   desk,
@@ -125,8 +134,8 @@ export function ChartPane({
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
       if (opts.overlay) setOverlay(next);
-      else if (!opts.strengthOnly) setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
-      else if (next.length) setBars(next);
+      else if (opts.strengthOnly) setBars((prev) => mergeStrengthOnto(prev.length ? prev : next, next));
+      else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
       setHasMore(Boolean(d.hasMore));
       setStrengthHasMore(Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');

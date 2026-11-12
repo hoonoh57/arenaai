@@ -148,6 +148,7 @@ const bridge = new DemandBridge({
 });
 
 const chartGate = new ChartGate();
+const lastChartBars = new Map<string, Candle[]>();
 const REFRESH_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
 type AppConfig = {
   condition: string;
@@ -468,10 +469,10 @@ app.post('/api/chart', async (req, res) => {
       const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
       page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
       candles = page.candles;
+      if (candles.length) lastChartBars.set(`${code}|${timeframe}|${baseDate}`, candles);
       if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
     } else {
-      candles = cache.candles(code);
-      if (!candles.length) candles = loadLocalBars(code, timeframe === 'D' || timeframe === 'W' || timeframe === 'M' ? timeframe : '1');
+      candles = lastChartBars.get(`${code}|${timeframe}|${baseDate}`) || [];
     }
     let strengthHasMore = false;
     let strengthKey = '';
