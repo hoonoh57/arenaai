@@ -1,6 +1,6 @@
 import type {Candle} from '../server/core';
 import {filterOn, type DelayContext, type FilterEnabled} from './patternFilters';
-import {adaptiveJumpNeed, failEnvelope, jumpVsFail, skipFeat, smaAt} from './skipJump';
+import {adaptiveJumpNeed, failEnvelope, jumpVsFail, skipFeatAt} from './skipJump';
 
 export type PatternMarket = {indexRet?: number; ma120Slope?: number};
 
@@ -234,10 +234,8 @@ export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: numbe
   const skip = candles[skipIndex];
   const last = candles[at];
   if (!skip || !last) return null;
-  const nowMa = smaAt(candles, at, 120);
-  const skipMa = smaAt(candles, skipIndex, 120);
-  const jumped = jumpVsFail(skipFeat(last, nowMa), failEnvelope([skipFeat(skip, skipMa)]), delay?.jumpNeed ?? adaptiveJumpNeed([], delay?.skip001N ?? 1));
-  if (jumped.belowMa120 || !jumped.ok) return null;
+  const jumped = jumpVsFail(skipFeatAt(candles, at), failEnvelope([skipFeatAt(candles, skipIndex)]), delay?.jumpNeed ?? adaptiveJumpNeed([], delay?.skip001N ?? 1));
+  if (jumped.belowMa120 || jumped.slopeDown || !jumped.ok) return null;
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + jumped.beats * 6));
   return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`실패피처 초월 jump${jumped.jump.toFixed(2)} ${jumped.parts.join('·')}`]};
 }

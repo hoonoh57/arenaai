@@ -17,6 +17,7 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
+import {ma120TrendPoints, smaAt} from '../shared/skipJump';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -129,6 +130,22 @@ export function Chart({
       chart.applyOptions({leftPriceScale: {visible: true, borderVisible: false}});
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
+    }
+    const smaPts = bars.map((c, i) => {
+      const v = smaAt(bars, i, 120);
+      return v > 0 ? {time: c.time as UTCTimestamp, value: v} : null;
+    }).filter((p): p is {time: UTCTimestamp; value: number} => Boolean(p));
+    if (smaPts.length) {
+      const smaLine = chart.addSeries(LineSeries, {color: '#8aa4b8', lineWidth: 1, lineStyle: LineStyle.Dotted, title: 'SMA120', priceLineVisible: false, lastValueVisible: true});
+      smaLine.setData(smaPts);
+      extras.current.push(smaLine);
+    }
+    const trend = ma120TrendPoints(bars);
+    if (trend.length) {
+      const up = trend[trend.length - 1].slope > 0;
+      const tLine = chart.addSeries(LineSeries, {color: up ? '#5d96e8' : '#ed6b72', lineWidth: 2, title: up ? '120추세+' : '120추세-', priceLineVisible: false, lastValueVisible: true});
+      tLine.setData(trend.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
+      extras.current.push(tLine);
     }
     const markers: SeriesMarker<UTCTimestamp>[] = [];
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {

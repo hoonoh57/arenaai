@@ -1,6 +1,6 @@
 import type {Candle} from '../server/core';
 
-/** 실패한 이평 진입(건너뜀) 봉의 피처. 지연봉이 이 봉투를 얼마나 넘는지가 적응 문턱. */
+/** 실패한 이평 진입 봉 피처. 지연봉이 이 봉투를 넘는지가 적응 문턱. */
 export type SkipFeat = {
   close: number;
   high: number;
@@ -9,8 +9,12 @@ export type SkipFeat = {
   barRet: number;
   volume: number;
   strength: number;
+  strengthAccel: number;
   turnover: number;
   vsMa120: number;
+  ma120Slope: number;
+  maAlign: number;
+  slopeReady: boolean;
 };
 
 export type JumpReport = {
@@ -19,6 +23,7 @@ export type JumpReport = {
   beats: number;
   parts: string[];
   belowMa120: boolean;
+  slopeDown: boolean;
 };
 
 export function smaAt(candles: Candle[], at: number, n = 120): number {
@@ -28,25 +33,110 @@ export function smaAt(candles: Candle[], at: number, n = 120): number {
   return s / n;
 }
 
-export function skipFeat(c: Candle, ma120: number): SkipFeat {
-  const range = c.high - c.low;
+/** OLS: y ~ a + b x, x = 0..n-1. slope는 봉당 가격. */
+export function linreg(ys: number[]): {intercept: number; slope: number} {
+  const n = ys.length;
+  if (n < 2) return {intercept: ys[0] || 0, slope: 0};
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += i;
+    sy += ys[i];
+    sxx += i * i;
+    sxy += i * ys[i];
+  }
+  const den = n * sxx - sx * sx;
+  const slope = den === 0 ? 0 : (n * sxy - sx * sy) / den;
+  const intercept = (sy - slope * sx) / n;
+  return {intercept, slope};
+}
+
+export function ma120Window(candles: Candle[], at: number, look = 40): number[] {
+  const out: number[] = [];
+  const from = Math.max(119, at - look + 1);
+  for (let i = from; i <= at; i++) {
+    const v = smaAt(candles, i, 120);
+    if (v > 0) out.push(v);
+  }
+  return out;
+}
+
+/** 차트에 그릴 120이평 직선 추세. */
+export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, look = 40): {time: number; value: number; slope: number}[] {
+  const from = Math.max(119, at - look + 1);
+  const ys: number[] = [];
+  const xs: number[] = [];
+  for (let i = from; i <= at; i++) {
+    const v = smaAt(candles, i, 120);
+    if (!(v > 0)) continue;
+    ys.push(v);
+    xs.push(i);
+  }
+  if (ys.length < 4) return [];
+  const {intercept, slope} = linreg(ys);
+  return ys.map((_, k) => ({time: candles[xs[k]].time, value: intercept + slope * k, slope}));
+}
+
+export function skipFeatAt(candles: Candle[], at: number): SkipFeat {
+  const c = candles[at];
+  const ma120 = smaAt(candles, at, 120);
+  const ma5 = smaAt(candles, at, 5);
+  const ma20 = smaAt(candles, at, 20);
+  const ma60 = smaAt(candles, at, 60);
+  let align = 0;
+  if (ma5 > 0 && ma20 > 0 && ma5 > ma20) align += 1;
+  if (ma20 > 0 && ma60 > 0 && ma20 > ma60) align += 1;
+  if (ma60 > 0 && ma120 > 0 && ma60 > ma120) align += 1;
+  if (c.close > ma5 && ma5 > 0) align += 1;
+  const str = c.strength ?? 0;
+  const str1 = at > 0 ? candles[at - 1].strength ?? 0 : 0;
+  const str2 = at > 1 ? candles[at - 2].strength ?? 0 : 0;
+  const strengthAccel = str - 2 * str1 + str2;
+  const win = ma120Window(candles, at, 40);
+  const slope = linreg(win).slope;
+  const mid = win[0] || ma120 || 1;
+  const ma120Slope = mid > 0 ? slope / mid : 0;
   return {
     close: c.close,
     high: c.high,
     low: c.low,
-    range,
+    range: c.high - c.low,
+    barRet: c.open > 0 ? (c.close - c.open) / c.open : 0,
+    volume: c.volume ?? 0,
+    strength: str,
+    strengthAccel,
+    turnover: c.turnover ?? 0,
+    vsMa120: ma120 > 0 ? (c.close - ma120) / ma120 : 0,
+    ma120Slope,
+    maAlign: align,
+    slopeReady: win.length >= 8,
+  };
+}
+
+export function skipFeat(c: Candle, ma120: number): SkipFeat {
+  return {
+    close: c.close,
+    high: c.high,
+    low: c.low,
+    range: c.high - c.low,
     barRet: c.open > 0 ? (c.close - c.open) / c.open : 0,
     volume: c.volume ?? 0,
     strength: c.strength ?? 0,
+    strengthAccel: 0,
     turnover: c.turnover ?? 0,
     vsMa120: ma120 > 0 ? (c.close - ma120) / ma120 : 0,
+    ma120Slope: 0,
+    maAlign: 0,
+    slopeReady: false,
   };
 }
 
 export function failEnvelope(fails: SkipFeat[]): SkipFeat {
   const n = fails.length || 1;
+  const mx = (pick: (f: SkipFeat) => number) => fails.reduce((m, f) => Math.max(m, pick(f)), -Infinity);
   const avg = (pick: (f: SkipFeat) => number) => fails.reduce((s, f) => s + pick(f), 0) / n;
-  const mx = (pick: (f: SkipFeat) => number) => fails.reduce((m, f) => Math.max(m, pick(f)), 0);
   return {
     close: mx((f) => f.close),
     high: mx((f) => f.high),
@@ -55,8 +145,12 @@ export function failEnvelope(fails: SkipFeat[]): SkipFeat {
     barRet: mx((f) => f.barRet),
     volume: mx((f) => f.volume),
     strength: mx((f) => f.strength),
+    strengthAccel: mx((f) => f.strengthAccel),
     turnover: mx((f) => f.turnover),
     vsMa120: mx((f) => f.vsMa120),
+    ma120Slope: mx((f) => f.ma120Slope),
+    maAlign: mx((f) => f.maAlign),
+    slopeReady: fails.some((f) => f.slopeReady),
   };
 }
 
@@ -65,12 +159,9 @@ function ratio(now: number, fail: number): number {
   return now / fail;
 }
 
-/**
- * 실패 피처 봉투 대비 현재 봉이 같은 가도인지, 새로 강한지.
- * jump = 각 피처 비율의 로그합. 1.0 ≈ 실패봉과 같음, 클수록 뛰어넘음.
- */
 export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpReport {
   const belowMa120 = now.vsMa120 < 0;
+  const slopeDown = now.slopeReady && now.ma120Slope <= 0;
   const parts: string[] = [];
   let beats = 0;
   const volR = ratio(now.volume, env.volume);
@@ -85,7 +176,15 @@ export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpRepo
   }
   if (strR >= 1.2) {
     beats += 1;
-    parts.push('강도초월');
+    parts.push('강도레벨초월');
+  }
+  if (now.strengthAccel > Math.max(0, env.strengthAccel) && now.strengthAccel > 0) {
+    beats += 1;
+    parts.push('강도가속');
+  }
+  if (now.maAlign >= 3 && now.maAlign > env.maAlign) {
+    beats += 1;
+    parts.push('이평정배열');
   }
   if (rngR >= 1.5) {
     beats += 1;
@@ -103,17 +202,23 @@ export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpRepo
     beats += 1;
     parts.push('실패고점돌파');
   }
+  if (now.ma120Slope > Math.max(0, env.ma120Slope)) {
+    beats += 1;
+    parts.push('120추세상승');
+  }
   const jump =
     Math.log(Math.max(1e-6, volR)) +
     Math.log(Math.max(1e-6, strR)) +
     Math.log(Math.max(1e-6, rngR)) +
     Math.log(Math.max(1e-6, Math.max(pxR, 0.5))) +
-    Math.log(Math.max(1e-6, Math.max(retR, 0.5)));
-  const ok = !belowMa120 && beats >= 2 && jump >= need;
-  return {ok, jump, beats, parts, belowMa120};
+    Math.log(Math.max(1e-6, Math.max(retR, 0.5))) +
+    (now.maAlign - env.maAlign) * 0.15 +
+    Math.max(0, now.ma120Slope) * 400 +
+    Math.max(0, now.strengthAccel) * 0.01;
+  const ok = !belowMa120 && !slopeDown && beats >= 2 && jump >= need;
+  return {ok, jump, beats, parts, belowMa120, slopeDown};
 }
 
-/** 손실 난 지연진입의 jump 평균을 문턱으로. 표본 없으면 약한 같은 가도는 막히게 1.2. */
 export function adaptiveJumpNeed(loserJumps: number[], nMul = 1): number {
   const base = 1.2;
   if (loserJumps.length < 3) return base * Math.max(0.5, nMul);
