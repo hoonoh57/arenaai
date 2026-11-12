@@ -3,6 +3,7 @@ import type {Candle} from '../server/core';
 import type {Formula} from '../shared/formula';
 import type {ChildWindow, VirtualDesk} from '../shared/desk';
 import {Chart} from './ChartView';
+import {DRAW_TOOLS} from '../shared/chartMenu';
 
 const TF = [
   {id: 'T1', label: '1틱'},
@@ -293,18 +294,9 @@ export function ChartPane({
           <button className="hts-tool" disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => void load({force: true})}>
             조회
           </button>
-          {([
-            ['cursor', '선택'],
-            ['hline', '수평'],
-            ['vline', '수직'],
-            ['trend', '추세'],
-            ['text', '메모'],
-            ['target', '목표'],
-            ['stop', '손절'],
-            ['entry', '진입'],
-          ] as const).map(([id, label]) => (
-            <button key={id} className={'hts-tool' + (drawTool === id ? ' on' : '')} onClick={() => setDrawTool(id)} title={label}>
-              {label}
+          {DRAW_TOOLS.map((t) => (
+            <button key={t.id} className={'hts-tool' + (drawTool === t.id ? ' on' : '')} onClick={() => setDrawTool(t.id)} title={t.menu}>
+              {t.label}
             </button>
           ))}
           <button className={'hts-tool' + (magnet ? ' on' : '')} onClick={() => setMagnet((v) => !v)} title="자석: 봉 시고저종에 붙임">
@@ -369,21 +361,38 @@ export function ChartPane({
         )}
         {menu && (
           <div className="ctx-menu" style={{left: menu.x, top: menu.y}} onMouseLeave={() => setMenu(null)}>
-            <button onClick={() => patchWin({formulaOpen: true})}>수식 탭</button>
-            <button onClick={() => patchWin({timeframe: '1'})}>1분봉</button>
-            <button onClick={() => patchWin({timeframe: 'D'})}>일봉</button>
-            <button onClick={() => patchWin({timeframe: 'W'})}>주봉</button>
-            <button onClick={() => patchWin({timeframe: 'M'})}>월봉</button>
-            <button onClick={() => setOverlay([])}>추종목 제거</button>
-            <button onClick={() => { setDrawTool('hline'); setMenu(null); }}>수평선</button>
-            <button onClick={() => { setDrawTool('vline'); setMenu(null); }}>수직선</button>
-            <button onClick={() => { setDrawTool('trend'); setMenu(null); }}>추세선</button>
-            <button onClick={() => { setDrawTool('text'); setMenu(null); }}>텍스트</button>
-            <button onClick={() => { setDrawTool('target'); setMenu(null); }}>목표선</button>
-            <button onClick={() => { setDrawTool('stop'); setMenu(null); }}>손절선</button>
-            <button onClick={() => { setDrawTool('entry'); setMenu(null); }}>진입마크</button>
-            <button onClick={() => { patchWin({drawings: []}); setMenu(null); }}>그림 모두 삭제</button>
-            <button onClick={() => setMenu(null)}>닫기</button>
+            <div className="g"><b>도구</b>
+              {DRAW_TOOLS.map((t) => (
+                <button key={t.id} className={drawTool === t.id ? 'on' : ''} onClick={() => { setDrawTool(t.id); setMenu(null); }}>{t.menu}</button>
+              ))}
+              <button className={magnet ? 'on' : ''} onClick={() => { setMagnet((v) => !v); setMenu(null); }}>{magnet ? '자석 끄기' : '자석 켜기'}</button>
+            </div>
+            <div className="g"><b>표시</b>
+              <button className={win.yMode === 'percent' ? 'on' : ''} onClick={() => { patchWin({yMode: win.yMode === 'percent' ? 'price' : 'percent'}); setMenu(null); }}>{win.yMode === 'percent' ? '가격축' : '등락률축'}</button>
+              <button className={win.daySep ? 'on' : ''} onClick={() => { patchWin({daySep: !win.daySep}); setMenu(null); }}>일 구분선</button>
+              <button className={win.refLines?.prev ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, prev: !win.refLines?.prev}}); setMenu(null); }}>전일종가</button>
+              <button className={win.refLines?.open ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, open: !win.refLines?.open}}); setMenu(null); }}>시가</button>
+              <button className={win.refLines?.vi ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, vi: !win.refLines?.vi}}); setMenu(null); }}>VI 예상</button>
+              <button className={formulaOpen ? 'on' : ''} onClick={() => { patchWin({formulaOpen: !formulaOpen}); setMenu(null); }}>수식 탭</button>
+            </div>
+            <div className="g"><b>주기</b>
+              {TF.map((t) => (
+                <button key={t.id} className={timeframe === t.id ? 'on' : ''} onClick={() => { patchWin({timeframe: t.id}); setMenu(null); }}>{t.label}</button>
+              ))}
+            </div>
+            <div className="g"><b>데이터</b>
+              <button disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => { void load({force: true}); setMenu(null); }}>조회</button>
+              <button disabled={!hasMore || busy} onClick={() => { void load({append: true}); setMenu(null); }}>+이전</button>
+              <button disabled={busy} onClick={() => { void load({strengthOnly: true, force: true}); setMenu(null); }}>{strengthReady ? '강도완료' : '강도+이전'}</button>
+              <button onClick={() => { setOverlay([]); setMenu(null); }}>추종목 제거</button>
+            </div>
+            <div className="g"><b>그림</b>
+              <button onClick={() => { patchWin({drawings: (win.drawings || []).slice(0, -1)}); setMenu(null); }}>마지막 지우기</button>
+              <button onClick={() => { patchWin({drawings: []}); setMenu(null); }}>그림 모두 삭제</button>
+            </div>
+            <div className="g">
+              <button onClick={() => setMenu(null)}>닫기</button>
+            </div>
           </div>
         )}
         {editor && editor.kind !== 'function' && (

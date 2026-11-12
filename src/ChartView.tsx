@@ -7,6 +7,7 @@ import {
   ColorType,
   LineStyle,
   PriceScaleMode,
+  CrosshairMode,
   createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
@@ -293,6 +294,7 @@ export function Chart({
       },
       rightPriceScale: {borderVisible: false, visible: true},
       crosshair: {
+        mode: magnetRef.current ? CrosshairMode.MagnetOHLC : CrosshairMode.Normal,
         vertLine: {color: '#516576', labelVisible: true, labelBackgroundColor: '#1c2a35'},
         horzLine: {color: '#516576', labelVisible: true, labelBackgroundColor: '#1c2a35'},
       },
@@ -386,12 +388,13 @@ export function Chart({
   useEffect(() => {
     chartRef.current?.applyOptions({
       grid: {vertLines: {visible: grid}, horzLines: {visible: grid}},
+      crosshair: {mode: magnet ? CrosshairMode.MagnetOHLC : CrosshairMode.Normal},
     });
     chartRef.current?.priceScale('right').applyOptions({
       mode: logScale && yMode !== 'percent' ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
     });
     paint();
-  }, [grid, logScale, yMode]);
+  }, [grid, logScale, yMode, magnet]);
 
   useEffect(() => {
     paint();
