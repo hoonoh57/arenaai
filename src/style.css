@@ -118,9 +118,9 @@
 .rank-name{background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer}
 .dock-group small{color:#6f857c}
 .chart-host{position:relative}.chart-draw{z-index:2;overflow:hidden}.chart-toolbar{flex-wrap:wrap}
-.pane-legend{position:absolute;left:6px;right:52px;z-index:5;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;padding:3px 4px;pointer-events:auto;border-left:2px solid transparent}
-.pane-legend.on{border-left-color:#b9ef78;background:#b9ef7814}
-.pane-legend .lg{background:#111923e8;border:1px solid #2a3d33;border-radius:3px;font-size:10px;padding:2px 7px;cursor:grab;max-width:100%;text-align:left;color:inherit}
+.pane-legend{position:absolute;left:6px;right:52px;z-index:5;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;padding:3px 4px;pointer-events:none;border-left:2px solid transparent;max-height:52px;overflow:hidden}
+.pane-legend.on{border-left-color:#b9ef78}
+.pane-legend .lg{pointer-events:auto;background:#111923e8;border:1px solid #2a3d33;border-radius:3px;font-size:10px;padding:2px 7px;cursor:grab;max-width:100%;text-align:left;color:inherit}
 .verify-pane label{display:flex;justify-content:space-between;gap:8px;margin:8px 0;color:#a9b7bf;font-size:11px}.verify-pane select,.verify-pane input[type=date]{background:#0e151e;border:1px solid #30404b;color:#d3dde2;border-radius:4px;padding:6px}.verify-stats{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#cfe3d3;margin:8px 0}.verify-result{margin-top:12px}
 .verify-1516{height:100%;overflow:auto;padding:8px 10px;font-size:12px}
 .v16-banner{background:#1a2740;color:#d5e2f0;padding:8px 10px;border-radius:4px;margin-bottom:8px}

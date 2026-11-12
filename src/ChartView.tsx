@@ -598,15 +598,24 @@ export function Chart({
         <div
           key={row.slot}
           className={'pane-legend' + (selectedPane === row.slot ? ' on' : '')}
-          style={{top: row.top, height: row.height}}
-          onClick={() => onSelectPane?.(row.slot)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const id = e.dataTransfer.getData('text/plain');
-            if (id) onMoveIndicator?.(id, row.slot);
-          }}
+          style={{top: row.top}}
         >
+          <button
+            className="lg pane-hit"
+            title="패널 선택 · 여기로 드롭하면 오버레이"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectPane?.(row.slot);
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const id = e.dataTransfer.getData('text/plain');
+              if (id) onMoveIndicator?.(id, row.slot);
+            }}
+          >
+            {row.slot === 0 ? '가격' : `패널${row.slot}`}
+          </button>
           {row.items.map((it) => {
             const raw = hoverIdx >= 0 ? valuesById.current[it.id]?.[hoverIdx] : undefined;
             const hv = typeof raw === 'number' && Number.isFinite(raw) ? raw.toFixed(2) : '';
