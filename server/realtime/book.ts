@@ -204,9 +204,13 @@ export class SimulationBook {
         limitPrice: live.limitPrice,
       });
       live.brokerOrdNo = ordNo;
-      live.reason = '키움 모의계좌 접수 (체결은 계좌 미체결/체결 조회)';
+      live.reason = '키움 모의계좌 접수';
       live.updatedAt = this.now();
       this.audit.record('order', '키움 모의 주문을 전송했습니다.', {id: live.id, ordNo, code: live.code, side: live.side});
+      const px = this.lastPrice(live.code);
+      if (px && (live.type === 'market' || !live.limitPrice)) {
+        this.fill(live, px, '키움 모의 시장가 체결 반영');
+      }
     } catch (error) {
       live.status = 'cancelled';
       live.reason = error instanceof Error ? error.message : '모의 주문 실패';
@@ -219,7 +223,7 @@ export class SimulationBook {
 
   /** Called on every realtime quote. Fills working orders that the quote satisfies. */
   onQuote(code: string, price: number): SimOrder[] {
-    if (this.fillMode !== 'assumed') return [];
+    if (this.fillMode !== 'assumed' && this.fillMode !== 'kiwoom-mock') return [];
     if (!Number.isFinite(price) || price <= 0) return [];
     const filled: SimOrder[] = [];
     for (const order of this.orders.values()) {

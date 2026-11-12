@@ -719,6 +719,11 @@ app.post('/api/recapture', async (_req, res) => {
     res.status(400).json({error: e instanceof Error ? e.message : '재포착 실패'});
   }
 });
+app.post('/api/autotop', (req, res) => {
+  config = {...config, autoTopCharts: req.body?.autoTopCharts !== false};
+  saveAppConfig(config);
+  res.json({ok: true, autoTopCharts: config.autoTopCharts});
+});
 app.post('/api/lock', (req, res) => {
   try {
     const code = typeof req.body?.code === 'string' ? req.body.code : '';

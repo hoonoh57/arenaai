@@ -1299,6 +1299,19 @@ function ScannerPane(props: {
         <input type="range" min={1} max={40} value={draft.count} onChange={(e) => props.setDraft({...draft, count: Number(e.target.value)})} />
         <label>목록 갱신 주기</label>
         <label>
+          <input
+            type="checkbox"
+            checked={draft.autoTopCharts !== false}
+            onChange={(e) => {
+              const autoTopCharts = e.target.checked;
+              props.setDraft({...draft, autoTopCharts});
+              void post('/api/autotop', {autoTopCharts}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
+            }}
+          />
+          종목전환 {draft.autoTopCharts !== false ? '켜짐' : '꺼짐'}
+        </label>
+        <p className="editor-hint">끄면 왼쪽 순위가 바뀌어도 멀티차트 종목을 바꾸지 않습니다. 보유·잠금 종목은 항상 유지합니다.</p>
+        <label>
           자동매매 종목 수 <b>{draft.tradeSlots ?? 4}개</b>
         </label>
         <input
@@ -1578,7 +1591,7 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
     <div className="book-pane">
       <p className="panel-desc">
         {book?.fillMode === 'kiwoom-mock'
-          ? '키움 모의계좌 주문(kt10000/01/03). 실전 주문 없음. 체결은 계좌 응답 기준.'
+          ? '키움 모의 시장가는 접수 후 체결로 반영합니다. 지정가는 시세 도달 시 반영합니다.'
           : '가정 체결 · 키움 주문 없음 · 관측 가격만 사용'}
       </p>
       <label className="hts-var">
@@ -1596,11 +1609,15 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
         <button className="apply" onClick={() => void run('/api/book/cancel', {})}>미체결 일괄 취소</button>
       </div>
       <h3>보유현황</h3>
-      {book?.holdings.length ? book.holdings.map((h) => (
+      {book?.holdings.length ? book.holdings.map((h) => {
+        const live = state.ranking.find((s) => s.code === h.code);
+        const px = live?.price || h.avgPrice;
+        const pnl = h.avgPrice > 0 ? ((px - h.avgPrice) / h.avgPrice) * 100 : 0;
+        return (
         <div className="rank-row" key={h.code}>
           <div className="rank-name">
-            <b>{h.code}</b>
-            <small>{h.qty}주 · 평균 {fmt(Math.round(h.avgPrice))}원</small>
+            <b>{live?.name || h.code}</b>
+            <small>{h.qty}주 · 평균 {fmt(Math.round(h.avgPrice))}원 · 현재 {fmt(Math.round(px))}원 · <span className={pnl >= 0 ? 'positive' : 'negative'}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</span></small>
           </div>
           <button className="text-button" onClick={() => void run('/api/book/sell', {code: h.code, type: 'market'})}>시장가 매도</button>
           <button className="text-button" onClick={() => {
@@ -1608,7 +1625,7 @@ function BookPane({state, load, setNotice}: {state: State; load: () => Promise<v
             if (Number.isFinite(limit) && limit > 0) void run('/api/book/sell', {code: h.code, type: 'limit', limitPrice: limit});
           }}>지정 매도</button>
         </div>
-      )) : <div className="empty-activity">모의 보유가 없습니다.</div>}
+      ); }) : <div className="empty-activity">모의 보유가 없습니다.</div>}
       <h3>미체결현황</h3>
       {book?.working.length ? book.working.map((o) => (
         <div className="rank-row" key={o.id}>
