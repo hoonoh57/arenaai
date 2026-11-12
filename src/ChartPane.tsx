@@ -374,10 +374,7 @@ export function ChartPane({
             magnet={magnet}
             viewState={win.chartView}
             onViewState={(s) => {
-              if (viewTimer.current) window.clearTimeout(viewTimer.current);
-              viewTimer.current = window.setTimeout(() => {
-                patchWin({chartView: {...win.chartView, ...s, magnet, selectedPane: selPane}});
-              }, 80);
+              patchWin({chartView: {...(win.chartView || {}), ...s, magnet, selectedPane: selPane}});
             }}
             paneById={paneById}
             selectedPane={selPane}

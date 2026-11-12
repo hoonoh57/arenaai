@@ -141,7 +141,7 @@ export function Chart({
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
   const height = Math.max(120, chartHeight);
 
-  const emitView = () => {
+  const emitView = (save = true) => {
     const chart = chartRef.current as (IChartApi & {panes?: () => {getHeight?: () => number}[]}) | null;
     if (!chart) return;
     let stretch: number[] | undefined;
@@ -165,6 +165,7 @@ export function Chart({
     } catch {
       /* view */
     }
+    if (!save) return;
     const range = rangeRef.current;
     if (range) viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: stretch});
   };
@@ -560,11 +561,13 @@ export function Chart({
     paint();
     const onPtr = (e: PointerEvent) => {
       if (e.type === 'pointermove' && e.buttons === 0) return;
-      emitView();
+      emitView(e.type !== 'pointermove');
     };
     const el = host.current;
     el.addEventListener('pointermove', onPtr);
     el.addEventListener('pointerup', onPtr);
+    window.addEventListener('pointerup', onPtr, true);
+    window.addEventListener('pointermove', onPtr, true);
     const ro = new ResizeObserver(() => {
       const box = host.current?.getBoundingClientRect();
       if (!box || box.width < 8 || box.height < 8) return;
@@ -574,8 +577,11 @@ export function Chart({
     });
     ro.observe(el);
     return () => {
+      emitView();
       el.removeEventListener('pointermove', onPtr);
       el.removeEventListener('pointerup', onPtr);
+      window.removeEventListener('pointerup', onPtr, true);
+      window.removeEventListener('pointermove', onPtr, true);
       ro.disconnect();
       extras.current = [];
       markersRef.current = null;

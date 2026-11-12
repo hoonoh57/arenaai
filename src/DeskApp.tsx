@@ -166,7 +166,7 @@ export function DeskApp() {
       const n = Number(e.key);
       if (n >= 1 && n <= 8 && workspace.desks.some((d) => d.number === n)) {
         e.preventDefault();
-        persist({...workspace, active: n});
+        persist({...workspaceRef.current, active: n});
       }
     };
     window.addEventListener('keydown', onKey);
@@ -174,7 +174,7 @@ export function DeskApp() {
   }, [workspace, persist]);
 
   const desk = activeDesk(workspace);
-  const updateDesk = (next: VirtualDesk) => persist(replaceDesk({...workspace, active: next.number}, next));
+  const updateDesk = (next: VirtualDesk) => persist(replaceDesk(workspaceRef.current, next));
 
   const addWindow = (kind: WindowKind) => {
     if (kind === 'logs') {
@@ -297,7 +297,7 @@ export function DeskApp() {
         <div className="hts-brand">KIWOOM <span>VIRTUAL DESK</span></div>
         <div className="desk-tabs">
           {workspace.desks.map((item) => (
-            <button key={item.id} className={item.number === desk.number ? 'on' : ''} onClick={() => persist({...workspace, active: item.number})}>
+            <button key={item.id} className={item.number === desk.number ? 'on' : ''} onClick={() => persist({...workspaceRef.current, active: item.number})}>
               {item.number}
             </button>
           ))}
