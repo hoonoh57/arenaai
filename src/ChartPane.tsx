@@ -34,6 +34,14 @@ async function post(path: string, body?: unknown) {
   return d;
 }
 
+const fetchCool = new Map<string, number>();
+function chartTooSoon(key: string, ms = 25_000): boolean {
+  const at = fetchCool.get(key) || 0;
+  if (Date.now() - at < ms) return true;
+  fetchCool.set(key, Date.now());
+  return false;
+}
+
 function mergeBars(oldBars: Candle[], olderPage: Candle[]): Candle[] {
   const seen = new Set(oldBars.map((b) => b.time));
   return [...olderPage.filter((b) => !seen.has(b.time)), ...oldBars];
@@ -93,9 +101,11 @@ export function ChartPane({
     if (rankingName) setName(rankingName);
   }, [rankingName]);
 
-  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean; overlay?: boolean} = {}) => {
+  const load = async (opts: {code?: string; timeframe?: string; baseDate?: string; append?: boolean; overlay?: boolean; force?: boolean} = {}) => {
     const useCode = opts.code ?? codeText;
     if (!/^\d{6}$/.test(useCode)) return;
+    const coolKey = `${useCode}|${opts.timeframe ?? timeframe}|${opts.baseDate ?? baseDate}|${opts.append ? 'a' : '1'}`;
+    if (!opts.append && !opts.force && chartTooSoon(coolKey) && bars.length) return;
     setBusy(true);
     try {
       const d = await post('/api/chart', {
@@ -234,7 +244,7 @@ export function ChartPane({
           <button className="hts-tool" disabled={!hasMore || busy} onClick={() => void load({append: true})} title="이전 페이지 추가">
             +이전
           </button>
-          <button className="hts-tool" disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => void load()}>
+          <button className="hts-tool" disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => void load({force: true})}>
             조회
           </button>
           {([

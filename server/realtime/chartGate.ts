@@ -4,7 +4,7 @@
 export class ChartGate {
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly cache = new Map<string, {at: number; value: unknown}>();
-  constructor(private readonly ttlMs = 8000) {}
+  constructor(private readonly ttlMs = 60_000) {}
 
   key(parts: Record<string, string | boolean | undefined>): string {
     return Object.entries(parts)

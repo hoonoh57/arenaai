@@ -462,11 +462,15 @@ export class Kiwoom {
       const hour = page.unified ? 8 : 9;
       const minute = page.unified ? 30 : 0;
       let n = 1;
-      while (!reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute) && page.hasMore && page.nextKey && n < 20) {
-        const older = await this.strengthPage({code, daily, hintSec: ticks[0]?.time ?? hint, nextKey: page.nextKey});
-        ticks = mergeTicks(older.ticks, ticks);
-        page = older;
-        n += 1;
+      while (!reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute) && page.hasMore && page.nextKey && n < 2) {
+        try {
+          const older = await this.strengthPage({code, daily, hintSec: ticks[0]?.time ?? hint, nextKey: page.nextKey});
+          ticks = mergeTicks(older.ticks, ticks);
+          page = older;
+          n += 1;
+        } catch {
+          break;
+        }
       }
     }
     const nxt = page.unified || hasMorningSession(candles);
