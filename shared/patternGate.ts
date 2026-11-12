@@ -147,19 +147,27 @@ export function measureSurge(session: Candle[]): {ok: boolean; parts: string[]; 
   return {ok, parts, bonus: Math.min(25, parts.length * 8)};
 }
 
-function confirmAfterSkip(session: Candle[], skip: Candle): {ok: boolean; parts: string[]; bonus: number} {
+function confirmAfterSkip(session: Candle[], skip: Candle, nextBar: boolean): {ok: boolean; parts: string[]; bonus: number} {
   const surge = measureSurge(session);
   const last = session[session.length - 1];
   if (!last) return surge;
   const body = last.open > 0 ? (last.close - last.open) / last.open : 0;
-  const green = last.close > last.open;
-  const lift = last.close > skip.high || last.close >= skip.close * 1.008;
-  const str = typeof last.strength === 'number' && last.strength >= 120;
+  const prev = session.slice(-8, -1);
+  const strPrev = mean(prev.map((b) => b.strength).filter((s): s is number => typeof s === 'number' && s > 0));
+  const hhhl = last.high > skip.high && last.low >= skip.low;
+  const strJump = typeof last.strength === 'number' && typeof skip.strength === 'number' && last.strength > skip.strength * 1.08;
+  const strGap = typeof last.strength === 'number' && strPrev > 0 && last.strength >= strPrev * 1.1;
+  const volJump = typeof last.volume === 'number' && typeof skip.volume === 'number' && skip.volume > 0 && last.volume >= skip.volume * 1.3;
+  const turnJump = typeof last.turnover === 'number' && typeof skip.turnover === 'number' && skip.turnover > 0 && last.turnover >= skip.turnover * 1.3;
+  const upClose = last.close > skip.close;
   const extra: string[] = [...surge.parts];
-  if (green && lift) extra.push('건너뜀고점돌파');
-  if (str) extra.push('강도확인');
-  if (body >= 0.008 && green) extra.push('양봉확인');
-  const ok = surge.ok || (green && (lift || str || body >= 0.008));
+  if (hhhl) extra.push('고저상향');
+  if (strJump || strGap) extra.push('강도이격');
+  if (volJump || turnJump) extra.push('대금급증');
+  if (body >= 0.005 && last.close >= last.open) extra.push('봉상승');
+  if (upClose) extra.push('종가상향');
+  const meaningful = hhhl || strJump || strGap || volJump || turnJump || (body >= 0.005 && last.close >= last.open) || last.close > skip.high;
+  const ok = nextBar ? upClose && meaningful : surge.ok || meaningful;
   return {ok, parts: extra, bonus: Math.min(25, extra.length * 8)};
 }
 
@@ -170,8 +178,6 @@ function confirmAfterSkip(session: Candle[], skip: Candle): {ok: boolean; parts:
 export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean, filters?: FilterEnabled): PatternVerdict | null {
   if (!filterOn(filters, 'delayed-buy')) return null;
   if (at < 1 || at >= candles.length) return null;
-  const now = judgePattern(candles, at, filters);
-  if (now.tag === '급등후횡보') return null;
   let lastSkip = -1;
   for (let i = 0; i < at; i++) {
     if (!hadSignal(i)) continue;
@@ -183,9 +189,14 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
     if (!j.allow) lastSkip = i;
     else lastSkip = -1;
   }
+  const nextBar = lastSkip >= 0 && at - lastSkip === 1;
+  if (!nextBar) {
+    const now = judgePattern(candles, at, filters);
+    if (now.tag === '급등후횡보') return null;
+  }
   if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;
   const session = sessionSlice(candles, at);
-  const surge = confirmAfterSkip(session, candles[lastSkip]);
+  const surge = confirmAfterSkip(session, candles[lastSkip], nextBar);
   if (!surge.ok) return null;
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
   const recross = hadSignal(at);

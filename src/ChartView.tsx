@@ -158,7 +158,8 @@ export function Chart({
         let lastSkip = -1;
         let delayedUsed = false;
         bars.forEach((c, i) => {
-          if (c.time + 60 > Math.floor(Date.now() / 1000)) return;
+          const step = bars.length >= 2 ? Math.max(60, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
+          if (c.time + step > Math.floor(Date.now() / 1000)) return;
           if (values[i] && exits[i]) return;
           if (values[i]) {
             if (f.kind === 'system') {
