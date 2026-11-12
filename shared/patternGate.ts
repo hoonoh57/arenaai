@@ -1,6 +1,6 @@
 import type {Candle} from '../server/core';
 import {filterOn, type DelayContext, type FilterEnabled} from './patternFilters';
-import {adaptiveJumpNeed, failEnvelope, jumpVsFail, skipFeatAt} from './skipJump';
+import {adaptiveJumpNeed, delayHardGates, failEnvelope, jumpVsFail, skipFeatAt} from './skipJump';
 
 export type PatternMarket = {indexRet?: number; ma120Slope?: number};
 
@@ -230,14 +230,20 @@ function confirmAfterSkip(session: Candle[], skip: Candle, nextBar: boolean): {o
 /** Chart/평가기가 이미 알고 있는 건너뜀 봉 이후 확인. */
 export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: number, filters?: FilterEnabled, delay?: DelayContext): PatternVerdict | null {
   if (!filterOn(filters, 'delayed-buy')) return null;
-  if (skipIndex < 0 || at <= skipIndex || at - skipIndex > 80 || at >= candles.length) return null;
+  if (skipIndex < 0 || at <= skipIndex || at - skipIndex > 200 || at >= candles.length) return null;
   const skip = candles[skipIndex];
   const last = candles[at];
   if (!skip || !last) return null;
+  const gates = delayHardGates(candles, at);
+  if (!gates.ok) return null;
   const jumped = jumpVsFail(skipFeatAt(candles, at), failEnvelope([skipFeatAt(candles, skipIndex)]), delay?.jumpNeed ?? adaptiveJumpNeed([], delay?.skip001N ?? 1));
-  if (jumped.belowMa120 || jumped.slopeDown || !jumped.ok) return null;
+  const strBeat = (last.strength ?? 0) >= Math.max(skip.strength ?? 0, 1) * 1.08;
+  const volBeat = (last.volume ?? 0) >= Math.max(skip.volume ?? 0, 1) * 1.3;
+  if (jumped.belowMa120) return null;
+  if (!strBeat && !volBeat) return null;
+  if (jumped.beats < 2 && !jumped.ok) return null;
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + jumped.beats * 6));
-  return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`실패피처 초월 jump${jumped.jump.toFixed(2)} ${jumped.parts.join('·')}`]};
+  return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`${gates.parts.join('·')} ${jumped.parts.join('·')}`.trim()]};
 }
 
 /**

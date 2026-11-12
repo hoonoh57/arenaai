@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {adaptiveJumpNeed, failEnvelope, jumpVsFail, skipFeat, type SkipFeat} from './skipJump';
+import {adaptiveJumpNeed, delayHardGates, failEnvelope, jumpVsFail, skipFeat, type SkipFeat} from './skipJump';
 
 function f(over: Partial<SkipFeat> = {}): SkipFeat {
   return {
@@ -52,6 +52,28 @@ test('실패 고점·거래량·강도·정배열·양의 120기울기를 넘으
   const j = jumpVsFail(now, env, 1.2);
   assert.equal(j.ok, true);
   assert.ok(j.beats >= 2);
+});
+
+test('음봉·강도알파 미달은 하드게이트에서 막힌다', () => {
+  const t0 = 1_700_000_000;
+  const c = Array.from({length: 130}, (_, i) => ({
+    time: t0 + i * 60,
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100.2 + i * 0.02,
+    volume: 100,
+    strength: 80 + i * 0.1,
+  }));
+  const red = c.length - 1;
+  c[red].open = 110;
+  c[red].close = 108;
+  assert.equal(delayHardGates(c, red).ok, false);
+  c[red].open = 108;
+  c[red].close = 110;
+  c[red].strength = 50;
+  c[red - 1].strength = 90;
+  assert.equal(delayHardGates(c, red).ok, false);
 });
 
 test('손실 지연의 jump가 크면 다음 문턱이 올라간다', () => {

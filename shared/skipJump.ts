@@ -219,6 +219,48 @@ export function jumpVsFail(now: SkipFeat, env: SkipFeat, need: number): JumpRepo
   return {ok, jump, beats, parts, belowMa120, slopeDown};
 }
 
+export const STR_ALPHA = 1.08;
+
+export function strengthSma(candles: Candle[], at: number, n = 5): number {
+  let s = 0;
+  let k = 0;
+  for (let i = Math.max(0, at - n + 1); i <= at; i++) {
+    const v = candles[i].strength;
+    if (typeof v === 'number' && v > 0) {
+      s += v;
+      k += 1;
+    }
+  }
+  return k ? s / k : 0;
+}
+
+/** 음봉·120아래·120하락·강도 미달은 지연 불가. */
+export function delayHardGates(candles: Candle[], at: number): {ok: boolean; parts: string[]} {
+  const last = candles[at];
+  if (!last) return {ok: false, parts: []};
+  const parts: string[] = [];
+  if (last.close < last.open) return {ok: false, parts: ['음봉']};
+  const ma = smaAt(candles, at, 120);
+  if (ma > 0 && last.close < ma) return {ok: false, parts: ['120아래']};
+  if (at >= 5) {
+    const prevMa = smaAt(candles, at - 5, 120);
+    if (ma > 0 && prevMa > 0 && ma <= prevMa) return {ok: false, parts: ['120하락']};
+    if (ma > prevMa) parts.push('120상승');
+  }
+  const str = last.strength ?? 0;
+  const prev = at > 0 ? candles[at - 1].strength ?? 0 : 0;
+  const sma5 = strengthSma(candles, at, 5);
+  const haveStr = str > 0 && (prev > 0 || sma5 > 0);
+  if (haveStr) {
+    if (prev > 0 && str < prev * STR_ALPHA) return {ok: false, parts: ['강도알파미달']};
+    if (sma5 > 0 && str < sma5) return {ok: false, parts: ['강도5이평미달']};
+    parts.push('강도확인');
+  }
+  parts.push('양봉');
+  if (ma > 0 && last.close >= ma) parts.push('120위');
+  return {ok: true, parts};
+}
+
 export function adaptiveJumpNeed(loserJumps: number[], nMul = 1): number {
   const base = 1.2;
   if (loserJumps.length < 3) return base * Math.max(0.5, nMul);
