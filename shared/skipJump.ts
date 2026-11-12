@@ -78,39 +78,35 @@ function aboveMa120(candles: Candle[], i: number): boolean {
 }
 
 /**
- * 종가 120 상승돌파에서 기울기 고정, 하락돌파 전까지 연장.
- * 돌파 시점까지의 SMA120만으로 OLS — 이후 봉은 선에 넣지 않음(비리페인트).
+ * 종가가 120을 위로 뚫은 봉부터, 다시 깨기 전까지.
+ * OLS 입력은 그 구간 SMA120만(가격 아님). 필터는 at까지 슬라이스.
  */
 export function ma120BreakSegments(candles: Candle[]): Ma120BreakSeg[] {
   const n = candles.length;
   if (n < 121) return [];
   const segs: Ma120BreakSeg[] = [];
   let start = -1;
-  let slope = 0;
-  let intercept = 0;
   const push = (from: number, to: number, live: boolean) => {
     if (to < from) return;
-    const points = [];
+    const ys: number[] = [];
     for (let i = from; i <= to; i++) {
-      points.push({time: candles[i].time, value: intercept + slope * (i - from), slope});
+      const v = smaAt(candles, i, 120);
+      if (v > 0) ys.push(v);
     }
+    if (ys.length < 2) return;
+    const {intercept, slope} = linreg(ys);
+    const points = ys.map((_, k) => ({
+      time: candles[from + k].time,
+      value: intercept + slope * k,
+      slope,
+    }));
     segs.push({start: from, end: to, live, slope, intercept, points});
   };
   for (let i = 120; i < n; i++) {
     const above = aboveMa120(candles, i);
     const prevAbove = aboveMa120(candles, i - 1);
     if (start < 0) {
-      if (above && !prevAbove) {
-        start = i;
-        const win = ma120Window(candles, i, 40);
-        slope = win.length >= 4 ? linreg(win).slope : 0;
-        intercept = smaAt(candles, i, 120);
-      } else if (i === 120 && above) {
-        start = i;
-        const win = ma120Window(candles, i, 40);
-        slope = win.length >= 4 ? linreg(win).slope : 0;
-        intercept = smaAt(candles, i, 120);
-      }
+      if ((above && !prevAbove) || (i === 120 && above)) start = i;
       continue;
     }
     if (!above && prevAbove) {
