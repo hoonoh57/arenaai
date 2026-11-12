@@ -17,7 +17,7 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import {ma120TrendPoints} from '../shared/skipJump';
+import {ma120BreakSegments} from '../shared/skipJump';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -138,22 +138,20 @@ export function Chart({
       extras.current.push(line);
     }
     {
-      const last = bars[bars.length - 1];
-      const maNow = bars.length >= 120 ? bars.slice(-120).reduce((s, c) => s + c.close, 0) / 120 : 0;
-      const above = Boolean(last && maNow > 0 && last.close >= maNow);
-      const trend = ma120TrendPoints(bars);
-      if (trend.length) {
-        const up = trend[trend.length - 1].slope > 0;
+      const segs = ma120BreakSegments(bars);
+      for (const seg of segs) {
+        if (seg.points.length < 2) continue;
+        const up = seg.slope > 0;
         const tLine = chart.addSeries(LineSeries, {
-          color: above && up ? '#7ec8e3' : up ? '#5d96e8' : '#ed6b72',
-          lineWidth: above ? 3 : 2,
-          lineStyle: above ? LineStyle.Solid : LineStyle.Dashed,
-          title: above ? (up ? '120돌파추세+' : '120위추세-') : up ? '120추세+' : '120추세-',
+          color: seg.live && up ? '#7ec8e3' : up ? '#5d96e8' : '#ed6b72',
+          lineWidth: seg.live ? 3 : 2,
+          lineStyle: seg.live && up ? LineStyle.Solid : LineStyle.Dashed,
+          title: seg.live ? (up ? '120돌파추세+' : '120위추세-') : up ? '120구간+' : '120구간-',
           priceLineVisible: false,
-          lastValueVisible: true,
+          lastValueVisible: seg.live,
           priceScaleId: 'right',
         });
-        tLine.setData(trend.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
+        tLine.setData(seg.points.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
         extras.current.push(tLine);
       }
     }

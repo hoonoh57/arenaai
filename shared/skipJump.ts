@@ -63,21 +63,78 @@ export function ma120Window(candles: Candle[], at: number, look = 40): number[] 
   return out;
 }
 
-/** 차트에 그릴 120이평 직선 추세. */
-export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, look = 0): {time: number; value: number; slope: number}[] {
-  const span = look > 0 ? look : at + 1;
-  const from = Math.max(119, at - span + 1);
-  const ys: number[] = [];
-  const xs: number[] = [];
-  for (let i = from; i <= at; i++) {
-    const v = smaAt(candles, i, 120);
-    if (!(v > 0)) continue;
-    ys.push(v);
-    xs.push(i);
+export type Ma120BreakSeg = {
+  start: number;
+  end: number;
+  live: boolean;
+  slope: number;
+  intercept: number;
+  points: {time: number; value: number; slope: number}[];
+};
+
+function aboveMa120(candles: Candle[], i: number): boolean {
+  const m = smaAt(candles, i, 120);
+  return m > 0 && candles[i].close >= m;
+}
+
+/**
+ * 종가 120 상승돌파에서 기울기 고정, 하락돌파 전까지 연장.
+ * 돌파 시점까지의 SMA120만으로 OLS — 이후 봉은 선에 넣지 않음(비리페인트).
+ */
+export function ma120BreakSegments(candles: Candle[]): Ma120BreakSeg[] {
+  const n = candles.length;
+  if (n < 121) return [];
+  const segs: Ma120BreakSeg[] = [];
+  let start = -1;
+  let slope = 0;
+  let intercept = 0;
+  const push = (from: number, to: number, live: boolean) => {
+    if (to < from) return;
+    const points = [];
+    for (let i = from; i <= to; i++) {
+      points.push({time: candles[i].time, value: intercept + slope * (i - from), slope});
+    }
+    segs.push({start: from, end: to, live, slope, intercept, points});
+  };
+  for (let i = 120; i < n; i++) {
+    const above = aboveMa120(candles, i);
+    const prevAbove = aboveMa120(candles, i - 1);
+    if (start < 0) {
+      if (above && !prevAbove) {
+        start = i;
+        const win = ma120Window(candles, i, 40);
+        slope = win.length >= 4 ? linreg(win).slope : 0;
+        intercept = smaAt(candles, i, 120);
+      } else if (i === 120 && above) {
+        start = i;
+        const win = ma120Window(candles, i, 40);
+        slope = win.length >= 4 ? linreg(win).slope : 0;
+        intercept = smaAt(candles, i, 120);
+      }
+      continue;
+    }
+    if (!above && prevAbove) {
+      push(start, i - 1, false);
+      start = -1;
+    }
   }
-  if (ys.length < 4) return [];
-  const {intercept, slope} = linreg(ys);
-  return ys.map((_, k) => ({time: candles[xs[k]].time, value: intercept + slope * k, slope}));
+  if (start >= 0) push(start, n - 1, true);
+  return segs;
+}
+
+/** 차트: 구간별 고정 직선. 마지막 인자 호환용. */
+export function ma120TrendPoints(candles: Candle[], at = candles.length - 1, _look = 0): {time: number; value: number; slope: number}[] {
+  const segs = ma120BreakSegments(at + 1 < candles.length ? candles.slice(0, at + 1) : candles);
+  const last = segs[segs.length - 1];
+  return last?.points ?? [];
+}
+
+/** at 시점까지 나온 봉만 쓰는 현재 120돌파 구간 기울기. */
+export function ma120RegimeAt(candles: Candle[], at: number): {inRegime: boolean; slope: number; value: number} {
+  const segs = ma120BreakSegments(candles.slice(0, at + 1));
+  const last = segs[segs.length - 1];
+  if (!last?.live) return {inRegime: false, slope: 0, value: 0};
+  return {inRegime: true, slope: last.slope, value: last.intercept + last.slope * (at - last.start)};
 }
 
 export function skipFeatAt(candles: Candle[], at: number): SkipFeat {
@@ -96,7 +153,8 @@ export function skipFeatAt(candles: Candle[], at: number): SkipFeat {
   const str2 = at > 1 ? candles[at - 2].strength ?? 0 : 0;
   const strengthAccel = str - 2 * str1 + str2;
   const win = ma120Window(candles, at, 40);
-  const slope = linreg(win).slope;
+  const regime = ma120RegimeAt(candles, at);
+  const slope = regime.inRegime ? regime.slope : linreg(win).slope;
   const mid = win[0] || ma120 || 1;
   const ma120Slope = mid > 0 ? slope / mid : 0;
   return {
