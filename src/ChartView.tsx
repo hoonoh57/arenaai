@@ -123,11 +123,27 @@ export function Chart({
       }
     }
     extras.current = [];
+    const pctOn = yModeRef.current === 'percent';
+    const refPx = bars[0].close > 0 ? bars[0].close : 1;
+    const toPct = (px: number) => (100 * (px / refPx - 1));
+    const ax = (px: number) => (pctOn ? toPct(px) : px);
+    series.applyOptions({
+      priceFormat: pctOn
+        ? {type: 'custom', minMove: 0.01, formatter: (p: number) => `${p.toFixed(2)}%`}
+        : {type: 'price', precision: 0, minMove: 1},
+    });
     const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: evaluate(f.expression, bars, f.variables, formulas)}));
     series.setData(
       bars.map((c, i) => {
         const h = highlights.find((item) => item.values[i]);
-        return {...c, time: c.time as UTCTimestamp, ...(h ? {color: h.formula.color, wickColor: h.formula.color} : {})};
+        return {
+          time: c.time as UTCTimestamp,
+          open: ax(c.open),
+          high: ax(c.high),
+          low: ax(c.low),
+          close: ax(c.close),
+          ...(h ? {color: h.formula.color, wickColor: h.formula.color} : {}),
+        };
       }),
     );
     if (overlay?.length) {
@@ -163,9 +179,12 @@ export function Chart({
           const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
           const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
+          const overlayPx = f.pane !== 'separate' && lineSpec.type !== 'histogram';
           line.setData(vals.map((value, i) => {
             const gap = value === null || value === 0 || (f.id === 'cntrstr' && value === 50);
-            return gap ? {time: bars[i].time as UTCTimestamp} : {time: bars[i].time as UTCTimestamp, value, color: colors[i]};
+            if (gap) return {time: bars[i].time as UTCTimestamp};
+            const v = overlayPx ? ax(value) : value;
+            return {time: bars[i].time as UTCTimestamp, value: v, color: colors[i]};
           }));
           if (f.pane === 'separate') {
             try {
@@ -265,7 +284,7 @@ export function Chart({
       wickUpColor: '#ed6b72',
       wickDownColor: '#5d96e8',
     });
-    chart.priceScale('right').applyOptions({mode: logRef.current ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal});
+    chart.priceScale('right').applyOptions({mode: PriceScaleMode.Normal});
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range) return;
       rangeRef.current = range;
@@ -329,8 +348,9 @@ export function Chart({
       grid: {vertLines: {visible: grid}, horzLines: {visible: grid}},
     });
     chartRef.current?.priceScale('right').applyOptions({
-      mode: yMode === 'percent' ? PriceScaleMode.Percentage : logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+      mode: logScale && yMode !== 'percent' ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
     });
+    paint();
   }, [grid, logScale, yMode]);
 
   useEffect(() => {
