@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
+import {judgePattern} from '../shared/patternGate';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
@@ -224,6 +225,10 @@ function currentEvaluator() {
     if (!system) return null;
     const buy = evaluate(system.expression, closed, system.variables, formulas).at(-1);
     const sell = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas).at(-1) : false;
+    if (buy) {
+      const v = judgePattern(closed);
+      if (!v.allow) return {buy: false, sell: Boolean(sell)};
+    }
     return {buy: Boolean(buy), sell: Boolean(sell)};
   };
 }

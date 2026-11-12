@@ -16,6 +16,7 @@ import {
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
+import {judgePattern, patternMarkerText} from '../shared/patternGate';
 import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
@@ -153,7 +154,18 @@ export function Chart({
         bars.forEach((c, i) => {
           if (c.time + 60 > Math.floor(Date.now() / 1000)) return;
           if (values[i] && exits[i]) return;
-          if (values[i]) markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.kind === 'system' ? '매수' : f.name});
+          if (values[i]) {
+            if (f.kind === 'system') {
+              const v = judgePattern(bars, i);
+              markers.push({
+                time: c.time as UTCTimestamp,
+                position: 'belowBar',
+                shape: 'arrowUp',
+                color: v.allow ? f.color : '#718395',
+                text: patternMarkerText(v.allow ? 'buy' : 'skip', v),
+              });
+            } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
+          }
           if (exits[i]) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: '매도'});
         });
       }
