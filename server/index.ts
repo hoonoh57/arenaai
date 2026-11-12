@@ -366,7 +366,7 @@ app.post('/api/chart', async (req, res) => {
     const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
-    const localBars = !nextKey ? loadLocalBars(code, timeframe) : [];
+    const localBars = !nextKey ? loadLocalBars(code, timeframe, {chart: true}) : [];
     const liveBars = !nextKey && (timeframe === '1' || timeframe === 'D') ? cache.candles(code) : [];
     const mergeByTime = (...lists: Candle[][]) => {
       const map = new Map<number, Candle>();
@@ -374,8 +374,8 @@ app.post('/api/chart', async (req, res) => {
       return [...map.values()].sort((a, b) => a.time - b.time);
     };
     let candles = mergeByTime(localBars, liveBars);
-    const todayOpen = Math.floor(Date.parse(`${new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'})}T08:00:00+09:00`) / 1000);
-    if (!nextKey && timeframe === '1' && (candles.at(-1)?.time ?? 0) < todayOpen) {
+    const stale = Date.now() / 1000 - (candles.at(-1)?.time ?? 0) > 120;
+    if (!nextKey && stale) {
       try {
         const page = await api.chartPage({code, timeframe, baseDate, nextKey: undefined});
         candles = mergeByTime(candles, page.candles);
