@@ -89,9 +89,6 @@ export function judgePattern(candles: Candle[], at = candles.length - 1, filters
   if (typeof market?.indexRet === 'number' && Math.abs(market.indexRet) >= 0.02) {
     return {score: 18, allow: false, tag: '지수급변', reasons: [market.indexRet > 0 ? '지수 폭등' : '지수 폭락']};
   }
-  if (typeof market?.ma120Slope === 'number' && market.ma120Slope <= 0) {
-    return {score: 22, allow: false, tag: '지수하락추세', reasons: ['지수 120이평 하락 기울기']};
-  }
   const peak = session.reduce((m, b) => (b.high > m.high ? b : m), first);
   const trough = session.reduce((m, b) => (b.low < m.low ? b : m), first);
   const run = pct(peak.high, first.open);
@@ -240,7 +237,6 @@ export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: numbe
   const jumped = jumpVsFail(skipFeatAt(candles, at), failEnvelope([skipFeatAt(candles, skipIndex)]), delay?.jumpNeed ?? adaptiveJumpNeed([], delay?.skip001N ?? 1));
   const strBeat = (last.strength ?? 0) >= Math.max(skip.strength ?? 0, 1) * 1.08;
   const volBeat = (last.volume ?? 0) >= Math.max(skip.volume ?? 0, 1) * 1.3;
-  if (jumped.belowMa120) return null;
   if (!strBeat && !volBeat) return null;
   if (jumped.beats < 2 && !jumped.ok) return null;
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + jumped.beats * 6));

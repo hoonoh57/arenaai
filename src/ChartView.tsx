@@ -17,7 +17,6 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import {ma120BreakSegments} from '../shared/skipJump';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -136,24 +135,6 @@ export function Chart({
       chart.applyOptions({leftPriceScale: {visible: true, borderVisible: false}});
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
-    }
-    {
-      const segs = ma120BreakSegments(bars);
-      for (const seg of segs) {
-        if (seg.points.length < 2) continue;
-        const up = seg.slope > 0;
-        const tLine = chart.addSeries(LineSeries, {
-          color: seg.live && up ? '#7ec8e3' : up ? '#5d96e8' : '#ed6b72',
-          lineWidth: seg.live ? 3 : 2,
-          lineStyle: seg.live && up ? LineStyle.Solid : LineStyle.Dashed,
-          title: seg.live ? (up ? '120돌파추세+' : '120위추세-') : up ? '120구간+' : '120구간-',
-          priceLineVisible: false,
-          lastValueVisible: seg.live,
-          priceScaleId: 'right',
-        });
-        tLine.setData(seg.points.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
-        extras.current.push(tLine);
-      }
     }
     const markers: SeriesMarker<UTCTimestamp>[] = [];
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {

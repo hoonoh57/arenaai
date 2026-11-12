@@ -30,10 +30,9 @@ test('시가 대비 1.09 부근이면 VI근접 건너뜀', () => {
   assert.equal(judgePattern(c).tag, 'VI근접');
 });
 
-test('지수 폭락·120이평 하락이면 건너뜀', () => {
+test('지수 폭락이면 건너뜀', () => {
   const c = bars(20, () => 100);
   assert.equal(judgePattern(c, 19, undefined, {indexRet: -0.03}).tag, '지수급변');
-  assert.equal(judgePattern(c, 19, undefined, {ma120Slope: -0.001}).tag, '지수하락추세');
 });
 
 test('당일은 08시 이후 봉만 본다', () => {

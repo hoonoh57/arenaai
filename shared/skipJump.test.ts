@@ -13,31 +13,27 @@ function f(over: Partial<SkipFeat> = {}): SkipFeat {
     strength: 80,
     strengthAccel: 0,
     turnover: 1e7,
-    vsMa120: -0.01,
     vsMa5: 0.002,
     prevRet: 0.002,
-    ma120Slope: 0,
     maAlign: 1,
-    slopeReady: true,
     ...over,
   };
 }
 
-test('120이평 아래·실패봉과 같은 양봉은 지연 불가', () => {
+test('5이평 아래·직전대비 음은 지연 불가', () => {
   const env = failEnvelope([f()]);
-  const same = jumpVsFail(f({close: 100.2, high: 100.4, barRet: 0.003, vsMa120: -0.02, ma120Slope: 0.0001}), env, 1.2);
+  const same = jumpVsFail(f({close: 100.2, high: 100.4, barRet: 0.003, vsMa5: -0.02, prevRet: -0.01}), env, 1.2);
   assert.equal(same.ok, false);
-  assert.equal(same.belowMa120, true);
 });
 
-test('120이평 기울기가 음이면 지연 불가', () => {
-  const env = failEnvelope([f({vsMa120: 0.01})]);
-  const now = f({close: 104, high: 104.5, barRet: 0.02, volume: 400, strength: 160, turnover: 4e7, range: 2, vsMa120: 0.01, ma120Slope: -0.0002, maAlign: 4, strengthAccel: 20});
+test('직전대비가 0이면 지연 불가', () => {
+  const env = failEnvelope([f()]);
+  const now = f({close: 104, high: 104.5, barRet: 0.02, volume: 400, strength: 160, turnover: 4e7, range: 2, vsMa5: 0.01, prevRet: 0, maAlign: 3, strengthAccel: 20});
   assert.equal(jumpVsFail(now, env, 1.2).ok, false);
 });
 
-test('실패 고점·거래량·강도·정배열·양의 120기울기를 넘으면 지연', () => {
-  const env = failEnvelope([f(), f({volume: 120, strength: 90, vsMa120: 0})]);
+test('실패 고점·거래량·강도·정배열·직전대비·5이격을 넘으면 지연', () => {
+  const env = failEnvelope([f(), f({volume: 120, strength: 90})]);
   const now = f({
     close: 104,
     high: 104.5,
@@ -46,9 +42,9 @@ test('실패 고점·거래량·강도·정배열·양의 120기울기를 넘으
     strength: 160,
     turnover: 4e7,
     range: 2,
-    vsMa120: 0.01,
-    ma120Slope: 0.0004,
-    maAlign: 4,
+    vsMa5: 0.01,
+    prevRet: 0.01,
+    maAlign: 3,
     strengthAccel: 25,
   });
   const j = jumpVsFail(now, env, 1.2);
