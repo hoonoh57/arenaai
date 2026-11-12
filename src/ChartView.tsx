@@ -210,7 +210,8 @@ export function Chart({
     const next = pctOn
       ? {from: rv.from, to: rv.to}
       : {from: (o0 * rv.from) / m0, to: (o0 * rv.to) / m0};
-    if (next.from === next.to) return;
+    if (!(next.to > next.from)) return;
+    if (!pctOn && (next.from <= 0 || next.to <= 0 || rv.from <= 0 || rv.to <= 0)) return;
     scaleLock.current = true;
     try {
       left.setAutoScale?.(false);
@@ -279,17 +280,10 @@ export function Chart({
       fitScale.current = false;
       rangeRef.current = null;
       meta.current = {len: 0, first: 0};
-      try {
-        const right = chart.priceScale('right') as {setAutoScale?: (on: boolean) => void; setVisibleRange?: (r: {from: number; to: number}) => void};
-        right.setAutoScale?.(true);
-        overlaySeriesRef.current?.priceScale()?.setAutoScale?.(true);
-      } catch {
-        /* fit */
-      }
       skipSync.current = true;
       window.setTimeout(() => {
         skipSync.current = false;
-      }, 200);
+      }, 400);
     }
     const prepend = meta.current.first !== 0 && bars[0].time < meta.current.first;
     const added = prepend ? Math.max(0, bars.length - meta.current.len) : 0;
@@ -576,6 +570,27 @@ export function Chart({
       rangeRef.current = {from: bars.length - hint, to: bars.length - 1} as LogicalRange;
     }
     chart.timeScale().setVisibleLogicalRange(rangeRef.current);
+    if (skipSync.current) {
+      const lows = bars.map((c) => ax(c.low)).filter((v) => Number.isFinite(v) && (pctOn || v > 0));
+      const highs = bars.map((c) => ax(c.high)).filter((v) => Number.isFinite(v) && (pctOn || v > 0));
+      if (lows.length && highs.length) {
+        let lo = Math.min(...lows);
+        let hi = Math.max(...highs);
+        if (lo === hi) {
+          lo = pctOn ? lo - 1 : lo * 0.99;
+          hi = pctOn ? hi + 1 : hi * 1.01;
+        }
+        const pad = (hi - lo) * 0.06;
+        lo = pctOn ? lo - pad : Math.max(0, lo - pad);
+        try {
+          const right = chart.priceScale('right') as {setAutoScale?: (on: boolean) => void; setVisibleRange?: (r: {from: number; to: number}) => void};
+          right.setAutoScale?.(false);
+          right.setVisibleRange?.({from: lo, to: hi + pad});
+        } catch {
+          /* fit */
+        }
+      }
+    }
     requestAnimationFrame(() => syncAllPriceScales());
   };
 

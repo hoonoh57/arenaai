@@ -170,11 +170,13 @@ export function ChartPane({
       if (!prev.length) return cached;
       const a = cached[cached.length - 1];
       const b = prev[prev.length - 1];
-      if (a && b && a.time === b.time && (a.close !== b.close || a.strength !== b.strength)) {
+      if (!a || !b) return cached;
+      if (a.time === b.time && a.close > 0 && b.close > 0 && Math.abs(a.close / b.close - 1) < 0.35) {
         const next = prev.slice();
         next[next.length - 1] = {...b, ...a};
         return next;
       }
+      if (a.close > 0 && b.close > 0 && Math.abs(a.close / b.close - 1) > 0.35) return cached;
       if (cached.length > prev.length + 2) return cached;
       return prev;
     });
@@ -182,11 +184,11 @@ export function ChartPane({
 
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
-    if (cached.length) {
-      setBars((prev) => (prev.length ? prev : cached));
-      return;
-    }
-    void load({code});
+    setOverlay([]);
+    setNextKey('');
+    setBars(cached.length ? cached : []);
+    if (cached.length) return;
+    void load({code, force: true});
   }, [code, timeframe, baseDate]);
 
 
