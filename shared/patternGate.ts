@@ -1,5 +1,5 @@
 import type {Candle} from '../server/core';
-import {filterOn, type FilterEnabled} from './patternFilters';
+import {filterOn, skip001Threshold, type DelayContext, type FilterEnabled} from './patternFilters';
 
 export type PatternVerdict = {
   score: number;
@@ -106,6 +106,7 @@ export function judgePattern(candles: Candle[], at = candles.length - 1, filters
     reasons.push('이미 고점 근처');
   }
   score = Math.max(0, Math.min(100, score));
+  if (!filterOn(filters, 'skip001')) score = Math.max(score, ENTER_MIN);
   const allow = score >= ENTER_MIN;
   if (!reasons.length) reasons.push(allow ? '경로 중립·지표 대기' : '자리 확신 부족');
   const tag = tightBase && strongBounce ? '횡보돌파' : allow ? `신뢰${score}` : '보류';
@@ -167,15 +168,23 @@ function confirmAfterSkip(session: Candle[], skip: Candle, nextBar: boolean): {o
   if (body >= 0.005 && last.close >= last.open) extra.push('봉상승');
   if (upClose) extra.push('종가상향');
   const meaningful = hhhl || strJump || strGap || volJump || turnJump || (body >= 0.005 && last.close >= last.open) || last.close > skip.high;
+  let quality = 40;
+  if (hhhl) quality += 15;
+  if (strJump || strGap) quality += 15;
+  if (volJump || turnJump) quality += 12;
+  if (body >= 0.005 && last.close >= last.open) quality += Math.min(15, 8 + body * 400);
+  if (upClose) quality += 8;
+  if (last.close > skip.high) quality += 10;
+  quality = Math.max(0, Math.min(100, quality));
   const ok = nextBar ? upClose && meaningful : surge.ok || meaningful;
-  return {ok, parts: extra, bonus: Math.min(25, extra.length * 8)};
+  return {ok, parts: extra, bonus: Math.min(25, extra.length * 8), quality};
 }
 
 /**
  * 횡보에서 이평 신호를 한 번 건너뛴 뒤, 급증이 나오면 재돌파 없이 지연 진입.
  * 급등 후 내리막 횡보 금지구간에는 지연 진입을 주지 않는다.
  */
-export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean, filters?: FilterEnabled): PatternVerdict | null {
+export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean, filters?: FilterEnabled, delay?: DelayContext): PatternVerdict | null {
   if (!filterOn(filters, 'delayed-buy')) return null;
   if (at < 1 || at >= candles.length) return null;
   let lastSkip = -1;
@@ -198,6 +207,10 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
   const session = sessionSlice(candles, at);
   const surge = confirmAfterSkip(session, candles[lastSkip], nextBar);
   if (!surge.ok) return null;
+  if (filterOn(filters, 'skip001')) {
+    const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
+    if (surge.quality < need) return null;
+  }
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
   const recross = hadSignal(at);
   return {

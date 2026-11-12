@@ -17,7 +17,7 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import type {FilterEnabled} from '../shared/patternFilters';
+import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
@@ -38,6 +38,7 @@ export function Chart({
   refLines,
   onDrawings,
   patternFilters,
+  delayContext,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -56,6 +57,7 @@ export function Chart({
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
   onDrawings?: (next: ChartDrawing[]) => void;
   patternFilters?: FilterEnabled;
+  delayContext?: DelayContext;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -164,7 +166,7 @@ export function Chart({
           if (values[i]) {
             if (f.kind === 'system') {
               const v = judgePattern(bars, i, patternFilters);
-              const late = !v.allow && lastSkip >= 0 && !delayedUsed ? delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters) : null;
+              const late = !v.allow && lastSkip >= 0 && !delayedUsed ? delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters, delayContext) : null;
               const take = v.allow || Boolean(late?.allow);
               if (take) {
                 lastSkip = -1;
@@ -181,7 +183,7 @@ export function Chart({
               });
             } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
           } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {
-            const late = delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters);
+            const late = delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters, delayContext);
             if (late?.allow) {
               delayedUsed = true;
               lastSkip = -1;

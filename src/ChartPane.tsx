@@ -51,6 +51,7 @@ export function ChartPane({
   setNotice,
   onCommonCode,
   patternFilters,
+  delayContext,
 }: {
   win: ChildWindow;
   desk: VirtualDesk;
@@ -275,6 +276,7 @@ export function ChartPane({
             overlay={overlay}
             formulas={applied}
             patternFilters={patternFilters}
+            delayContext={delayContext}
             chartHeight={Math.max(160, (win.h || 380) - 56)}
             grid={grid}
             logScale={logScale}

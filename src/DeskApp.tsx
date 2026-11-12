@@ -35,7 +35,7 @@ import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 import {PATTERN_FILTERS} from '../shared/patternFilters';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]; patternFilters?: Record<string, boolean>};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]; patternFilters?: Record<string, boolean>; skip001N?: number};
 type State = {
   mode: string;
   config: Config;
@@ -566,6 +566,10 @@ function Pane(props: {
         setNotice={props.setNotice}
         onCommonCode={props.onCommonCode}
         patternFilters={state.config.patternFilters}
+        delayContext={{
+          skip001N: state.config.skip001N ?? 1.2,
+          skip001Score: state.patternKpi?.summaries.find((s) => s.filterId === 'skip001' || s.filterId === 'delayed-buy')?.score ?? 50,
+        }}
       />
     );
   }
@@ -1565,6 +1569,10 @@ function SystemTradePanel({
             })()}
           </label>
         ))}
+        <label>
+          skip001 지연배수 N {draft.skip001N ?? 1.2} (높을수록 진입 자제)
+          <input type="range" min={0.5} max={3} step={0.1} value={draft.skip001N ?? 1.2} onChange={(e) => setDraft({...draft, skip001N: Number(e.target.value)})} />
+        </label>
         <div className="book-actions">
           <button
             className="apply"
@@ -1576,6 +1584,7 @@ function SystemTradePanel({
               refreshMs: draft.refreshMs || 60000,
               autoTopCharts: draft.autoTopCharts !== false,
               patternFilters: draft.patternFilters,
+              skip001N: draft.skip001N ?? 1.2,
               condition: draft.condition || state.config.condition,
               count: draft.count,
               weights: draft.weights,

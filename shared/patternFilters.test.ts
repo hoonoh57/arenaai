@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {filterOn, normalizeFilterEnabled} from './patternFilters';
+import {filterOn, normalizeFilterEnabled, skip001Threshold} from './patternFilters';
 import {judgePattern} from './patternGate';
 import type {Candle} from '../server/core';
 
@@ -22,4 +22,9 @@ test('필터 끄면 급등후횡보 금지가 풀린다', () => {
   const off = normalizeFilterEnabled({['skip-chop']: false});
   assert.equal(filterOn(off, 'skip-chop'), false);
   assert.equal(judgePattern(c, c.length - 1, off).tag === '급등후횡보', false);
+});
+
+test('skip001 배수 N을 올리면 지연 진입 문턱이 높아진다', () => {
+  assert.equal(skip001Threshold(50, 1.2), 60);
+  assert.ok(skip001Threshold(50, 2) > skip001Threshold(50, 1.2));
 });

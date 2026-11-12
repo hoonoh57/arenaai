@@ -7,7 +7,7 @@ import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern} from '../shared/patternGate';
-import {filterOn, normalizeFilterEnabled, type FilterEnabled} from '../shared/patternFilters';
+import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
@@ -164,6 +164,7 @@ type AppConfig = {
   tradeSlots: number;
   lockedCodes: string[];
   patternFilters: FilterEnabled;
+  skip001N: number;
 };
 const savedCfg = loadAppConfig<AppConfig>();
 let config: AppConfig = {
@@ -182,6 +183,7 @@ let config: AppConfig = {
   tradeSlots: Number.isInteger(savedCfg.tradeSlots) ? savedCfg.tradeSlots as number : 4,
   lockedCodes: Array.isArray(savedCfg.lockedCodes) ? savedCfg.lockedCodes.filter((c): c is string => typeof c === 'string' && /^\d{6}$/.test(c)) : [],
   patternFilters: normalizeFilterEnabled((savedCfg as {patternFilters?: unknown}).patternFilters),
+  skip001N: normalizeSkip001N((savedCfg as {skip001N?: unknown}).skip001N),
 };
 setTradeSession(config.running && config.tradeMode === 'auto');
 
@@ -235,6 +237,11 @@ function currentEvaluator() {
     const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
     const filters = config.patternFilters;
+    const delay: DelayContext = (() => {
+      const sums = patternKpi.snapshot().summaries;
+      const skip = sums.find((s) => s.filterId === 'skip001') || sums.find((s) => s.filterId === 'delayed-buy');
+      return {skip001N: config.skip001N, skip001Score: skip?.ready ? skip.score : 50};
+    })();
     let buy = false;
     let score = 50;
     const tags: string[] = [];
@@ -245,19 +252,19 @@ function currentEvaluator() {
       if (buy && v.tag === '횡보돌파') tags.push('base-boost');
       if (buy && v.reasons.some((r) => r.includes('조기'))) tags.push('early-buy');
       if (!buy) {
-        const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
+        const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters, delay);
         buy = Boolean(late?.allow);
         if (late) {
           score = late.score;
-          tags.push('delayed-buy');
+          tags.push('delayed-buy', 'skip001');
         }
       }
     } else {
-      const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
+      const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters, delay);
       buy = Boolean(late?.allow);
       if (late) {
         score = late.score;
-        tags.push('delayed-buy');
+        tags.push('delayed-buy', 'skip001');
       }
     }
     let sell = sellFlag;
@@ -916,6 +923,7 @@ app.post('/api/config', async (req, res) => {
       tradeSlots,
       lockedCodes: config.lockedCodes,
       patternFilters: req.body.patternFilters !== undefined ? normalizeFilterEnabled(req.body.patternFilters) : config.patternFilters,
+      skip001N: req.body.skip001N !== undefined ? normalizeSkip001N(req.body.skip001N) : config.skip001N,
     };
     await applyConfig(next);
     restartRefreshTimer();
