@@ -115,7 +115,6 @@ export function Chart({
   const refLinesRef = useRef(refLines);
   refLinesRef.current = refLines;
   const priceLinesRef = useRef<{remove?: () => void}[]>([]);
-  if (viewState?.paneStretch?.length) stretchRef.current = viewState.paneStretch;
   const pendingRef = useRef<{t: number; p: number} | null>(null);
   const runtimeRef = useRef(createChartRuntime('desk-chart'));
   const valuesById = useRef<Record<string, (number | null)[]>>({});
@@ -174,6 +173,53 @@ export function Chart({
     if (range) viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: stretch});
   };
 
+  const applyRefLines = () => {
+    const series = candleRef.current;
+    const bars = dataRef.current;
+    if (!series || !bars.length) return;
+    for (const line of priceLinesRef.current) {
+      try {
+        (series as ISeriesApi<'Candlestick'> & {removePriceLine?: (l: unknown) => void}).removePriceLine?.(line);
+      } catch {
+        /* line */
+      }
+    }
+    priceLinesRef.current = [];
+    const pctOn = yModeRef.current === 'percent';
+    const refPx = bars[0].close > 0 ? bars[0].close : 1;
+    const ax = (px: number) => corePercent(px, refPx, pctOn);
+    const dayKey = (t: number) => {
+      const d = new Date((t + 9 * 3600) * 1000);
+      return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+    };
+    const hourKst = (t: number) => new Date((t + 9 * 3600) * 1000).getUTCHours();
+    const today = dayKey(bars[bars.length - 1].time);
+    const same = bars.filter((c) => dayKey(c.time) === today);
+    const openBar = same.find((c) => hourKst(c.time) >= 9) || same[0] || bars[0];
+    const openPx = openBar.open;
+    const addPx = (price: number, color: string, title: string, dashed = false) => {
+      const line = series.createPriceLine({
+        price: ax(price),
+        color,
+        lineWidth: 1,
+        lineStyle: dashed ? LineStyle.Dashed : LineStyle.Solid,
+        axisLabelVisible: true,
+        title,
+      });
+      priceLinesRef.current.push(line);
+    };
+    const refs = refLinesRef.current;
+    if (refs?.open) addPx(openPx, '#6ab0c8', '시가');
+    if (refs?.prev) {
+      const prev = bars.find((c) => c.previousDay?.close)?.previousDay?.close;
+      if (prev) addPx(prev, '#e8bd64', '전일');
+    }
+    if (refs?.vi && openPx > 0) {
+      addPx(openPx * 1.1, '#ed6b72', 'VI+10', true);
+      addPx(openPx * 0.9, '#5d96e8', 'VI-10', true);
+    }
+  };
+
   const paint = () => {
     const chart = chartRef.current;
     const series = candleRef.current;
@@ -205,14 +251,6 @@ export function Chart({
         : {type: 'price', precision: 0, minMove: 1},
     });
     const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: chartHub.evaluate(f.expression, bars, f.variables, formulas)}));
-    for (const line of priceLinesRef.current) {
-      try {
-        (series as ISeriesApi<'Candlestick'> & {removePriceLine?: (l: unknown) => void}).removePriceLine?.(line);
-      } catch {
-        /* line */
-      }
-    }
-    priceLinesRef.current = [];
     series.setData(
       bars.map((c, i) => {
         const h = highlights.find((item) => item.values[i]);
@@ -232,34 +270,7 @@ export function Chart({
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
     }
-    const lastBar = bars[bars.length - 1];
-    const dayKey = (t: number) => {
-      const d = new Date((t + 9 * 3600) * 1000);
-      return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
-    };
-    const today = dayKey(lastBar.time);
-    const openBar = bars.find((c) => dayKey(c.time) === today) || bars[0];
-    const addPx = (price: number, color: string, title: string, dashed = false) => {
-      const line = series.createPriceLine({
-        price: ax(price),
-        color,
-        lineWidth: 1,
-        lineStyle: dashed ? LineStyle.Dashed : LineStyle.Dotted,
-        axisLabelVisible: true,
-        title,
-      });
-      priceLinesRef.current.push(line);
-    };
-    const refs = refLinesRef.current;
-    if (refs?.open) addPx(openBar.open, '#6ab0c8', '시가');
-    if (refs?.prev) {
-      const prev = bars.find((c) => c.previousDay?.close)?.previousDay?.close;
-      if (prev) addPx(prev, '#e8bd64', '전일');
-    }
-    if (refs?.vi) {
-      addPx(openBar.open * 1.1, '#ed6b72', 'VI+', true);
-      addPx(openBar.open * 0.9, '#5d96e8', 'VI-', true);
-    }
+    applyRefLines();
     const markers: SeriesMarker<UTCTimestamp>[] = [];
     const inds = formulas.filter((x) => x.enabled && x.kind === 'indicator');
     const slotOf: Record<string, number> = {};
@@ -643,7 +654,11 @@ export function Chart({
 
   useEffect(() => {
     paint();
-  }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady, refLines?.vi, refLines?.open, refLines?.prev, yMode, logScale]);
+  }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady, yMode, logScale]);
+
+  useEffect(() => {
+    applyRefLines();
+  }, [refLines?.vi, refLines?.open, refLines?.prev]);
 
   const chart = chartRef.current;
   const series = candleRef.current;
