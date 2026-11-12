@@ -230,6 +230,7 @@ function confirmAfterSkip(session: Candle[], skip: Candle, nextBar: boolean): {o
 /** Chart/평가기가 이미 알고 있는 건너뜀 봉 이후 확인. */
 export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: number, filters?: FilterEnabled, delay?: DelayContext): PatternVerdict | null {
   if (!filterOn(filters, 'delayed-buy')) return null;
+  if (delay?.strengthReady === false) return null;
   if (skipIndex < 0 || at <= skipIndex || at - skipIndex > 200 || at >= candles.length) return null;
   const skip = candles[skipIndex];
   const last = candles[at];

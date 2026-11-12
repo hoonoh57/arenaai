@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {alignStrengthToCandles, carryStrength, fillStrengthOnCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget} from './strength';
+import {alignStrengthToCandles, carryStrength, fillStrengthOnCandles, correctSmallLotStrength, parseStrengthTicks, strengthPageBudget, strengthSyncStatus, sessionOpenSec} from './strength';
 
 test('소량 연속 매수 체결강도는 50으로 보정한다', () => {
   const ticks = [
@@ -70,4 +70,16 @@ test('6자리 체결시각은 힌트 날짜의 KST로 붙인다', () => {
   assert.equal(ticks[0].qty, 3);
   assert.equal(ticks[0].strength, 120.5);
   assert.equal(new Date(ticks[0].time * 1000).toISOString(), '2026-01-15T06:00:00.000Z');
+});
+
+test('최근봉부터 세션 시작까지 강도가 없으면 ready가 아니다', () => {
+  const open = sessionOpenSec(Date.parse('2026-11-12T12:00:00+09:00') / 1000, false);
+  const bars = Array.from({length: 10}, (_, i) => ({
+    time: open + i * 60,
+    open: 1, high: 1, low: 1, close: 1,
+    strength: i > 7 ? 80 : undefined,
+  }));
+  assert.equal(strengthSyncStatus(bars).ready, false);
+  const full = bars.map((b) => ({...b, strength: 90}));
+  assert.equal(strengthSyncStatus(full).ready, true);
 });

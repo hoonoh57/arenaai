@@ -40,6 +40,8 @@ export function Chart({
   onDrawings,
   patternFilters,
   delayContext,
+  strengthReady,
+  strengthLabel,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -59,6 +61,8 @@ export function Chart({
   onDrawings?: (next: ChartDrawing[]) => void;
   patternFilters?: FilterEnabled;
   delayContext?: DelayContext;
+  strengthReady?: boolean;
+  strengthLabel?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -153,6 +157,7 @@ export function Chart({
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
       const values = evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
+        if ((f.id === 'cntrstr' || f.expression === 'STRENGTH') && strengthReady === false) continue;
         let paneIndex = 0;
         if (f.pane === 'separate') {
           const panes = (chart as unknown as {panes?: () => {paneIndex: () => number}[]}).panes?.() || [];
@@ -345,7 +350,7 @@ export function Chart({
 
   useEffect(() => {
     paint();
-  }, [dataSig, formulaSig, overlaySig, filterSig]);
+  }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady]);
 
   const chart = chartRef.current;
   const series = candleRef.current;
@@ -395,6 +400,7 @@ export function Chart({
   return (
     <div className="chart-host" style={{height, width: '100%', minHeight: 120, position: 'relative'}} onContextMenu={onContextMenu}>
       <div ref={host} className="chart" style={{height: '100%', width: '100%'}} />
+      {strengthReady === false ? <div className="strength-pending">체결강도 다운로드 중 · 최근봉→{strengthLabel || '세션 시작'} 확인 전 · 전략 미사용</div> : null}
       <svg className="chart-draw" width={w} height={hbox} style={{position: 'absolute', inset: 0, pointerEvents: 'none'}}>
         {allDraw.map((d) => {
           if (d.kind === 'hline') {

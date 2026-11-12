@@ -1,6 +1,6 @@
 import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
-import {correctSmallLotStrength, fillStrengthOnCandles, parseStrengthTicks, type StrengthTick} from '../shared/strength';
+import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthSyncStatus, type StrengthTick} from '../shared/strength';
 import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
 
 type ObjectRow = Record<string, unknown>;
@@ -452,8 +452,8 @@ export class Kiwoom {
    * 가격 차트와 맞추려면 최신 봉 날짜의 세션 시작(NXT 08:30 / KRX 09:00)까지 ka10046을 연속조회한다.
    * +이전은 nextKey 한 페이지만. 소량 연속 매수 이상치는 50으로 보정한다.
    */
-  async attachStrength(code: string, timeframe: string, candles: Candle[], nextKey?: string): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
-    if (!candles.length) return {candles, hasMore: false, nextKey: ''};
+  async attachStrength(code: string, timeframe: string, candles: Candle[], nextKey?: string): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string; ready: boolean; nxt: boolean}> {
+    if (!candles.length) return {candles, hasMore: false, nextKey: '', ready: false, nxt: false};
     const daily = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
     const hint = candles[candles.length - 1].time;
     let page = await this.strengthPage({code, daily, hintSec: hint, nextKey: nextKey || undefined});
@@ -469,10 +469,18 @@ export class Kiwoom {
         n += 1;
       }
     }
+    const nxt = page.unified || hasMorningSession(candles);
+    const hour = nxt ? 8 : 9;
+    const minute = nxt ? 30 : 0;
+    const reached = daily || reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute);
+    const aligned = alignStrengthToCandles(candles, correctSmallLotStrength(ticks), timeframe);
+    const sync = strengthSyncStatus(aligned);
     return {
-      candles: fillStrengthOnCandles(candles, correctSmallLotStrength(ticks), timeframe),
-      hasMore: page.hasMore,
+      candles: aligned,
+      hasMore: page.hasMore && !reached,
       nextKey: page.nextKey,
+      ready: reached && sync.ready,
+      nxt,
     };
   }
 }

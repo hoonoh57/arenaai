@@ -64,6 +64,7 @@ export function ChartPane({
   setNotice: (v: string) => void;
   onCommonCode?: (code: string) => void;
   patternFilters?: import('../shared/patternFilters').FilterEnabled;
+  delayContext?: import('../shared/patternFilters').DelayContext;
 }) {
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
@@ -72,6 +73,8 @@ export function ChartPane({
   const [nextKey, setNextKey] = useState('');
   const [strengthNextKey, setStrengthNextKey] = useState('');
   const [hasMore, setHasMore] = useState(false);
+  const [strengthReady, setStrengthReady] = useState(false);
+  const [strengthNxt, setStrengthNxt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [viewCount, setViewCount] = useState(win.visibleBars || 200);
   const [overlay, setOverlay] = useState<Candle[]>([]);
@@ -101,7 +104,7 @@ export function ChartPane({
         baseDate: opts.baseDate ?? baseDate,
         nextKey: opts.append ? nextKey : '',
         strengthNextKey: opts.append ? strengthNextKey : '',
-        withStrength: enabled.has('cntrstr'),
+        withStrength: (opts.timeframe ?? timeframe) !== 'D' && (opts.timeframe ?? timeframe) !== 'W' && (opts.timeframe ?? timeframe) !== 'M',
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
@@ -110,6 +113,8 @@ export function ChartPane({
       setHasMore(Boolean(d.hasMore) || Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');
       setStrengthNextKey(d.strengthNextKey || '');
+      setStrengthReady(Boolean(d.strengthReady));
+      setStrengthNxt(Boolean(d.strengthNxt));
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
@@ -117,10 +122,9 @@ export function ChartPane({
     }
   };
 
-  const wantStrength = enabled.has('cntrstr');
   useEffect(() => {
     if (/^\d{6}$/.test(code)) void load({code});
-  }, [code, timeframe, baseDate, wantStrength]);
+  }, [code, timeframe, baseDate]);
 
   const commitCode = (value: string) => {
     const next = value.replace(/\D/g, '').slice(0, 6);
@@ -272,11 +276,13 @@ export function ChartPane({
         </div>
         {bars.length ? (
           <Chart
-            data={bars}
+            data={strengthReady ? bars : bars.map((c) => ({...c, strength: undefined}))}
             overlay={overlay}
             formulas={applied}
             patternFilters={patternFilters}
-            delayContext={delayContext}
+            delayContext={{...(delayContext || {skip001N: 1.2, skip001Score: 50}), strengthReady}}
+            strengthReady={strengthReady}
+            strengthLabel={strengthNxt ? 'NXT 08:30' : 'KRX 09:00'}
             chartHeight={Math.max(160, (win.h || 380) - 56)}
             grid={grid}
             logScale={logScale}

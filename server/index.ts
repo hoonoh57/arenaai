@@ -9,6 +9,7 @@ import {evaluate} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patternGate';
 import {extractMaLegs, MA_MIN_EDGE} from '../shared/maRoundTrip';
 import {adaptiveJumpNeed} from '../shared/skipJump';
+import {strengthSyncStatus} from '../shared/strength';
 import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
@@ -257,7 +258,7 @@ function currentEvaluator() {
     const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
     const filters = config.patternFilters;
-    const delay: DelayContext = delayContextNow();
+    const delay: DelayContext = {...delayContextNow(), strengthReady: strengthSyncStatus(closed).ready};
     let buy = false;
     let score = 50;
     const tags: string[] = [];
@@ -449,6 +450,8 @@ app.post('/api/chart', async (req, res) => {
     if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
     let strengthHasMore = false;
     let strengthKey = '';
+    let strengthReady = false;
+    let strengthNxt = false;
     if (withStrength) {
       try {
         const sKey = chartGate.key({kind: 'strength', code, timeframe, next: strengthNextKey});
@@ -456,8 +459,10 @@ app.post('/api/chart', async (req, res) => {
         candles = attached.candles;
         strengthHasMore = attached.hasMore;
         strengthKey = attached.nextKey;
+        strengthReady = attached.ready;
+        strengthNxt = attached.nxt;
       } catch {
-        /* 체결강도는 선택. 가격 봉은 그대로 반환 */
+        /* 가격은 그대로. 강도는 미완료 */
       }
     }
     const listed = ranking.find((s) => s.code === code);
@@ -471,6 +476,8 @@ app.post('/api/chart', async (req, res) => {
       nextKey: page.nextKey,
       strengthHasMore,
       strengthNextKey: strengthKey,
+      strengthReady,
+      strengthNxt,
       timeframe,
     });
   } catch (e) {

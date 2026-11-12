@@ -112,6 +112,46 @@ export function carryStrength(values: Array<number | null | undefined>): Array<n
   });
 }
 
+function kstParts(sec: number) {
+  const t = new Date((sec + 9 * 3600) * 1000);
+  return {y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate(), hour: t.getUTCHours(), minute: t.getUTCMinutes()};
+}
+
+/** 최신 봉 날짜의 NXT 08:30 또는 KRX 09:00 unix. */
+export function sessionOpenSec(lastBarSec: number, nxt: boolean): number {
+  const p = kstParts(lastBarSec);
+  const hh = nxt ? '08' : '09';
+  const mm = nxt ? '30' : '00';
+  const ms = Date.parse(`${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}T${hh}:${mm}:00+09:00`);
+  return Number.isFinite(ms) ? ms / 1000 : lastBarSec;
+}
+
+export function detectNxtSession(candles: StrengthBar[]): boolean {
+  if (!candles.length) return false;
+  const last = kstParts(candles[candles.length - 1].time);
+  return candles.some((c) => {
+    const p = kstParts(c.time);
+    return p.y === last.y && p.m === last.m && p.d === last.d && p.hour === 8;
+  });
+}
+
+export type StrengthSync = {ready: boolean; nxt: boolean; openSec: number; need: number; have: number; priceToOpen: boolean};
+
+/** 가격 최근봉 → 세션 시작까지 봉이 있고, 그 구간에 체결강도가 붙은 뒤에만 ready. */
+export function strengthSyncStatus(candles: StrengthBar[]): StrengthSync {
+  const empty = {ready: false, nxt: false, openSec: 0, need: 0, have: 0, priceToOpen: false};
+  if (!candles.length) return empty;
+  const nxt = detectNxtSession(candles);
+  const last = candles[candles.length - 1];
+  const openSec = sessionOpenSec(last.time, nxt);
+  const win = candles.filter((c) => c.time + 60 >= openSec && c.time <= last.time);
+  const have = win.filter((c) => typeof c.strength === 'number' && Number.isFinite(c.strength) && c.strength > 0).length;
+  const priceToOpen = win.some((c) => c.time <= openSec + 120);
+  const lastHas = typeof last.strength === 'number' && last.strength > 0;
+  const ready = priceToOpen && lastHas && win.length > 0 && have >= Math.max(3, Math.ceil(win.length * 0.6));
+  return {ready, nxt, openSec, need: win.length, have, priceToOpen};
+}
+
 export function strengthPageBudget(barCount: number): number {
   const n = Number.isFinite(barCount) ? Math.max(1, Math.min(500, Math.floor(barCount))) : 1;
   return Math.min(16, Math.max(1, Math.ceil(n / 20)));
