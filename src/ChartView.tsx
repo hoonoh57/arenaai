@@ -371,7 +371,6 @@ export function Chart({
         const lines = [{name: f.name, expression: f.expression, color: f.color, alternateColor: f.alternateColor, ...f.primaryLine, visible: f.primaryLine?.visible !== false}, ...(f.extraLines || [])];
         const styles = {solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted};
         let baselineAdded = false;
-        const share = extraSlots.length > 0 && inds.filter((x) => slotOf[x.id] === slotOf[f.id]).length > 1;
         while (((chartEx.panes?.() || []).length) <= paneIndex) {
           try {
             chart.addPane();
@@ -390,7 +389,7 @@ export function Chart({
             color: lineSpec.color,
             priceLineVisible: false,
             lastValueVisible: true,
-            priceScaleId: share ? `ps-${f.id}` : 'right',
+            priceScaleId: 'right',
           };
           const line =
             lineSpec.type === 'histogram'
@@ -406,15 +405,16 @@ export function Chart({
             const v = overlayPx ? ax(value) : value;
             return {time: bars[i].time as UTCTimestamp, value: v, color: colors[i]};
           }));
-          try {
-            line.priceScale().applyOptions({
-              visible: true,
-              borderVisible: false,
-              mode: PriceScaleMode.Normal,
-              autoScale: true,
-            });
-          } catch {
-            /* scale */
+          if (separate) {
+            try {
+              line.priceScale().applyOptions({
+                visible: true,
+                borderVisible: false,
+                autoScale: true,
+              });
+            } catch {
+              /* scale */
+            }
           }
           extras.current.push(line);
           if (!baselineAdded) {
