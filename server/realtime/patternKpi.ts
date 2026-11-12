@@ -1,15 +1,16 @@
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {signedReturn, summarizeByFilter, type KpiClosed, type KpiOpen, type KpiSide, type KpiSummary} from '../../shared/patternKpi';
+import {maRegime, type MaLeg, type MaRegime} from '../../shared/maRoundTrip';
 
 const path = () => process.env.PATTERN_KPI_PATH || 'data/pattern-kpi.json';
 
-type FileShape = {open: KpiOpen[]; closed: KpiClosed[]};
+type FileShape = {open: KpiOpen[]; closed: KpiClosed[]; maLegs?: MaLeg[]};
 
 function loadFile(): FileShape {
   try {
     const raw = JSON.parse(readFileSync(path(), 'utf8')) as FileShape;
-    return {open: Array.isArray(raw.open) ? raw.open : [], closed: Array.isArray(raw.closed) ? raw.closed : []};
+    return {open: Array.isArray(raw.open) ? raw.open : [], closed: Array.isArray(raw.closed) ? raw.closed : [], maLegs: Array.isArray(raw.maLegs) ? raw.maLegs : []};
   } catch {
     return {open: [], closed: []};
   }
@@ -18,16 +19,18 @@ function loadFile(): FileShape {
 export class PatternKpiStore {
   private open: KpiOpen[] = [];
   private closed: KpiClosed[] = [];
+  private maLegs: MaLeg[] = [];
 
   constructor() {
     const f = loadFile();
     this.open = f.open;
     this.closed = f.closed.slice(-2000);
+    this.maLegs = (f.maLegs || []).slice(-2000);
   }
 
   private persist(): void {
     mkdirSync(dirname(path()), {recursive: true});
-    writeFileSync(path(), JSON.stringify({open: this.open, closed: this.closed.slice(-2000)}, null, 2), {mode: 0o600});
+    writeFileSync(path(), JSON.stringify({open: this.open, closed: this.closed.slice(-2000), maLegs: this.maLegs.slice(-2000)}, null, 2), {mode: 0o600});
   }
 
   /**
@@ -57,7 +60,35 @@ export class PatternKpiStore {
     return closed;
   }
 
-  snapshot(): {open: KpiOpen[]; summaries: KpiSummary[]} {
-    return {open: this.open, summaries: summarizeByFilter(this.closed)};
+  ingestMaLegs(legs: MaLeg[]): number {
+    const seen = new Set(this.maLegs.map((l) => `${l.code}|${l.entryTime}`));
+    let n = 0;
+    for (const leg of legs) {
+      const key = `${leg.code}|${leg.entryTime}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      this.maLegs.push(leg);
+      this.closed.push({
+        code: leg.code,
+        side: 'buy',
+        filters: ['ma-cross', 'skip001'],
+        entryTime: leg.entryTime,
+        entryClose: leg.entryClose,
+        exitTime: leg.exitTime,
+        exitClose: leg.exitClose,
+        signedPct: leg.signedPct,
+      });
+      n += 1;
+    }
+    if (n) this.persist();
+    return n;
+  }
+
+  maSummary(): MaRegime {
+    return maRegime(this.maLegs);
+  }
+
+  snapshot(): {open: KpiOpen[]; summaries: KpiSummary[]; ma: MaRegime} {
+    return {open: this.open, summaries: summarizeByFilter(this.closed), ma: this.maSummary()};
   }
 }

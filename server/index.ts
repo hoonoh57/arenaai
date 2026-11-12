@@ -7,6 +7,7 @@ import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patternGate';
+import {extractMaLegs, MA_MIN_EDGE} from '../shared/maRoundTrip';
 import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
@@ -234,6 +235,9 @@ function delayContextNow(): DelayContext {
     skip001Score: skip?.ready ? skip.score : 50,
     indexRet: Number.isFinite(indexRet) ? indexRet : undefined,
     ma120Slope: maSlope(daily.map((c) => c.close)),
+    maAvgPct: patternKpi.maSummary().avgPct,
+    maReady: patternKpi.maSummary().ready,
+    maAvgLoserRange: patternKpi.maSummary().avgLoserRange,
   };
 }
 
@@ -246,6 +250,7 @@ function currentEvaluator() {
     if (!system) return null;
     const buys = evaluate(system.expression, closed, system.variables, formulas);
     const exits = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas) : [];
+    patternKpi.ingestMaLegs(extractMaLegs(code, closed, buys, exits));
     const buyFlag = Boolean(buys.at(-1));
     const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
@@ -256,7 +261,7 @@ function currentEvaluator() {
     const tags: string[] = [];
     if (buyFlag) {
       const v = judgePattern(closed, at, filters, delay);
-      buy = v.allow;
+      buy = v.allow && !(delay.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE);
       score = v.score;
       if (buy && v.tag === '횡보돌파') tags.push('base-boost');
       if (buy && v.reasons.some((r) => r.includes('조기'))) tags.push('early-buy');
