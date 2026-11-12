@@ -181,49 +181,79 @@ export function Chart({
       const px = bars.map((c) => c.close).filter((c) => c > 0).sort((a, b) => a - b);
       return px.length ? px[Math.floor(px.length / 2)] : 0;
     })();
-    const used = new Set<number>();
+    const pinHit: Record<number, number> = {};
+    for (const f of inds) {
+      const p = paneByIdRef.current?.[f.id];
+      if (typeof p === 'number' && p > 0) pinHit[p] = (pinHit[p] || 0) + 1;
+    }
     for (const f of inds) {
       const values = evaluate(f.expression, bars, f.variables, formulas);
       valMap[f.id] = values;
       const pinned = paneByIdRef.current?.[f.id];
-      if (typeof pinned === 'number' && pinned >= 0) {
-        slotOf[f.id] = pinned;
-        if (pinned > 0) used.add(pinned);
-        continue;
-      }
       const sample = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0);
       const mv = sample.length ? Math.abs([...sample].sort((a, b) => a - b)[Math.floor(sample.length / 2)]) : 0;
       const priceLike = mv > 0 && pxMid > 0 && mv > pxMid * 0.2 && mv < pxMid * 4;
-      const separate = f.pane === 'separate' || !priceLike;
-      if (!separate) slotOf[f.id] = 0;
-      else if (f.paneShare === 'overlay') {
-        slotOf[f.id] = 1;
-        used.add(1);
-      } else slotOf[f.id] = -1;
+      const separate = f.pane === 'separate' || (!priceLike && f.pane !== 'price');
+      if (!separate) {
+        slotOf[f.id] = 0;
+        continue;
+      }
+      if (f.paneShare === 'overlay') {
+        slotOf[f.id] = typeof pinned === 'number' && pinned > 0 ? pinned : 1;
+        continue;
+      }
+      if (typeof pinned === 'number' && pinned > 0 && pinHit[pinned] === 1) {
+        slotOf[f.id] = pinned;
+        continue;
+      }
+      slotOf[f.id] = -1;
     }
+    const taken = new Set(Object.values(slotOf).filter((s) => s > 0));
     let next = 1;
     for (const f of inds) {
       if (slotOf[f.id] !== -1) continue;
-      while (used.has(next)) next += 1;
+      while (taken.has(next)) next += 1;
       slotOf[f.id] = next;
-      used.add(next);
+      taken.add(next);
       next += 1;
     }
     valuesById.current = valMap;
     const extraSlots = [...new Set(Object.values(slotOf).filter((s) => s > 0))].sort((a, b) => a - b);
-    const chartEx = chart as IChartApi & {panes: () => {getHeight?: () => number; paneIndex: () => number}[]; removePane: (n: number) => void};
+    const chartEx = chart as IChartApi & {
+      panes: () => {getHeight?: () => number; paneIndex?: () => number; setStretchFactor?: (n: number) => void}[];
+      removePane: (n: number) => void;
+    };
+    let have = 1;
     try {
-      while ((chartEx.panes?.() || []).length > 1) chartEx.removePane((chartEx.panes() || []).length - 1);
+      have = Math.max(1, chartEx.panes?.().length || 1);
     } catch {
-      /* pane */
+      have = 1;
+    }
+    const need = 1 + extraSlots.length;
+    while (have < need) {
+      try {
+        chart.addPane();
+        have += 1;
+      } catch {
+        break;
+      }
+    }
+    while (have > need) {
+      try {
+        chartEx.removePane(have - 1);
+        have -= 1;
+      } catch {
+        break;
+      }
     }
     const paneIdx = new Map<number, number>([[0, 0]]);
-    for (const s of extraSlots) {
-      try {
-        paneIdx.set(s, chart.addPane().paneIndex());
-      } catch {
-        paneIdx.set(s, 1);
-      }
+    extraSlots.forEach((s, i) => paneIdx.set(s, i + 1));
+    try {
+      const panes = chartEx.panes?.() || [];
+      panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
+      for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
+    } catch {
+      /* stretch */
     }
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
       const values = valMap[f.id] || evaluate(f.expression, bars, f.variables, formulas);
@@ -233,18 +263,31 @@ export function Chart({
         const lines = [{name: f.name, expression: f.expression, color: f.color, alternateColor: f.alternateColor, ...f.primaryLine, visible: f.primaryLine?.visible !== false}, ...(f.extraLines || [])];
         const styles = {solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted};
         let baselineAdded = false;
+        const share = extraSlots.length > 0 && inds.filter((x) => slotOf[x.id] === slotOf[f.id]).length > 1;
+        while (((chartEx.panes?.() || []).length) <= paneIndex) {
+          try {
+            chart.addPane();
+          } catch {
+            break;
+          }
+        }
+        const paneApi = (chartEx.panes?.() || [])[paneIndex] as {addSeries?: (def: unknown, opts: object) => ISeriesApi<'Line' | 'Histogram'>} | undefined;
+        const putSeries = (def: typeof LineSeries | typeof HistogramSeries, opts: object) => {
+          if (paneIndex > 0 && typeof paneApi?.addSeries === 'function') return paneApi.addSeries(def, opts);
+          return chart.addSeries(def as typeof LineSeries, opts as never, paneIndex);
+        };
         for (const lineSpec of lines.filter((l) => l.visible)) {
           const common = {
             title: (f.name || f.id).slice(0, 12),
             color: lineSpec.color,
             priceLineVisible: false,
             lastValueVisible: true,
-            priceScaleId: separate || (slotOf[f.id] === 0 && f.pane === 'separate') ? `ps-${f.id}` : 'right',
+            priceScaleId: share ? `ps-${f.id}` : 'right',
           };
           const line =
             lineSpec.type === 'histogram'
-              ? chart.addSeries(HistogramSeries, common, paneIndex)
-              : chart.addSeries(LineSeries, {...common, lineWidth: lineSpec.width || 1, lineStyle: styles[lineSpec.style || 'solid']}, paneIndex);
+              ? putSeries(HistogramSeries, common)
+              : putSeries(LineSeries, {...common, lineWidth: lineSpec.width || 1, lineStyle: styles[lineSpec.style || 'solid']});
           const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
           const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
@@ -321,32 +364,36 @@ export function Chart({
         });
       }
     }
-    const paneRows: {slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[] = [];
-    try {
-      const panes = chartEx.panes?.() || [];
-      let top = 0;
-      const order = [0, ...extraSlots];
-      for (let i = 0; i < order.length; i++) {
-        const slot = order[i];
-        const pi = paneIdx.get(slot) ?? i;
-        const ph = panes[pi]?.getHeight?.() || (i === 0 ? Math.max(80, height * 0.62) : 88);
-        const items = inds
-          .filter((x) => slotOf[x.id] === slot)
-          .map((x) => ({
-            id: x.id,
-            name: x.name,
-            param: Object.entries(x.variables || {})
-              .map(([k, v]) => `${k} ${v}`)
-              .join(' '),
-            color: x.color,
-          }));
-        paneRows.push({slot, top, height: ph, items});
-        top += ph;
+    const legendItems = (slot: number) =>
+      inds
+        .filter((x) => slotOf[x.id] === slot)
+        .map((x) => ({
+          id: x.id,
+          name: x.name,
+          param: Object.entries(x.variables || {})
+            .map(([k, v]) => `${k} ${v}`)
+            .join(' '),
+          color: x.color,
+        }));
+    const layoutLegends = () => {
+      try {
+        const panes = chartEx.panes?.() || [];
+        let top = 0;
+        const order = [0, ...extraSlots];
+        const rows = order.map((slot, i) => {
+          const pi = paneIdx.get(slot) ?? i;
+          const ph = panes[pi]?.getHeight?.() || Math.max(72, Math.round(height / Math.max(1, order.length)));
+          const row = {slot, top, height: ph, items: legendItems(slot)};
+          top += ph;
+          return row;
+        });
+        setLegends(rows);
+      } catch {
+        setLegends([{slot: 0, top: 0, height, items: legendItems(0)}]);
       }
-    } catch {
-      /* legend */
-    }
-    setLegends(paneRows);
+    };
+    layoutLegends();
+    requestAnimationFrame(layoutLegends);
     const sorted = markers.sort((a, b) => Number(a.time) - Number(b.time));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(series, []);
     markersRef.current?.setMarkers(sorted);
