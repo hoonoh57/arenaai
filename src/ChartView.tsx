@@ -17,7 +17,7 @@ import {
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import {ma120TrendPoints, smaAt} from '../shared/skipJump';
+import {ma120TrendPoints} from '../shared/skipJump';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -118,6 +118,14 @@ export function Chart({
       }
     }
     extras.current = [];
+    try {
+      const panes = (chart as unknown as {panes?: () => {paneIndex: () => number}[]}).panes?.() || [];
+      for (let i = panes.length - 1; i >= 1; i--) {
+        (chart as unknown as {removePane: (n: number) => void}).removePane(i);
+      }
+    } catch {
+      /* pane API */
+    }
     const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: evaluate(f.expression, bars, f.variables, formulas)}));
     series.setData(
       bars.map((c, i) => {
@@ -131,19 +139,17 @@ export function Chart({
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
     }
-    const smaPts = bars.map((c, i) => {
-      const v = smaAt(bars, i, 120);
-      return v > 0 ? {time: c.time as UTCTimestamp, value: v} : null;
-    }).filter((p): p is {time: UTCTimestamp; value: number} => Boolean(p));
-    if (smaPts.length) {
-      const smaLine = chart.addSeries(LineSeries, {color: '#8aa4b8', lineWidth: 1, lineStyle: LineStyle.Dotted, title: 'SMA120', priceLineVisible: false, lastValueVisible: true});
-      smaLine.setData(smaPts);
-      extras.current.push(smaLine);
-    }
     const trend = ma120TrendPoints(bars);
     if (trend.length) {
       const up = trend[trend.length - 1].slope > 0;
-      const tLine = chart.addSeries(LineSeries, {color: up ? '#5d96e8' : '#ed6b72', lineWidth: 2, title: up ? '120추세+' : '120추세-', priceLineVisible: false, lastValueVisible: true});
+      const tLine = chart.addSeries(LineSeries, {
+        color: up ? '#5d96e8' : '#ed6b72',
+        lineWidth: 2,
+        title: up ? '120추세+' : '120추세-',
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceScaleId: 'right',
+      });
       tLine.setData(trend.map((p) => ({time: p.time as UTCTimestamp, value: p.value})));
       extras.current.push(tLine);
     }
@@ -165,6 +171,13 @@ export function Chart({
           const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
           line.setData(vals.map((value, i) => (value === null ? {time: bars[i].time as UTCTimestamp} : {time: bars[i].time as UTCTimestamp, value, color: colors[i]})));
+          if (f.pane === 'separate') {
+            try {
+              line.priceScale().applyOptions({mode: PriceScaleMode.Normal, autoScale: true});
+            } catch {
+              /* scale */
+            }
+          }
           extras.current.push(line);
           if (!baselineAdded) {
             for (const base of f.baselines || []) line.createPriceLine({price: base.value, color: base.color, lineWidth: base.width || 1, lineStyle: styles[base.style || 'dashed'], axisLabelVisible: true, title: '기준선'});
