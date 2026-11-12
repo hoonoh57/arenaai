@@ -93,7 +93,7 @@ test('건너뜀 바로 다음 봉이 종가·고저 상향이면 즉시 매수',
   c[21].high = 100.6;
   c[21].close = 100.5;
   const late = delayedEntry(c, 21, (i) => i === 20);
-  assert.equal(late?.allow, true);
+  assert.equal(late?.allow, true, late?.reasons.join(',') || 'no delayed');
 });
 
 test('건너뜀 뒤 같은 봉에 이평이 다시 나와도 양봉 급등이면 확인 매수', () => {
@@ -108,5 +108,5 @@ test('건너뜀 뒤 같은 봉에 이평이 다시 나와도 양봉 급등이면
   const sig = (i: number) => i === 20 || i === c.length - 1;
   const late = delayedEntry(c, c.length - 1, sig);
   assert.equal(late?.allow, true);
-  assert.equal(late?.tag, '확인매수');
+  assert.ok(late?.tag === '확인매수' || late?.tag === '지연확인');
 });

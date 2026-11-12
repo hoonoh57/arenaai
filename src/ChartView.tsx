@@ -16,7 +16,7 @@ import {
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
-import {delayedEntry, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
+import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
@@ -166,13 +166,15 @@ export function Chart({
           if (values[i]) {
             if (f.kind === 'system') {
               const v = judgePattern(bars, i, patternFilters, delayContext);
-              const late = !v.allow && lastSkip >= 0 && !delayedUsed ? delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters, delayContext) : null;
-              const take = v.allow || Boolean(late?.allow);
-              if (take) {
-                lastSkip = -1;
+              let late = null as ReturnType<typeof delayedAfterSkip>;
+              if (!v.allow) {
+                lastSkip = v.tag === '급등후횡보' ? -1 : i;
+              } else if (lastSkip >= 0 && !delayedUsed) {
+                late = delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext);
                 if (late?.allow) delayedUsed = true;
-              } else if (v.tag !== '급등후횡보') lastSkip = i;
-              else lastSkip = -1;
+                lastSkip = -1;
+              } else lastSkip = -1;
+              const take = v.allow || Boolean(late?.allow);
               const shown = late?.allow ? late : v;
               markers.push({
                 time: c.time as UTCTimestamp,
@@ -183,7 +185,7 @@ export function Chart({
               });
             } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
           } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {
-            const late = delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters, delayContext);
+            const late = delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext);
             if (late?.allow) {
               delayedUsed = true;
               lastSkip = -1;

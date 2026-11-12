@@ -219,8 +219,40 @@ function confirmAfterSkip(session: Candle[], skip: Candle, nextBar: boolean): {o
   if (upClose) quality += 8;
   if (last.close > skip.high) quality += 10;
   quality = Math.max(0, Math.min(100, quality));
-  const ok = nextBar ? upClose && meaningful : surge.ok || meaningful;
+  const brokeHigh = last.high > skip.high;
+  const green = last.close >= last.open;
+  const ok = nextBar
+    ? upClose || green || brokeHigh || meaningful
+    : surge.ok || meaningful || upClose;
   return {ok, parts: extra, bonus: Math.min(25, extra.length * 8), quality};
+}
+
+/** Chart/평가기가 이미 알고 있는 건너뜀 봉 이후 확인. */
+export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: number, filters?: FilterEnabled, delay?: DelayContext): PatternVerdict | null {
+  if (!filterOn(filters, 'delayed-buy')) return null;
+  if (skipIndex < 0 || at <= skipIndex || at - skipIndex > 80 || at >= candles.length) return null;
+  const skip = candles[skipIndex];
+  const last = candles[at];
+  if (!skip || !last) return null;
+  const nextBar = at === skipIndex + 1;
+  const slice = candles.slice(skipIndex, at + 1);
+  const surge = confirmAfterSkip(slice, skip, true);
+  const green = last.close >= last.open;
+  const upClose = last.close > skip.close;
+  const brokeHigh = last.high > skip.high;
+  if (!(surge.ok || green || upClose || brokeHigh)) return null;
+  if (!nextBar) {
+    if (delay?.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE) {
+      const move = skip.close > 0 ? Math.abs(last.close - skip.close) / skip.close : 0;
+      if (move < (delay.maAvgLoserRange || 0.01) * (delay.skip001N ?? 1.2)) return null;
+    }
+    if (filterOn(filters, 'skip001')) {
+      const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
+      if (surge.quality < need) return null;
+    }
+  }
+  const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
+  return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`건너뜀 다음 ${surge.parts.join('·') || '양봉확인'}`]};
 }
 
 /**
@@ -238,40 +270,9 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
       lastSkip = -1;
       continue;
     }
-    if (!j.allow) lastSkip = i;
-    else lastSkip = -1;
+    if (!j.allow && j.tag !== '급등후횡보') lastSkip = i;
   }
-  const nextBar = lastSkip >= 0 && at - lastSkip === 1;
-  if (!nextBar) {
-    const now = judgePattern(candles, at, filters, delay);
-    if (now.tag === '급등후횡보') return null;
-  }
-  if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;
-  const session = sessionSlice(candles, at);
-  const surge = confirmAfterSkip(session, candles[lastSkip], nextBar);
-  if (!surge.ok) return null;
-  /* 건너뜀 바로 다음 봉은 확인 피처만. KPI×N은 그 이후 봉에만. */
-  if (!nextBar) {
-    if (delay?.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE) {
-      const last = session[session.length - 1];
-      const skipPx = candles[lastSkip];
-      const move = skipPx.close > 0 ? Math.abs(last.close - skipPx.close) / skipPx.close : 0;
-      if (move < (delay.maAvgLoserRange || 0.01) * (delay.skip001N ?? 1.2)) return null;
-    }
-    if (filterOn(filters, 'skip001')) {
-      const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
-      if (surge.quality < need) return null;
-    }
-  }
-  const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
-  const recross = hadSignal(at);
-  return {
-    score,
-    allow: true,
-    delayed: true,
-    tag: recross ? '확인매수' : '지연확인',
-    reasons: [`건너뜀 후 ${surge.parts.join('·')}${recross ? '·이평재교차' : ''}`],
-  };
+  return delayedAfterSkip(candles, lastSkip, at, filters, delay);
 }
 
 export function delayedExit(candles: Candle[], at: number, hadExit: (i: number) => boolean, filters?: FilterEnabled): PatternVerdict | null {
