@@ -388,26 +388,8 @@ app.post('/api/chart', async (req, res) => {
       res.json({code, name, candles, hasMore: false, nextKey: '', timeframe});
       return;
     }
-    if (timeframe === '1' && !nextKey) {
-      const cachedBars = cache.candles(code);
-      if (cachedBars.length) {
-        let candles = cachedBars;
-        if (req.body?.withStrength) {
-          try {
-            candles = await api.attachStrength(code, timeframe, candles);
-          } catch {
-            /* keep price bars */
-          }
-        }
-        const listed = ranking.find((s) => s.code === code);
-        const fetched = await api.stockName(code).catch(() => '');
-        const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
-        res.json({code, name, candles, hasMore: false, nextKey: '', timeframe});
-        return;
-      }
-    }
     const page = await api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
-    let candles = page.candles;
+    candles = mergeByTime(candles, page.candles);
     if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
     if (req.body?.withStrength) {
       try {
