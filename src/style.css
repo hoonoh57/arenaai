@@ -36,6 +36,7 @@
 .log-list{font-size:11px;max-height:100%;overflow:auto;line-height:1.4}
 .log-row{padding:3px 0;border-bottom:1px solid #1c2a24;color:#c5d4cc}
 .hts-workspace{position:relative;flex:1;overflow:hidden;background:#0a1210}
+.hts-desk-layer{position:absolute;inset:0}
 .hts-empty{position:absolute;inset:40% 10% auto;text-align:center;color:#6f857c;font-size:13px}
 .hts-taskbar{position:absolute;left:8px;bottom:8px;display:flex;gap:6px;z-index:50}
 .hts-taskbar button{background:#1c2c24;border:1px solid #3a5344;color:#cfe3d3;border-radius:4px;padding:4px 8px;font-size:10px}

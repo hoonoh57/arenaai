@@ -36,6 +36,10 @@ async function post(path: string, body?: unknown) {
 }
 
 const fetchCool = new Map<string, number>();
+const barCache = new Map<string, Candle[]>();
+function barKey(code: string, tf: string, base: string) {
+  return `${code}|${tf}|${base || ''}`;
+}
 function chartTooSoon(key: string, ms = 25_000): boolean {
   const at = fetchCool.get(key) || 0;
   if (Date.now() - at < ms) return true;
@@ -89,7 +93,11 @@ export function ChartPane({
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
   const [name, setName] = useState(rankingName || '');
-  const [bars, setBars] = useState<Candle[]>(cached);
+  const [bars, setBars] = useState<Candle[]>(() => {
+    if (cached.length) return cached;
+    const hit = barCache.get(barKey(code, win.timeframe || '1', win.baseDate || ''));
+    return hit || [];
+  });
   const [nextKey, setNextKey] = useState('');
   const [strengthNextKey, setStrengthNextKey] = useState('');
   const [hasMore, setHasMore] = useState(false);
@@ -142,8 +150,19 @@ export function ChartPane({
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
       if (opts.overlay) setOverlay(next);
-      else if (opts.strengthOnly) setBars((prev) => mergeStrengthOnto(prev.length ? prev : next, next));
-      else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
+      else if (opts.strengthOnly) {
+        setBars((prev) => {
+          const merged = mergeStrengthOnto(prev.length ? prev : next, next);
+          barCache.set(barKey(useCode, opts.timeframe ?? timeframe, opts.baseDate ?? baseDate), merged);
+          return merged;
+        });
+      } else {
+        setBars((prev) => {
+          const merged = opts.append ? mergeBars(prev, next) : next.length ? next : prev;
+          barCache.set(barKey(useCode, opts.timeframe ?? timeframe, opts.baseDate ?? baseDate), merged);
+          return merged;
+        });
+      }
       setHasMore(Boolean(d.hasMore));
       setStrengthHasMore(Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');
@@ -165,7 +184,13 @@ export function ChartPane({
   };
 
   useEffect(() => {
-    if (/^\d{6}$/.test(code)) void load({code});
+    if (!/^\d{6}$/.test(code)) return;
+    const hit = barCache.get(barKey(code, timeframe, baseDate));
+    if (hit?.length) {
+      setBars(hit);
+      return;
+    }
+    void load({code});
   }, [code, timeframe, baseDate]);
 
 

@@ -175,6 +175,8 @@ export function DeskApp() {
 
   const desk = activeDesk(workspace);
   const updateDesk = (next: VirtualDesk) => persist(replaceDesk(workspaceRef.current, next));
+  const deskOf = (winId: string) =>
+    workspaceRef.current.desks.find((d) => d.windows.some((w) => w.id === winId)) || activeDesk(workspaceRef.current);
 
   const addWindow = (kind: WindowKind) => {
     if (kind === 'logs') {
@@ -367,60 +369,72 @@ export function DeskApp() {
         </button>
       </header>
       <div className="hts-workspace">
-        {desk.windows
-          .slice()
-          .sort((a, b) => a.z - b.z)
-          .map((win) => (
-            <ChildFrame
-              key={win.id}
-              win={win}
-              desks={workspace.desks}
-              deskNumber={desk.number}
-              onMove={(n) => {
-                try {
-                  persist(moveWindow(workspace, win.id, n));
-                } catch (e) {
-                  setNotice((e as Error).message);
-                }
-              }}
-              onFocus={() => updateDesk(focusWindow(desk, win.id))}
-              onClose={() => updateDesk(removeWindow(desk, win.id))}
-              onLock={() => updateDesk(toggleLock(desk, win.id))}
-              onState={(st) => updateDesk(setWindowState(desk, win.id, st))}
-              onDrag={(e, mode) => {
-                updateDesk(focusWindow(desk, win.id));
-                drag.current = {id: win.id, dx: e.clientX - win.x, dy: e.clientY - win.y, mode};
-              }}
-            >
-              <Pane
-                win={win}
-                desk={desk}
-                state={state}
-                draft={draft}
-                setDraft={setDraft}
-                selected={selected}
-                chartCodes={chartCodes}
-                grid={grid}
-                logScale={logScale}
-                chartHeight={chartHeight}
-                setGrid={setGrid}
-                setLogScale={setLogScale}
-                setChartHeight={setChartHeight}
-                update={update}
-                toggleChart={toggleChart}
-                load={load}
-                setNotice={setNotice}
-                setShowFormulas={setShowFormulas}
-                setShowSysTrade={setShowSysTrade}
-                setStrategy={setStrategy}
-                setTrade={setTrade}
-                formulasFor={formulasFor}
-                systems={systems}
-                patchWin={(id, patch) => updateDesk(patchWindow(desk, id, patch))}
-                onCommonCode={applyCode}
-              />
-            </ChildFrame>
-          ))}
+        {workspace.desks.map((d) => (
+          <div
+            key={d.id}
+            className="hts-desk-layer"
+            style={{
+              visibility: d.number === desk.number ? 'visible' : 'hidden',
+              pointerEvents: d.number === desk.number ? 'auto' : 'none',
+              zIndex: d.number === desk.number ? 1 : 0,
+            }}
+          >
+            {d.windows
+              .slice()
+              .sort((a, b) => a.z - b.z)
+              .map((win) => (
+                <ChildFrame
+                  key={win.id}
+                  win={win}
+                  desks={workspace.desks}
+                  deskNumber={d.number}
+                  onMove={(n) => {
+                    try {
+                      persist(moveWindow(workspaceRef.current, win.id, n));
+                    } catch (e) {
+                      setNotice((e as Error).message);
+                    }
+                  }}
+                  onFocus={() => updateDesk(focusWindow(deskOf(win.id), win.id))}
+                  onClose={() => updateDesk(removeWindow(deskOf(win.id), win.id))}
+                  onLock={() => updateDesk(toggleLock(deskOf(win.id), win.id))}
+                  onState={(st) => updateDesk(setWindowState(deskOf(win.id), win.id, st))}
+                  onDrag={(e, mode) => {
+                    updateDesk(focusWindow(deskOf(win.id), win.id));
+                    drag.current = {id: win.id, dx: e.clientX - win.x, dy: e.clientY - win.y, mode};
+                  }}
+                >
+                  <Pane
+                    win={win}
+                    desk={d}
+                    state={state}
+                    draft={draft}
+                    setDraft={setDraft}
+                    selected={selected}
+                    chartCodes={chartCodes}
+                    grid={grid}
+                    logScale={logScale}
+                    chartHeight={chartHeight}
+                    setGrid={setGrid}
+                    setLogScale={setLogScale}
+                    setChartHeight={setChartHeight}
+                    update={update}
+                    toggleChart={toggleChart}
+                    load={load}
+                    setNotice={setNotice}
+                    setShowFormulas={setShowFormulas}
+                    setShowSysTrade={setShowSysTrade}
+                    setStrategy={setStrategy}
+                    setTrade={setTrade}
+                    formulasFor={formulasFor}
+                    systems={systems}
+                    patchWin={(id, patch) => updateDesk(patchWindow(deskOf(id), id, patch))}
+                    onCommonCode={applyCode}
+                  />
+                </ChildFrame>
+              ))}
+          </div>
+        ))}
         {desk.windows.length === 0 && (
           <div className="hts-empty">
             툴바에서 차트·멀티차트·조건검색·TR 창을 이 가상화면({desk.number})에 넣으세요. Ctrl+1~8로 화면을 바꿉니다.
@@ -845,6 +859,10 @@ function StockMiniChart({
   }, [lastPrice]);
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
+    if (bars.length) {
+      setWait(false);
+      return;
+    }
     let stop = false;
     if (!cached.length) setWait(true);
     void queuedChart(code, timeframe, false)
