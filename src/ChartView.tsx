@@ -16,7 +16,9 @@ import {
   type LogicalRange,
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
-import {evaluate, seriesColors, type Formula} from '../shared/formula';
+import {seriesColors, type Formula} from '../shared/formula';
+import {chartHub, corePercent, createChartRuntime} from '../shared/chart';
+import './chart/register';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
 import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
@@ -96,6 +98,7 @@ export function Chart({
   const yModeRef = useRef(yMode);
   yModeRef.current = yMode;
   const pendingRef = useRef<{t: number; p: number} | null>(null);
+  const runtimeRef = useRef(createChartRuntime('desk-chart'));
   const valuesById = useRef<Record<string, (number | null)[]>>({});
   const paneByIdRef = useRef(paneById);
   paneByIdRef.current = paneById;
@@ -144,16 +147,16 @@ export function Chart({
       }
     }
     extras.current = [];
+    runtimeRef.current.paintAddons({bars, formulas, paneById: paneByIdRef.current});
     const pctOn = yModeRef.current === 'percent';
     const refPx = bars[0].close > 0 ? bars[0].close : 1;
-    const toPct = (px: number) => (100 * (px / refPx - 1));
-    const ax = (px: number) => (pctOn ? toPct(px) : px);
+    const ax = (px: number) => corePercent(px, refPx, pctOn);
     series.applyOptions({
       priceFormat: pctOn
         ? {type: 'custom', minMove: 0.01, formatter: (p: number) => `${p.toFixed(2)}%`}
         : {type: 'price', precision: 0, minMove: 1},
     });
-    const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: evaluate(f.expression, bars, f.variables, formulas)}));
+    const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: chartHub.evaluate(f.expression, bars, f.variables, formulas)}));
     series.setData(
       bars.map((c, i) => {
         const h = highlights.find((item) => item.values[i]);
@@ -187,7 +190,7 @@ export function Chart({
       if (typeof p === 'number' && p > 0) pinHit[p] = (pinHit[p] || 0) + 1;
     }
     for (const f of inds) {
-      const values = evaluate(f.expression, bars, f.variables, formulas);
+      const values = chartHub.evaluate(f.expression, bars, f.variables, formulas);
       valMap[f.id] = values;
       const pinned = paneByIdRef.current?.[f.id];
       const sample = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0);
@@ -256,7 +259,7 @@ export function Chart({
       /* stretch */
     }
     for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
-      const values = valMap[f.id] || evaluate(f.expression, bars, f.variables, formulas);
+      const values = valMap[f.id] || chartHub.evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
         const separate = (slotOf[f.id] ?? 0) > 0;
         const paneIndex = paneIdx.get(slotOf[f.id] ?? 0) ?? 0;
@@ -288,8 +291,8 @@ export function Chart({
             lineSpec.type === 'histogram'
               ? putSeries(HistogramSeries, common)
               : putSeries(LineSeries, {...common, lineWidth: lineSpec.width || 1, lineStyle: styles[lineSpec.style || 'solid']});
-          const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
-          const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
+          const vals = lineSpec.expression === f.expression ? values : chartHub.evaluate(lineSpec.expression, bars, f.variables, formulas);
+          const colorSrc = lineSpec.colorMode === 'st' ? chartHub.evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
           const overlayPx = !separate && lineSpec.type !== 'histogram';
           line.setData(vals.map((value, i) => {
@@ -316,7 +319,7 @@ export function Chart({
         }
       }
       if (f.kind === 'signal' || f.kind === 'system') {
-        const exits = f.kind === 'system' ? evaluate(f.exitExpression, bars, f.variables, formulas) : [];
+        const exits = f.kind === 'system' ? chartHub.evaluate(f.exitExpression, bars, f.variables, formulas) : [];
         let lastSkip = -1;
         bars.forEach((c, i) => {
           const step = bars.length >= 2 ? Math.max(60, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
