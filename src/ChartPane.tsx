@@ -114,7 +114,7 @@ export function ChartPane({
         baseDate: opts.baseDate ?? baseDate,
         nextKey: opts.append ? nextKey : '',
         strengthNextKey: opts.append ? strengthNextKey : '',
-        withStrength: (opts.timeframe ?? timeframe) !== 'D' && (opts.timeframe ?? timeframe) !== 'W' && (opts.timeframe ?? timeframe) !== 'M',
+        withStrength: enabled.has('cntrstr') && (opts.timeframe ?? timeframe) !== 'D' && (opts.timeframe ?? timeframe) !== 'W' && (opts.timeframe ?? timeframe) !== 'M',
       });
       setName(d.name && d.name !== useCode ? d.name : d.name || useCode);
       const next = d.candles || [];
@@ -125,6 +125,7 @@ export function ChartPane({
       setStrengthNextKey(d.strengthNextKey || '');
       setStrengthReady(Boolean(d.strengthReady));
       setStrengthNxt(Boolean(d.strengthNxt));
+      if (d.warning) setNotice(String(d.warning));
     } catch (e) {
       setNotice((e as Error).message);
     } finally {

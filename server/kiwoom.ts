@@ -205,9 +205,15 @@ export class Kiwoom {
 
   private async auth(force = false): Promise<string> {
     if (!force && this.token && Date.now() < this.expires) return this.token;
-    const key = process.env.KIWOOM_APP_KEY;
-    const secret = process.env.KIWOOM_SECRET_KEY;
-    if (!key || !secret) throw new Error('.env에 키움 API 키를 설정하고 서버를 재시작하세요.');
+    const key =
+      this.hostMode === 'real'
+        ? process.env.KIWOOM_APP_KEY_REAL || process.env.KIWOOM_APP_KEY
+        : process.env.KIWOOM_APP_KEY_MOCK || process.env.KIWOOM_APP_KEY;
+    const secret =
+      this.hostMode === 'real'
+        ? process.env.KIWOOM_SECRET_KEY_REAL || process.env.KIWOOM_SECRET_KEY
+        : process.env.KIWOOM_SECRET_KEY_MOCK || process.env.KIWOOM_SECRET_KEY;
+    if (!key || !secret) throw new Error(this.hostMode === 'real' ? '.env에 KIWOOM_APP_KEY_REAL / SECRET 을 넣으세요.' : '.env에 KIWOOM_APP_KEY_MOCK / SECRET 을 넣으세요.');
     await this.governor.acquire('au10001', 'read');
     const r = await fetch(this.base + '/oauth2/token', {
       method: 'POST',
@@ -217,7 +223,15 @@ export class Kiwoom {
     });
     const d = (await r.json()) as any;
     if (!r.ok) throw new Error(`키움 인증 HTTP 오류: ${r.status}`);
-    if (d.return_code !== undefined && Number(d.return_code) !== 0) throw new KiwoomApiError({returnCode: Number(d.return_code), returnMsg: String(d.return_msg ?? '인증 실패')});
+    if (d.return_code !== undefined && Number(d.return_code) !== 0) {
+      const msg = String(d.return_msg ?? '인증 실패');
+      if (Number(d.return_code) === 821 || /8030/.test(msg)) {
+        throw new Error(
+          `AppKey가 ${this.hostMode === 'real' ? '실전' : '모의'} 호스트와 다릅니다. .env에 KIWOOM_APP_KEY_REAL / KIWOOM_APP_KEY_MOCK 을 구분해 넣으세요.`,
+        );
+      }
+      throw new KiwoomApiError({returnCode: Number(d.return_code), returnMsg: msg});
+    }
     const expiry = kstTimestamp(d.expires_dt);
     if (!d.token || !Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('키움 토큰 또는 만료일이 유효하지 않습니다.');
     this.token = d.token;

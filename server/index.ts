@@ -498,9 +498,25 @@ app.post('/api/chart', async (req, res) => {
       timeframe,
     });
   } catch (e) {
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    const timeframe = typeof req.body?.timeframe === 'string' ? req.body.timeframe : '1';
+    const fallback = cache.candles(code);
+    const local = fallback.length ? fallback : loadLocalBars(code, timeframe === 'D' || timeframe === 'W' || timeframe === 'M' ? timeframe : '1');
+    if (local.length) {
+      res.json({
+        code,
+        name: code,
+        candles: local,
+        hasMore: false,
+        nextKey: '',
+        strengthReady: false,
+        warning: e instanceof Error ? e.message : 'REST 실패, 로컬/캐시 봉만 표시',
+        timeframe,
+      });
+      return;
+    }
     res.status(400).json({error: e instanceof Error ? e.message : '차트 조회 실패'});
   }
-});
 app.get('/api/audit', (req, res) => {
   const limit = Number(req.query.limit ?? 100);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({error: 'limit은 1~500이어야 합니다.'});
