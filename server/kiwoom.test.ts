@@ -8,6 +8,11 @@ test('최신일의 08시 봉 유무를 본다', async () => {
   const bar = (iso: string) => ({time: t(iso), open: 1, high: 1, low: 1, close: 1});
   assert.equal(hasMorningSession([bar('2026-11-10T23:00:00Z'), bar('2026-11-11T06:30:00Z')]), true);
   assert.equal(hasMorningSession([bar('2026-11-11T00:00:00Z'), bar('2026-11-11T06:30:00Z')]), false);
+  const {reachedSessionOpen} = await import('./kiwoom');
+  const last = t('2026-11-11T03:00:00Z');
+  assert.equal(reachedSessionOpen([t('2026-11-10T23:30:00Z')], last, 8, 30), true);
+  assert.equal(reachedSessionOpen([t('2026-11-11T00:10:00Z')], last, 8, 30), false);
+  assert.equal(reachedSessionOpen([t('2026-11-11T00:00:00Z')], last, 9, 0), true);
 });
 test('분봉을 KST에서 UTC로 변환하고 최근순이면 reverse만',()=>{const row=(t:string)=>({cntr_tm:t,open_pric:'-100',high_pric:'+110',low_pric:'90',cur_prc:'105'});const candles=parseCandles([row('20260102090100'),row('20260102090000'),row('20260102090000'),row('invalid')]);assert.equal(candles.length,2);assert.equal(new Date(candles[0].time*1000).toISOString(),'2026-01-02T00:00:00.000Z');assert.equal(candles[0].open,100);assert.throws(()=>parseCandles(null));});
 

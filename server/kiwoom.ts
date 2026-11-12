@@ -62,6 +62,22 @@ export function hasMorningSession(candles: Candle[], hour = 8): boolean {
   });
 }
 
+/** 최신 봉이 속한 날의 NXT 08:30 또는 KRX 09:00까지 체결강도가 왔는지. */
+export function reachedSessionOpen(times: number[], lastSec: number, hour: number, minute: number): boolean {
+  if (!times.length || !Number.isFinite(lastSec)) return false;
+  const last = kstClock(lastSec);
+  return times.some((t) => {
+    const p = kstClock(t);
+    if (p.day !== last.day) return false;
+    return p.hour < hour || (p.hour === hour && p.minute <= minute);
+  });
+}
+
+function mergeTicks(older: StrengthTick[], newer: StrengthTick[]): StrengthTick[] {
+  const seen = new Set(newer.map((t) => `${t.time}:${t.qty}`));
+  return [...older.filter((t) => !seen.has(`${t.time}:${t.qty}`)), ...newer];
+}
+
 function mergeCandlePages(older: Candle[], newer: Candle[]): Candle[] {
   const seen = new Set(newer.map((c) => c.time));
   return [...older.filter((c) => !seen.has(c.time)), ...newer];
@@ -410,14 +426,17 @@ export class Kiwoom {
     return {strength: strength === null ? null : Math.abs(strength), value: value === null ? null : Math.abs(value), change: null};
   }
 
-  async strengthPage(input: {code: string; daily?: boolean; nextKey?: string; hintSec: number}): Promise<{ticks: StrengthTick[]; hasMore: boolean; nextKey: string}> {
+  async strengthPage(input: {code: string; daily?: boolean; nextKey?: string; hintSec: number}): Promise<{ticks: StrengthTick[]; hasMore: boolean; nextKey: string; unified: boolean}> {
     if (!/^\d{6}$/.test(input.code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
     const apiId = input.daily ? 'ka10047' : 'ka10046';
     let d: any;
+    let unified = true;
     try {
       d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: `${input.code}_AL`}, extra);
+      if (!Array.isArray(d.cntr_str_tm || d.cntr_str_dy) || !(d.cntr_str_tm || d.cntr_str_dy).length) throw new Error('empty');
     } catch {
+      unified = false;
       d = await this.rest('/api/dostk/mrkcond', apiId, {stk_cd: input.code}, extra);
     }
     const rows = d.cntr_str_tm || d.cntr_str_dy || [];
@@ -425,19 +444,33 @@ export class Kiwoom {
       ticks: parseStrengthTicks(rows, input.hintSec),
       hasMore: this.lastContinuation.contYn === 'Y',
       nextKey: this.lastContinuation.nextKey,
+      unified,
     };
   }
 
   /**
-   * 차트 봉 수만큼 ka10046(분·틱) / ka10047(일·주·월)을 연속조회해 봉 시각에 맞춘다.
-   * 소량 연속 매수 이상치는 50으로 보정한다.
+   * 가격 차트와 맞추려면 최신 봉 날짜의 세션 시작(NXT 08:30 / KRX 09:00)까지 ka10046을 연속조회한다.
+   * +이전은 nextKey 한 페이지만. 소량 연속 매수 이상치는 50으로 보정한다.
    */
   async attachStrength(code: string, timeframe: string, candles: Candle[], nextKey?: string): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
     if (!candles.length) return {candles, hasMore: false, nextKey: ''};
     const daily = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
-    const page = await this.strengthPage({code, daily, hintSec: candles[candles.length - 1].time, nextKey: nextKey || undefined});
+    const hint = candles[candles.length - 1].time;
+    let page = await this.strengthPage({code, daily, hintSec: hint, nextKey: nextKey || undefined});
+    let ticks = page.ticks;
+    if (!daily && !nextKey) {
+      const hour = page.unified ? 8 : 9;
+      const minute = page.unified ? 30 : 0;
+      let n = 1;
+      while (!reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute) && page.hasMore && page.nextKey && n < 20) {
+        const older = await this.strengthPage({code, daily, hintSec: ticks[0]?.time ?? hint, nextKey: page.nextKey});
+        ticks = mergeTicks(older.ticks, ticks);
+        page = older;
+        n += 1;
+      }
+    }
     return {
-      candles: fillStrengthOnCandles(candles, correctSmallLotStrength(page.ticks), timeframe),
+      candles: fillStrengthOnCandles(candles, correctSmallLotStrength(ticks), timeframe),
       hasMore: page.hasMore,
       nextKey: page.nextKey,
     };
