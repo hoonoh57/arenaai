@@ -41,7 +41,7 @@ export type BrokerLike = {
   daily(code: string, baseDate: string): Promise<{date: string; open?: number; high?: number; low?: number; close?: number}[]>;
 };
 
-export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean} | null;
+export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean; score?: number} | null;
 
 /**
  * Optional guards around the simulated position. `canEnter` may only *block*; exits are
@@ -135,6 +135,9 @@ export class RealtimeHub {
   private duplicatesDropped = 0;
   private activeCodes = new Set<string>();
   private evaluator: SignalEvaluator | null = null;
+  bestScoreOnly = false;
+  private pendingBuys = new Map<string, {bar: Candle; score: number}>();
+  private bestTimer: ReturnType<typeof setTimeout> | null = null;
   orderQty = 1;
   private readonly readyHandlers = new Set<() => void | Promise<void>>();
   private hooks: PositionHooks = {};
@@ -535,12 +538,35 @@ export class RealtimeHub {
       return;
     }
     if (result.buy) {
-      this.audit.record('signal', '매수 신호', {code, barTime: last.time, price: last.close});
-      this.applySignal(code, last, 'buy');
+      if (this.bestScoreOnly) {
+        this.pendingBuys.set(code, {bar: last, score: result.score ?? 50});
+        if (this.bestTimer) clearTimeout(this.bestTimer);
+        this.bestTimer = setTimeout(() => this.flushBestBuys(), 80);
+      } else {
+        this.audit.record('signal', '매수 신호', {code, barTime: last.time, price: last.close, score: result.score});
+        this.applySignal(code, last, 'buy');
+      }
     }
     if (result.sell) {
       this.audit.record('signal', '매도 신호', {code, barTime: last.time, price: last.close});
       this.applySignal(code, last, 'sell');
+    }
+  }
+
+  private flushBestBuys(): void {
+    this.bestTimer = null;
+    const items = [...this.pendingBuys.entries()];
+    this.pendingBuys.clear();
+    if (!items.length) return;
+    items.sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
+    const [bestCode, best] = items[0];
+    for (const [code, item] of items) {
+      if (code === bestCode) {
+        this.audit.record('signal', `매수 신호 최고점 ${best.score}`, {code, barTime: item.bar.time, price: item.bar.close, score: item.score});
+        this.applySignal(code, item.bar, 'buy');
+      } else {
+        this.audit.record('signal', `점수 ${item.score} < ${best.score} 진입 안 함`, {code, barTime: item.bar.time, score: item.score});
+      }
     }
   }
 

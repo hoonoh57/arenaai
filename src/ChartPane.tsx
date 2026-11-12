@@ -50,6 +50,7 @@ export function ChartPane({
   patchWin,
   setNotice,
   onCommonCode,
+  patternFilters,
 }: {
   win: ChildWindow;
   desk: VirtualDesk;
@@ -61,6 +62,7 @@ export function ChartPane({
   patchWin: (patch: Partial<ChildWindow>) => void;
   setNotice: (v: string) => void;
   onCommonCode?: (code: string) => void;
+  patternFilters?: import('../shared/patternFilters').FilterEnabled;
 }) {
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
@@ -272,6 +274,7 @@ export function ChartPane({
             data={bars}
             overlay={overlay}
             formulas={applied}
+            patternFilters={patternFilters}
             chartHeight={Math.max(160, (win.h || 380) - 56)}
             grid={grid}
             logScale={logScale}

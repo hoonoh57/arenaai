@@ -16,7 +16,8 @@ import {
 } from 'lightweight-charts';
 import type {Candle} from '../server/core';
 import {evaluate, seriesColors, type Formula} from '../shared/formula';
-import {delayedEntry, judgePattern, patternMarkerText} from '../shared/patternGate';
+import {delayedEntry, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
+import type {FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
@@ -36,6 +37,7 @@ export function Chart({
   daySep,
   refLines,
   onDrawings,
+  patternFilters,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -53,6 +55,7 @@ export function Chart({
   daySep?: boolean;
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
   onDrawings?: (next: ChartDrawing[]) => void;
+  patternFilters?: FilterEnabled;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -86,6 +89,7 @@ export function Chart({
   drawingsRef.current = drawings;
   onDrawingsRef.current = onDrawings;
   const formulaSig = formulas.filter((f) => f.enabled).map((f) => f.id).join(',');
+  const filterSig = patternFilters ? Object.keys(patternFilters).filter((k) => patternFilters[k]).join(',') : '';
   const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
   const height = Math.max(120, chartHeight);
@@ -158,7 +162,7 @@ export function Chart({
           if (values[i] && exits[i]) return;
           if (values[i]) {
             if (f.kind === 'system') {
-              const v = judgePattern(bars, i);
+              const v = judgePattern(bars, i, patternFilters);
               if (v.allow) lastSkip = -1;
               else if (v.tag !== '급등후횡보') lastSkip = i;
               else lastSkip = -1;
@@ -171,7 +175,7 @@ export function Chart({
               });
             } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
           } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {
-            const late = delayedEntry(bars, i, (j) => Boolean(values[j]));
+            const late = delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters);
             if (late?.allow) {
               delayedUsed = true;
               lastSkip = -1;
@@ -185,6 +189,10 @@ export function Chart({
             }
           }
           if (exits[i]) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: '매도'});
+          else if (f.kind === 'system') {
+            const lateSell = delayedExit(bars, i, (j) => Boolean(exits[j]), patternFilters);
+            if (lateSell?.allow) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: patternMarkerText('sell', lateSell)});
+          }
         });
       }
     }
@@ -293,7 +301,7 @@ export function Chart({
 
   useEffect(() => {
     paint();
-  }, [dataSig, formulaSig, overlaySig]);
+  }, [dataSig, formulaSig, overlaySig, filterSig]);
 
   const chart = chartRef.current;
   const series = candleRef.current;

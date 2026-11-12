@@ -6,7 +6,8 @@ import WebSocket from 'ws';
 import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
-import {delayedEntry, judgePattern} from '../shared/patternGate';
+import {delayedEntry, delayedExit, judgePattern} from '../shared/patternGate';
+import {filterOn, normalizeFilterEnabled, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
@@ -159,6 +160,7 @@ type AppConfig = {
   orderQty: number;
   tradeSlots: number;
   lockedCodes: string[];
+  patternFilters: FilterEnabled;
 };
 const savedCfg = loadAppConfig<AppConfig>();
 let config: AppConfig = {
@@ -176,6 +178,7 @@ let config: AppConfig = {
   orderQty: Number.isInteger(savedCfg.orderQty) ? savedCfg.orderQty as number : 1,
   tradeSlots: Number.isInteger(savedCfg.tradeSlots) ? savedCfg.tradeSlots as number : 4,
   lockedCodes: Array.isArray(savedCfg.lockedCodes) ? savedCfg.lockedCodes.filter((c): c is string => typeof c === 'string' && /^\d{6}$/.test(c)) : [],
+  patternFilters: normalizeFilterEnabled((savedCfg as {patternFilters?: unknown}).patternFilters),
 };
 setTradeSession(config.running && config.tradeMode === 'auto');
 
@@ -224,16 +227,33 @@ function currentEvaluator() {
     const system = strategyFor(code);
     if (!system) return null;
     const buys = evaluate(system.expression, closed, system.variables, formulas);
+    const exits = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas) : [];
     const buyFlag = Boolean(buys.at(-1));
-    const sell = system.exitExpression ? evaluate(system.exitExpression, closed, system.variables, formulas).at(-1) : false;
+    const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
+    const filters = config.patternFilters;
+    let buy = false;
+    let score = 50;
     if (buyFlag) {
-      const v = judgePattern(closed, at);
-      if (!v.allow) return {buy: false, sell: Boolean(sell)};
-      return {buy: true, sell: Boolean(sell)};
+      const v = judgePattern(closed, at, filters);
+      buy = v.allow;
+      score = v.score;
+    } else {
+      const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
+      buy = Boolean(late?.allow);
+      if (late) score = late.score;
     }
-    const late = delayedEntry(closed, at, (i) => Boolean(buys[i]));
-    return {buy: Boolean(late?.allow), sell: Boolean(sell)};
+    let sell = sellFlag;
+    if (sellFlag && !filterOn(filters, 'early-sell')) {
+      const session = closed.length;
+      const firstExit = exits.findIndex(Boolean);
+      if (firstExit === at && session > 20) sell = false;
+    }
+    if (!sell) {
+      const lateSell = delayedExit(closed, at, (i) => Boolean(exits[i]), filters);
+      sell = Boolean(lateSell?.allow);
+    }
+    return {buy, sell, score};
   };
 }
 
@@ -247,6 +267,7 @@ function normalizeStrategyId(id: unknown): string {
 function syncSignals(): void {
   const anyRun = config.chartCodes.some((code) => (config.tradeByCode[code] ?? 'wait') === 'run');
   hub.setSignalEvaluator(anyRun ? currentEvaluator() : null);
+  hub.bestScoreOnly = filterOn(config.patternFilters, 'best-score');
 }
 
 function applyRanking(result: {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>}): void {
@@ -875,6 +896,7 @@ app.post('/api/config', async (req, res) => {
       orderQty,
       tradeSlots,
       lockedCodes: config.lockedCodes,
+      patternFilters: req.body.patternFilters !== undefined ? normalizeFilterEnabled(req.body.patternFilters) : config.patternFilters,
     };
     await applyConfig(next);
     restartRefreshTimer();

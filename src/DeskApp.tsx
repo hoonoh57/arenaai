@@ -33,8 +33,9 @@ import {DAY_HOLD_PRESETS, HOLD_PRESETS, parseSearchAt} from '../shared/verify';
 import {Search150Pane} from './Search150Pane';
 import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
+import {PATTERN_FILTERS} from '../shared/patternFilters';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]; patternFilters?: Record<string, boolean>};
 type State = {
   mode: string;
   config: Config;
@@ -563,6 +564,7 @@ function Pane(props: {
         patchWin={(patch) => props.patchWin(win.id, patch)}
         setNotice={props.setNotice}
         onCommonCode={props.onCommonCode}
+        patternFilters={state.config.patternFilters}
       />
     );
   }
@@ -837,6 +839,7 @@ function StockMiniChart({
       logScale={logScale}
       visibleHint={visibleHint}
       onContextMenu={onContext}
+      patternFilters={undefined}
     />
   );
 }
@@ -1544,6 +1547,17 @@ function SystemTradePanel({
           <input type="checkbox" checked={draft.autoTopCharts !== false} onChange={(e) => setDraft({...draft, autoTopCharts: e.target.checked})} />
           진입 전 종목만 점수 순으로 교체 (매매 중 유지)
         </label>
+        <div className="editor-hint">패턴 필터 (지표 신호 위에 적용)</div>
+        {PATTERN_FILTERS.map((f) => (
+          <label key={f.id} title={f.description}>
+            <input
+              type="checkbox"
+              checked={draft.patternFilters ? draft.patternFilters[f.id] !== false : f.defaultOn}
+              onChange={(e) => setDraft({...draft, patternFilters: {...(draft.patternFilters || Object.fromEntries(PATTERN_FILTERS.map((x) => [x.id, x.defaultOn]))), [f.id]: e.target.checked}})}
+            />
+            {f.name}
+          </label>
+        ))}
         <div className="book-actions">
           <button
             className="apply"
@@ -1554,6 +1568,7 @@ function SystemTradePanel({
               orderQty: draft.orderQty ?? 1,
               refreshMs: draft.refreshMs || 60000,
               autoTopCharts: draft.autoTopCharts !== false,
+              patternFilters: draft.patternFilters,
               condition: draft.condition || state.config.condition,
               count: draft.count,
               weights: draft.weights,

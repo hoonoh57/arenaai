@@ -1,4 +1,5 @@
 import type {Candle} from '../server/core';
+import {filterOn, type FilterEnabled} from './patternFilters';
 
 export type PatternVerdict = {
   score: number;
@@ -53,7 +54,7 @@ function rangePct(bars: Candle[]): number {
  * 사람 눈으로 보는 당일 경로: 급등 후 내리막 횡보는 금지,
  * 긴 횡보 뒤 강한 돌파는 가점. 지표 신호와 곱해 쓸 점수.
  */
-export function judgePattern(candles: Candle[], at = candles.length - 1): PatternVerdict {
+export function judgePattern(candles: Candle[], at = candles.length - 1, filters?: FilterEnabled): PatternVerdict {
   const session = sessionSlice(candles, at);
   const reasons: string[] = [];
   let score = 50;
@@ -76,7 +77,7 @@ export function judgePattern(candles: Candle[], at = candles.length - 1): Patter
   const upCount = bounceBars.filter((b) => b.close >= b.open).length;
   const strongBounce = bounceBars.length === 3 && upCount >= 2 && last.close > last.open && last.close > baseHigh;
 
-  if (run >= 0.06 && drop >= 0.025 && chop) {
+  if (filterOn(filters, 'skip-chop') && run >= 0.06 && drop >= 0.025 && chop) {
     score = 12;
     reasons.push('급등 후 내리막 횡보');
     return {score, allow: false, tag: '급등후횡보', reasons};
@@ -85,12 +86,16 @@ export function judgePattern(candles: Candle[], at = candles.length - 1): Patter
     score -= 20;
     reasons.push('고점 대비 되돌림');
   }
-  if (tightBase && strongBounce) {
+  if (filterOn(filters, 'base-boost') && tightBase && strongBounce) {
     score += 28;
     reasons.push('장기횡보 돌파');
-  } else if (tightBase && fromLow >= 0.015) {
+  } else if (filterOn(filters, 'base-boost') && tightBase && fromLow >= 0.015) {
     score += 12;
     reasons.push('횡보 구간 반등');
+  }
+  if (filterOn(filters, 'early-buy') && tightBase && !strongBounce) {
+    score = Math.max(score, 66);
+    reasons.push('조기 횡보 이평');
   }
   if (pct(last.close, first.open) < 0.03 && pct(last.close, Math.max(...session.map((b) => b.high))) > -0.012) {
     score += 8;
@@ -146,14 +151,15 @@ export function measureSurge(session: Candle[]): {ok: boolean; parts: string[]; 
  * 횡보에서 이평 신호를 한 번 건너뛴 뒤, 급증이 나오면 재돌파 없이 지연 진입.
  * 급등 후 내리막 횡보 금지구간에는 지연 진입을 주지 않는다.
  */
-export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean): PatternVerdict | null {
+export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: number) => boolean, filters?: FilterEnabled): PatternVerdict | null {
+  if (!filterOn(filters, 'delayed-buy')) return null;
   if (at < 1 || at >= candles.length) return null;
-  const now = judgePattern(candles, at);
+  const now = judgePattern(candles, at, filters);
   if (now.tag === '급등후횡보') return null;
   let lastSkip = -1;
   for (let i = 0; i < at; i++) {
     if (!hadSignal(i)) continue;
-    const j = judgePattern(candles, i);
+    const j = judgePattern(candles, i, filters);
     if (j.tag === '급등후횡보') {
       lastSkip = -1;
       continue;
@@ -175,9 +181,31 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
   };
 }
 
-export function patternMarkerText(side: 'buy' | 'skip', v: PatternVerdict): string {
+export function delayedExit(candles: Candle[], at: number, hadExit: (i: number) => boolean, filters?: FilterEnabled): PatternVerdict | null {
+  if (!filterOn(filters, 'delayed-sell')) return null;
+  if (at < 1 || at >= candles.length) return null;
+  if (filterOn(filters, 'early-sell')) return null;
+  let lastSkip = -1;
+  for (let i = 0; i < at; i++) {
+    if (!hadExit(i)) continue;
+    lastSkip = i;
+  }
+  if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;
+  if (hadExit(at)) return null;
+  const session = sessionSlice(candles, at);
+  const last = session[session.length - 1];
+  if (!last || last.close >= last.open) return null;
+  const surge = measureSurge(session);
+  if (!surge.ok) return null;
+  const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
+  return {score, allow: true, delayed: true, tag: '지연매도', reasons: [`매도 건너뜀 후 ${surge.parts.join('·')}`]};
+}
+
+export function patternMarkerText(side: 'buy' | 'skip' | 'sell', v: PatternVerdict): string {
+  if (v.delayed && v.tag === '지연매도') return `지연매도${v.score}`;
   if (v.delayed) return `지연매수${v.score} ${v.tag}`;
   if (side === 'skip') return `건너뜀${v.score} ${v.tag}`;
+  if (side === 'sell') return `매도${v.score}`;
   return `매수${v.score} ${v.tag}`;
 }
 
