@@ -112,6 +112,10 @@ export function Chart({
   const onDrawingsRef = useRef(onDrawings);
   const yModeRef = useRef(yMode);
   yModeRef.current = yMode;
+  const refLinesRef = useRef(refLines);
+  refLinesRef.current = refLines;
+  const priceLinesRef = useRef<{remove?: () => void}[]>([]);
+  if (viewState?.paneStretch?.length) stretchRef.current = viewState.paneStretch;
   const pendingRef = useRef<{t: number; p: number} | null>(null);
   const runtimeRef = useRef(createChartRuntime('desk-chart'));
   const valuesById = useRef<Record<string, (number | null)[]>>({});
@@ -201,6 +205,14 @@ export function Chart({
         : {type: 'price', precision: 0, minMove: 1},
     });
     const highlights = formulas.filter((f) => f.enabled && f.kind === 'highlight').map((f) => ({formula: f, values: chartHub.evaluate(f.expression, bars, f.variables, formulas)}));
+    for (const line of priceLinesRef.current) {
+      try {
+        (series as ISeriesApi<'Candlestick'> & {removePriceLine?: (l: unknown) => void}).removePriceLine?.(line);
+      } catch {
+        /* line */
+      }
+    }
+    priceLinesRef.current = [];
     series.setData(
       bars.map((c, i) => {
         const h = highlights.find((item) => item.values[i]);
@@ -219,6 +231,34 @@ export function Chart({
       chart.applyOptions({leftPriceScale: {visible: true, borderVisible: false}});
       line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
       extras.current.push(line);
+    }
+    const lastBar = bars[bars.length - 1];
+    const dayKey = (t: number) => {
+      const d = new Date((t + 9 * 3600) * 1000);
+      return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+    };
+    const today = dayKey(lastBar.time);
+    const openBar = bars.find((c) => dayKey(c.time) === today) || bars[0];
+    const addPx = (price: number, color: string, title: string, dashed = false) => {
+      const line = series.createPriceLine({
+        price: ax(price),
+        color,
+        lineWidth: 1,
+        lineStyle: dashed ? LineStyle.Dashed : LineStyle.Dotted,
+        axisLabelVisible: true,
+        title,
+      });
+      priceLinesRef.current.push(line);
+    };
+    const refs = refLinesRef.current;
+    if (refs?.open) addPx(openBar.open, '#6ab0c8', '시가');
+    if (refs?.prev) {
+      const prev = bars.find((c) => c.previousDay?.close)?.previousDay?.close;
+      if (prev) addPx(prev, '#e8bd64', '전일');
+    }
+    if (refs?.vi) {
+      addPx(openBar.open * 1.1, '#ed6b72', 'VI+', true);
+      addPx(openBar.open * 0.9, '#5d96e8', 'VI-', true);
     }
     const markers: SeriesMarker<UTCTimestamp>[] = [];
     const inds = formulas.filter((x) => x.enabled && x.kind === 'indicator');
@@ -299,16 +339,16 @@ export function Chart({
     paneIdxRef.current = paneIdx;
     try {
       const panes = chartEx.panes?.() || [];
-      if (panes.length !== stretchApplied.current) {
-        const saved = stretchRef.current;
-        if (saved && saved.length === panes.length) {
-          panes.forEach((p, i) => p.setStretchFactor?.(Math.max(0.15, saved[i] || 1)));
-        } else {
+      const saved = stretchRef.current;
+      if (saved && saved.length === panes.length) {
+        panes.forEach((p, i) => p.setStretchFactor?.(Math.max(0.15, saved[i] || 1)));
+      } else if (!saved || saved.length !== panes.length) {
+        if (!saved) {
           panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
           for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
         }
-        stretchApplied.current = panes.length;
       }
+      stretchApplied.current = panes.length;
     } catch {
       /* stretch */
     }
@@ -599,12 +639,11 @@ export function Chart({
     chartRef.current?.priceScale('right').applyOptions({
       mode: logScale && yMode !== 'percent' ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
     });
-    paint();
   }, [grid, logScale, yMode, magnet]);
 
   useEffect(() => {
     paint();
-  }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady]);
+  }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady, refLines?.vi, refLines?.open, refLines?.prev, yMode, logScale]);
 
   const chart = chartRef.current;
   const series = candleRef.current;
@@ -626,25 +665,6 @@ export function Chart({
         auto.push({id: `day-${key}`, kind: 'vline', t1: c.time, p1: c.close, color: '#3a4a55'});
       }
     }
-  }
-  if (data.length && refLines?.open) {
-    const last = data[data.length - 1];
-    const ld = new Date((last.time + 9 * 3600) * 1000);
-    const key = ld.getUTCFullYear() * 10000 + (ld.getUTCMonth() + 1) * 100 + ld.getUTCDate();
-    const open = data.find((c) => {
-      const d = new Date((c.time + 9 * 3600) * 1000);
-      return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate() === key;
-    });
-    if (open) auto.push({id: 'open-ref', kind: 'hline', t1: open.time, p1: open.open, color: '#6ab0c8'});
-  }
-  if (data.length && refLines?.prev) {
-    const prev = data.find((c) => c.previousDay?.close)?.previousDay?.close;
-    if (prev) auto.push({id: 'prev-ref', kind: 'hline', t1: data[0].time, p1: prev, color: '#e8bd64'});
-  }
-  if (data.length && refLines?.vi) {
-    const prev = data.find((c) => c.previousDay?.close)?.previousDay?.close || data[0].close;
-    auto.push({id: 'vi-up', kind: 'hline', t1: data[0].time, p1: prev * 1.1, color: '#ed6b72'});
-    auto.push({id: 'vi-dn', kind: 'hline', t1: data[0].time, p1: prev * 0.9, color: '#5d96e8'});
   }
   const allDraw = [...auto, ...drawings];
   const box = host.current?.getBoundingClientRect();
@@ -709,8 +729,9 @@ export function Chart({
           if (d.kind === 'hline') {
             const a = xy(data[0]?.time || d.t1, d.p1);
             const b = xy(data[data.length - 1]?.time || d.t1, d.p1);
-            if (!a || !b) return null;
-            return <line key={d.id} x1={0} x2={w} y1={a.y} y2={a.y} stroke={d.color} strokeDasharray={d.id.startsWith('vi') ? '4 3' : undefined} />;
+            const priceH = legends[0]?.height || hbox;
+            if (!a || !b || a.y < 0 || a.y > priceH) return null;
+            return <line key={d.id} x1={0} x2={w} y1={a.y} y2={a.y} stroke={d.color} />;
           }
           if (d.kind === 'vline') {
             const a = xy(d.t1, d.p1);

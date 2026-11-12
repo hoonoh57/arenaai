@@ -140,8 +140,8 @@ export function DeskApp() {
     workspaceRef.current = next;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      void put('/api/desks', next).catch((e) => setNotice((e as Error).message));
-    }, 1500);
+      void put('/api/desks', workspaceRef.current).catch((e) => setNotice((e as Error).message));
+    }, 80);
   }, []);
 
   useEffect(() => {

@@ -340,7 +340,7 @@ export function ChartPane({
             onClick={() => {
               setMagnet((v) => {
                 const next = !v;
-                patchWin({chartView: {...win.chartView, magnet: next, selectedPane: selPane}});
+                patchWin({chartView: {...(win.chartView || {}), magnet: next, selectedPane: selPane}});
                 return next;
               });
             }}
