@@ -150,7 +150,7 @@ type AppConfig = {
   /** Default system formula for checked codes without an override. */
   strategyId: string;
   strategyByCode: Record<string, string>;
-  tradeByCode: Record<string, 'wait' | 'run' | 'stop'>;
+  tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>;
   autoTopCharts: boolean;
   tradeMode: 'auto' | 'semi';
   orderQty: number;
@@ -356,9 +356,36 @@ app.post('/api/chart', async (req, res) => {
     const baseDate = typeof req.body?.baseDate === 'string' ? req.body.baseDate : '';
     const nextKey = typeof req.body?.nextKey === 'string' ? req.body.nextKey : '';
     const localBars = !nextKey ? loadLocalBars(code, timeframe) : [];
-    if (localBars.length) {
+    const liveBars = !nextKey && (timeframe === '1' || timeframe === 'D') ? cache.candles(code) : [];
+    const mergeByTime = (...lists: Candle[][]) => {
+      const map = new Map<number, Candle>();
+      for (const list of lists) for (const c of list) map.set(c.time, c);
+      return [...map.values()].sort((a, b) => a.time - b.time);
+    };
+    let candles = mergeByTime(localBars, liveBars);
+    const todayOpen = Math.floor(Date.parse(`${new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'})}T08:00:00+09:00`) / 1000);
+    const last = candles.at(-1)?.time ?? 0;
+    if (!nextKey && last < todayOpen) {
+      try {
+        const page = await api.chartPage({code, timeframe, baseDate, nextKey: undefined});
+        candles = mergeByTime(candles, page.candles);
+        if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
+      } catch {
+        /* 오늘 봉 REST 실패 시 로컬만 */
+      }
+    }
+    if (candles.length && !nextKey) {
+      if (req.body?.withStrength) {
+        try {
+          candles = await api.attachStrength(code, timeframe, candles);
+        } catch {
+          /* keep */
+        }
+      }
       const listed = ranking.find((s) => s.code === code);
-      res.json({code, name: listed?.name && listed.name !== code ? listed.name : code, candles: localBars, hasMore: false, nextKey: '', timeframe});
+      const fetched = await api.stockName(code).catch(() => '');
+      const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
+      res.json({code, name, candles, hasMore: false, nextKey: '', timeframe});
       return;
     }
     if (timeframe === '1' && !nextKey) {
@@ -744,7 +771,7 @@ app.post('/api/trade', async (req, res) => {
     const code = req.body?.code;
     const status = req.body?.status;
     if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
-    if (status !== 'wait' && status !== 'run' && status !== 'stop') throw new Error('상태는 대기/모의/중지입니다.');
+    if (status !== 'wait' && status !== 'run' && status !== 'stop' && status !== 'backtest') throw new Error('상태는 대기/적용/백테스트입니다.');
     if (!config.chartCodes.includes(code)) throw new Error('멀티차트에 없는 종목입니다.');
     config = {...config, tradeByCode: {...config.tradeByCode, [code]: status}, running: status === 'run' || config.chartCodes.some((c) => (c === code ? status : config.tradeByCode[c]) === 'run')};
     syncSignals();

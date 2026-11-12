@@ -34,7 +34,7 @@ import {Search150Pane} from './Search150Pane';
 import {VerifyCompare} from './VerifyCompare';
 import type {SavedCondition} from '../shared/localConditions';
 
-type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]};
+type Config = {condition: string; count: number; weights: Weights; running: boolean; refreshMs: number; chartCodes: string[]; strategyId: string; strategyByCode: Record<string, string>; tradeByCode: Record<string, 'wait' | 'run' | 'stop' | 'backtest'>; autoTopCharts?: boolean; tradeMode?: 'auto' | 'semi'; orderQty?: number; tradeSlots?: number; lockedCodes?: string[]};
 type State = {
   mode: string;
   config: Config;
@@ -250,7 +250,7 @@ export function DeskApp() {
     }
   };
   const systems = state.formulas.filter((f) => f.kind === 'system');
-  const setTrade = async (code: string, status: 'wait' | 'run' | 'stop') => {
+  const setTrade = async (code: string, status: 'wait' | 'run' | 'stop' | 'backtest') => {
     try {
       await post('/api/trade', {code, status});
       await load();
@@ -303,6 +303,9 @@ export function DeskApp() {
             {tool.label}
           </button>
         ))}
+        <button className="hts-tool" onClick={() => setShowSysTrade(true)}>
+          시스템트레이딩
+        </button>
         <button className="hts-tool" onClick={() => setShowFormulas(true)}>
           수식 관리자
         </button>
@@ -318,7 +321,10 @@ export function DeskApp() {
           공통 전략
           <select
             value={desk.vars.strategyId || state.config.strategyId || ''}
-            onChange={(e) => void setStrategy(e.target.value)}
+            onChange={(e) => {
+              void setStrategy(e.target.value);
+              setShowSysTrade(true);
+            }}
           >
             <option value="">선택</option>
             {systems.map((f) => (
@@ -418,6 +424,10 @@ export function DeskApp() {
           setDraft={setDraft}
           systems={systems}
           update={update}
+          onDesign={() => {
+            setShowSysTrade(false);
+            setShowFormulas(true);
+          }}
           onClose={() => setShowSysTrade(false)}
         />
       )}
@@ -521,7 +531,7 @@ function Pane(props: {
   setShowFormulas: (v: boolean) => void;
   setShowSysTrade: (v: boolean) => void;
   setStrategy: (formulaId: string, code?: string) => Promise<void>;
-  setTrade: (code: string, status: 'wait' | 'run' | 'stop') => Promise<void>;
+  setTrade: (code: string, status: 'wait' | 'run' | 'stop' | 'backtest') => Promise<void>;
   formulasFor: (code: string) => Formula[];
   systems: Formula[];
   patchWin: (id: string, patch: Partial<ChildWindow>) => void;
@@ -610,8 +620,9 @@ function Pane(props: {
             className="hts-tool"
             disabled={!state.captured?.length}
             onClick={() => {
-              const codes = (state.captured || []).slice(0, MULTI_CHART_MAX).map((r) => r.code);
-              void post('/api/charts', {codes}).then(() => props.load());
+              const extra = (state.captured || []).map((r) => r.code).filter((c) => !chartCodes.includes(c));
+              const merged = [...chartCodes, ...extra].slice(0, MULTI_CHART_MAX);
+              void post('/api/charts', {codes: merged}).then(() => props.load());
             }}
           >
             포착넣기({MULTI_CHART_MAX})
@@ -622,7 +633,11 @@ function Pane(props: {
           <button
             className={'hts-tool' + (win.syncCharts !== false ? ' on' : '')}
             title="주기·봉수·수식을 모든 칸에 맞춤"
-            onClick={() => props.patchWin(win.id, {syncCharts: win.syncCharts === false})}
+            onClick={() => {
+              props.patchWin(win.id, {syncCharts: true});
+              if (state.config.strategyId) void props.setStrategy(state.config.strategyId);
+              for (const s of selected) void props.setTrade(s.code, 'run');
+            }}
           >
             {win.syncCharts === false ? '동기화꺼짐' : '동기화'}
           </button>
@@ -647,12 +662,12 @@ function Pane(props: {
                 {(() => {
                   const st = (state.config.tradeByCode || {})[s.code] || 'wait';
                   const inPos = (state.book?.holdings || []).some((h) => h.code === s.code);
-                  const label = inPos ? '매매중' : st === 'run' ? '자동' : st === 'stop' ? '중지' : '반자동';
-                  const next = st === 'wait' ? 'run' : st === 'run' ? 'stop' : 'wait';
+                  const label = inPos ? '매매중' : st === 'run' ? '적용' : st === 'backtest' ? '백테스트' : '대기';
+                  const next = st === 'wait' || st === 'stop' ? 'run' : st === 'run' ? 'backtest' : 'wait';
                   return (
                     <button
-                      className={'trade-pill ' + (inPos ? 'run' : st)}
-                      title="자동(신호 주문) / 반자동(버튼) / 중지. 매매 중이면 순위에서 빼지 않습니다."
+                      className={'trade-tag ' + (inPos ? 'run' : st === 'run' ? 'run' : st === 'backtest' ? 'backtest' : 'wait')}
+                      title="클릭: 대기 → 적용(자동매매) → 백테스트"
                       onClick={(e) => {
                         e.stopPropagation();
                         void props.setTrade(s.code, next);
@@ -797,16 +812,16 @@ function StockMiniChart({
     });
   }, [lastPrice]);
   useEffect(() => {
-    if (!/^\d{6}$/.test(code) || cached.length) return;
+    if (!/^\d{6}$/.test(code)) return;
     let stop = false;
-    setWait(true);
+    if (!cached.length) setWait(true);
     const withStrength = formulas.some((f) => f.enabled && (f.id === 'cntrstr' || /STRENGTH|체결강도/.test(f.expression)));
     void queuedChart(code, timeframe, withStrength)
       .then((d) => {
         if (!stop && d.candles?.length) {
           setBars(d.candles);
           setWait(false);
-        }
+        } else if (!stop) setWait(false);
       })
       .catch(() => {
         if (!stop) setWait(false);
@@ -814,7 +829,7 @@ function StockMiniChart({
     return () => {
       stop = true;
     };
-  }, [code, timeframe, cached.length]);
+  }, [code, timeframe]);
   if (!bars.length) return <div className="empty-chart">{wait ? '분봉 조회 대기(중앙 큐)…' : '분봉 없음. 한도 해제 후 다시 포착넣기.'}</div>;
   return (
     <Chart
@@ -1451,6 +1466,7 @@ function SystemTradePanel({
   setDraft,
   systems,
   update,
+  onDesign,
   onClose,
 }: {
   state: State;
@@ -1458,8 +1474,10 @@ function SystemTradePanel({
   setDraft: React.Dispatch<React.SetStateAction<Config | null>>;
   systems: Formula[];
   update: (patch?: Partial<Config>) => Promise<void>;
+  onDesign: () => void;
   onClose: () => void;
 }) {
+  const [host, setHost] = useState(state.book?.fillMode === 'kiwoom-mock' ? 'mock' : 'virtual');
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="formula-modal sys-trade" onClick={(e) => e.stopPropagation()}>
@@ -1467,7 +1485,7 @@ function SystemTradePanel({
           <div><h2>시스템트레이딩 설정</h2></div>
           <button className="icon-button" type="button" onClick={onClose}>×</button>
         </div>
-        <p className="editor-hint">키움 HTS 시스템트레이딩과 같이 공통 설정을 멀티차트 전 종목에 적용합니다. 이미 매매 중인 종목은 순위에서 빼지 않습니다.</p>
+        <p className="editor-hint">전략을 고르고 적용하면 멀티차트 공통으로 자동매매가 시작됩니다. 차트 라벨 클릭: 대기 → 적용 → 백테스트.</p>
         <label>
           시스템 수식
           <select value={draft.strategyId || ''} onChange={(e) => setDraft({...draft, strategyId: e.target.value})}>
@@ -1475,6 +1493,15 @@ function SystemTradePanel({
             {systems.map((f) => (
               <option key={f.id} value={f.id}>{f.name}</option>
             ))}
+          </select>
+        </label>
+        <button type="button" className="hts-tool" onClick={onDesign}>전략 설계 (수식 관리자)</button>
+        <label>
+          주문 모드
+          <select value={host} onChange={(e) => setHost(e.target.value)}>
+            <option value="virtual">가상 (가정 체결)</option>
+            <option value="mock">모의 (키움 모의계좌)</option>
+            <option value="real" disabled>실전 (주문 안 함)</option>
           </select>
         </label>
         <label>
@@ -1520,10 +1547,13 @@ function SystemTradePanel({
               condition: draft.condition || state.config.condition,
               count: draft.count,
               weights: draft.weights,
-              running: state.config.running,
-            }).then(onClose)}
+              running: true,
+            }).then(async () => {
+              await post('/api/book/mode', {mode: host === 'mock' ? 'kiwoom-mock' : 'assumed'});
+              onClose();
+            })}
           >
-            멀티차트에 적용
+            적용하고 자동매매 시작
           </button>
         </div>
       </div>
