@@ -377,7 +377,7 @@ export function ChartPane({
               if (viewTimer.current) window.clearTimeout(viewTimer.current);
               viewTimer.current = window.setTimeout(() => {
                 patchWin({chartView: {...win.chartView, ...s, magnet, selectedPane: selPane}});
-              }, 400);
+              }, 80);
             }}
             paneById={paneById}
             selectedPane={selPane}

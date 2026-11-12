@@ -93,6 +93,10 @@ export function Chart({
   const viewCb = useRef(onViewState);
   viewCb.current = onViewState;
   const stretchRef = useRef(viewState?.paneStretch);
+  const stretchApplied = useRef(0);
+  const extraSlotsRef = useRef<number[]>([]);
+  const paneIdxRef = useRef(new Map<number, number>([[0, 0]]));
+  const legendFnRef = useRef<(slot: number) => {id: string; name: string; param: string; color: string}[]>(() => []);
   const meta = useRef({len: 0, first: 0});
   const hintRef = useRef(visibleHint);
   const countCb = useRef(onVisibleCount);
@@ -136,6 +140,34 @@ export function Chart({
   const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
   const height = Math.max(120, chartHeight);
+
+  const emitView = () => {
+    const chart = chartRef.current as (IChartApi & {panes?: () => {getHeight?: () => number}[]}) | null;
+    if (!chart) return;
+    let stretch: number[] | undefined;
+    try {
+      const panes = chart.panes?.() || [];
+      const hs = panes.map((p) => p.getHeight?.() || 1);
+      const sum = hs.reduce((a, b) => a + b, 0) || 1;
+      stretch = hs.map((h) => h / sum);
+      stretchRef.current = stretch;
+      let top = 0;
+      const order = [0, ...extraSlotsRef.current];
+      setLegends(
+        order.map((slot, i) => {
+          const pi = paneIdxRef.current.get(slot) ?? i;
+          const ph = panes[pi]?.getHeight?.() || Math.max(72, Math.round(height / Math.max(1, order.length)));
+          const row = {slot, top, height: ph, items: legendFnRef.current(slot)};
+          top += ph;
+          return row;
+        }),
+      );
+    } catch {
+      /* view */
+    }
+    const range = rangeRef.current;
+    if (range) viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: stretch});
+  };
 
   const paint = () => {
     const chart = chartRef.current;
@@ -262,14 +294,19 @@ export function Chart({
     }
     const paneIdx = new Map<number, number>([[0, 0]]);
     extraSlots.forEach((s, i) => paneIdx.set(s, i + 1));
+    extraSlotsRef.current = extraSlots;
+    paneIdxRef.current = paneIdx;
     try {
       const panes = chartEx.panes?.() || [];
-      const saved = stretchRef.current;
-      if (saved && saved.length === panes.length) {
-        panes.forEach((p, i) => p.setStretchFactor?.(Math.max(0.15, saved[i] || 1)));
-      } else {
-        panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
-        for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
+      if (panes.length !== stretchApplied.current) {
+        const saved = stretchRef.current;
+        if (saved && saved.length === panes.length) {
+          panes.forEach((p, i) => p.setStretchFactor?.(Math.max(0.15, saved[i] || 1)));
+        } else {
+          panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
+          for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
+        }
+        stretchApplied.current = panes.length;
       }
     } catch {
       /* stretch */
@@ -383,7 +420,7 @@ export function Chart({
         });
       }
     }
-    const legendItems = (slot: number) =>
+    legendFnRef.current = (slot: number) =>
       inds
         .filter((x) => slotOf[x.id] === slot)
         .map((x) => ({
@@ -394,25 +431,8 @@ export function Chart({
             .join(' '),
           color: x.color,
         }));
-    const layoutLegends = () => {
-      try {
-        const panes = chartEx.panes?.() || [];
-        let top = 0;
-        const order = [0, ...extraSlots];
-        const rows = order.map((slot, i) => {
-          const pi = paneIdx.get(slot) ?? i;
-          const ph = panes[pi]?.getHeight?.() || Math.max(72, Math.round(height / Math.max(1, order.length)));
-          const row = {slot, top, height: ph, items: legendItems(slot)};
-          top += ph;
-          return row;
-        });
-        setLegends(rows);
-      } catch {
-        setLegends([{slot: 0, top: 0, height, items: legendItems(0)}]);
-      }
-    };
-    layoutLegends();
-    requestAnimationFrame(layoutLegends);
+    emitView();
+    requestAnimationFrame(emitView);
     const sorted = markers.sort((a, b) => Number(a.time) - Number(b.time));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(series, []);
     markersRef.current?.setMarkers(sorted);
@@ -538,14 +558,24 @@ export function Chart({
     chartRef.current = chart;
     candleRef.current = series;
     paint();
+    const onPtr = (e: PointerEvent) => {
+      if (e.type === 'pointermove' && e.buttons === 0) return;
+      emitView();
+    };
+    const el = host.current;
+    el.addEventListener('pointermove', onPtr);
+    el.addEventListener('pointerup', onPtr);
     const ro = new ResizeObserver(() => {
       const box = host.current?.getBoundingClientRect();
       if (!box || box.width < 8 || box.height < 8) return;
       chart.applyOptions({width: Math.floor(box.width), height: Math.floor(box.height)});
       if (rangeRef.current) chart.timeScale().setVisibleLogicalRange(rangeRef.current);
+      emitView();
     });
-    ro.observe(host.current);
+    ro.observe(el);
     return () => {
+      el.removeEventListener('pointermove', onPtr);
+      el.removeEventListener('pointerup', onPtr);
       ro.disconnect();
       extras.current = [];
       markersRef.current = null;
