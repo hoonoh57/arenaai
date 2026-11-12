@@ -85,6 +85,8 @@ export function ChartPane({
   const [strengthNxt, setStrengthNxt] = useState(false);
   const [strengthHasMore, setStrengthHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [workMsg, setWorkMsg] = useState('');
+  const [workErr, setWorkErr] = useState('');
   const [viewCount, setViewCount] = useState(win.visibleBars || 200);
   const [overlay, setOverlay] = useState<Candle[]>([]);
   const [mode, setMode] = useState<'replace' | 'overlay'>((win as {compareMode?: 'replace' | 'overlay'}).compareMode || 'replace');
@@ -106,8 +108,10 @@ export function ChartPane({
     const useCode = opts.code ?? codeText;
     if (!/^\d{6}$/.test(useCode)) return;
     const coolKey = `${useCode}|${opts.timeframe ?? timeframe}|${opts.baseDate ?? baseDate}|${opts.append ? 'a' : '1'}`;
-    if (!opts.append && !opts.force && chartTooSoon(coolKey) && bars.length) return;
+    if (!opts.append && !opts.force && !opts.strengthOnly && chartTooSoon(coolKey) && bars.length) return;
     setBusy(true);
+    setWorkErr('');
+    setWorkMsg(opts.strengthOnly ? '체결강도 이전 페이지를 받는 중' : opts.append ? '가격 이전 페이지를 받는 중' : '차트를 조회하는 중');
     try {
       const d = await post('/api/chart', {
         code: useCode,
@@ -129,11 +133,17 @@ export function ChartPane({
       setStrengthNextKey(d.strengthNextKey || '');
       setStrengthReady(Boolean(d.strengthReady));
       setStrengthNxt(Boolean(d.strengthNxt));
-      if (d.warning) setNotice(String(d.warning));
+      if (d.warning) {
+        setNotice(String(d.warning));
+        setWorkErr(String(d.warning));
+      } else setWorkMsg('');
     } catch (e) {
-      setNotice((e as Error).message);
+      const msg = (e as Error).message;
+      setNotice(msg);
+      setWorkErr(msg);
     } finally {
       setBusy(false);
+      setWorkMsg('');
     }
   };
 
@@ -195,7 +205,12 @@ export function ChartPane({
           </div>
         ))}
       </aside>
-      <div className="chart-main">
+      <div className="chart-main" style={{position: 'relative'}}>
+        {(busy || workErr) ? (
+          <div className={'work-overlay' + (!busy && workErr ? ' err' : '')}>
+            <b>{busy ? (workMsg || '처리 중') : workErr}</b>
+          </div>
+        ) : null}
         <div className="chart-toolbar" onMouseDown={(e) => e.stopPropagation()}>
           <button className="dock-toggle" title="수식 탭" onClick={() => patchWin({formulaOpen: !formulaOpen})}>
             {formulaOpen ? '⟨' : '⟩'}

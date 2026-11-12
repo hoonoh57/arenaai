@@ -180,7 +180,10 @@ export function Chart({
           const vals = lineSpec.expression === f.expression ? values : evaluate(lineSpec.expression, bars, f.variables, formulas);
           const colorSrc = lineSpec.colorMode === 'st' ? evaluate(lineSpec.expression.replace(/^\s*ST\s*\(/i, 'STDIR('), bars, f.variables, formulas) : vals;
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
-          line.setData(vals.map((value, i) => (value === null || value === 0 ? {time: bars[i].time as UTCTimestamp} : {time: bars[i].time as UTCTimestamp, value, color: colors[i]})));
+          line.setData(vals.map((value, i) => {
+            const gap = value === null || value === 0 || (f.id === 'cntrstr' && value === 50);
+            return gap ? {time: bars[i].time as UTCTimestamp} : {time: bars[i].time as UTCTimestamp, value, color: colors[i]};
+          }));
           if (f.pane === 'separate') {
             try {
               line.priceScale().applyOptions({mode: PriceScaleMode.Normal, autoScale: true});

@@ -491,7 +491,7 @@ export class Kiwoom {
     try {
       page = await this.strengthPage({code, daily, hintSec: prev?.ticks[0]?.time ?? hint, nextKey: useKey || undefined});
     } catch {
-      const aligned0 = prev ? alignStrengthToCandles(candles, correctSmallLotStrength(prev.ticks), timeframe) : candles;
+      const aligned0 = prev ? alignStrengthToCandles(candles, prev.ticks.filter((x) => x.strength > 0 && x.strength !== 50), timeframe) : candles;
       return {candles: aligned0, hasMore: Boolean(prev && !prev.reached), nextKey: prev?.nextKey || '', ready: Boolean(prev?.reached), nxt: Boolean(prev?.nxt)};
     }
     let ticks = mergeTicks(page.ticks, prev?.ticks || []);
@@ -500,7 +500,7 @@ export class Kiwoom {
     const minute = nxt ? 30 : 0;
     const reached = daily || reachedSessionOpen(ticks.map((t) => t.time), hint, hour, minute);
     strengthBuf.set(bufKey, {ticks, nextKey: page.nextKey, reached, nxt});
-    const aligned = alignStrengthToCandles(candles, correctSmallLotStrength(ticks), timeframe);
+    const aligned = alignStrengthToCandles(candles, ticks.filter((t) => t.strength > 0 && t.strength !== 50), timeframe);
     const sync = strengthSyncStatus(aligned);
     return {
       candles: aligned,
