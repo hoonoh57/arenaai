@@ -41,7 +41,7 @@ export type BrokerLike = {
   daily(code: string, baseDate: string): Promise<{date: string; open?: number; high?: number; low?: number; close?: number}[]>;
 };
 
-export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean; score?: number} | null;
+export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean; score?: number; filters?: string[]} | null;
 
 /**
  * Optional guards around the simulated position. `canEnter` may only *block*; exits are
@@ -71,6 +71,7 @@ export type HubDeps = {
   signalDedupSize?: number;
   orderBroker?: MockOrderBroker;
   allowBrokerOrders?: boolean;
+  onKpi?: (ev: {code: string; side: 'buy' | 'sell'; close: number; time: number; filters: string[]}) => void;
 };
 
 type Subscription = {item: string; type: string; owners: Set<string>};
@@ -136,7 +137,8 @@ export class RealtimeHub {
   private activeCodes = new Set<string>();
   private evaluator: SignalEvaluator | null = null;
   bestScoreOnly = false;
-  private pendingBuys = new Map<string, {bar: Candle; score: number}>();
+  private pendingBuys = new Map<string, {bar: Candle; score: number; filters: string[]}>();
+  private kpiFilters = new Map<string, string[]>();
   private bestTimer: ReturnType<typeof setTimeout> | null = null;
   orderQty = 1;
   private readonly readyHandlers = new Set<() => void | Promise<void>>();
@@ -538,8 +540,9 @@ export class RealtimeHub {
       return;
     }
     if (result.buy) {
+      this.kpiFilters.set(`${code}|buy`, result.filters || []);
       if (this.bestScoreOnly) {
-        this.pendingBuys.set(code, {bar: last, score: result.score ?? 50});
+        this.pendingBuys.set(code, {bar: last, score: result.score ?? 50, filters: result.filters || []});
         if (this.bestTimer) clearTimeout(this.bestTimer);
         this.bestTimer = setTimeout(() => this.flushBestBuys(), 80);
       } else {
@@ -548,6 +551,7 @@ export class RealtimeHub {
       }
     }
     if (result.sell) {
+      this.kpiFilters.set(`${code}|sell`, result.filters || []);
       this.audit.record('signal', '매도 신호', {code, barTime: last.time, price: last.close});
       this.applySignal(code, last, 'sell');
     }
@@ -573,6 +577,12 @@ export class RealtimeHub {
   private applySignal(code: string, bar: Candle, side: 'buy' | 'sell'): void {
     const key = `${code}|${bar.time}|${side}`;
     if (!this.signalDedup.claim(key)) return;
+    const filters = this.pendingBuys.get(code)?.filters || this.kpiFilters.get(`${code}|${side}`) || [];
+    try {
+      this.deps.onKpi?.({code, side, close: bar.close, time: bar.time, filters});
+    } catch {
+      /* kpi must not block orders */
+    }
     const input = {
       code,
       side,

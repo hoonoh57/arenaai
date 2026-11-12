@@ -66,6 +66,7 @@ type State = {
     brokerOrders: boolean;
     fillMode?: 'assumed' | 'kiwoom-mock';
   };
+  patternKpi?: {summaries: {filterId: string; n: number; avgPct: number; score: number; ready: boolean}[]};
 };
 
 const fmt = (n: number) => new Intl.NumberFormat('ko-KR').format(n);
@@ -1556,6 +1557,12 @@ function SystemTradePanel({
               onChange={(e) => setDraft({...draft, patternFilters: {...(draft.patternFilters || Object.fromEntries(PATTERN_FILTERS.map((x) => [x.id, x.defaultOn]))), [f.id]: e.target.checked}})}
             />
             {f.name}
+            {(() => {
+              const k = state.patternKpi?.summaries.find((s) => s.filterId === f.id);
+              if (!k) return null;
+              const pct = (k.avgPct * 100).toFixed(2);
+              return <small> · {k.n}건 {pct}% 점{k.score}{k.ready ? '' : ' (표본 부족)'}</small>;
+            })()}
           </label>
         ))}
         <div className="book-actions">

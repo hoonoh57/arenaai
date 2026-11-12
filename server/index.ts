@@ -25,6 +25,7 @@ import {ChartGate} from './realtime/chartGate';
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
+import {PatternKpiStore} from './realtime/patternKpi';
 import {wsUrl} from './realtime/protocol';
 
 const mode = process.env.KIWOOM_MODE || 'real';
@@ -76,6 +77,7 @@ const api = new Kiwoom(mode as 'mock' | 'real', governor, {
   onEvent: (event) => audit.record(event.kind === 'rate-limit' ? 'limit' : 'error', event.message, event.detail),
 });
 
+const patternKpi = new PatternKpiStore();
 const hub = new RealtimeHub({
   url: wsUrl(mode as 'mock' | 'real'),
   // NOTE: forceRefresh does not bypass the governor — token issuance is queued like any
@@ -91,6 +93,7 @@ const hub = new RealtimeHub({
     cancelStock: (input) => api.cancelStock(input),
   },
   allowBrokerOrders: mode === 'mock',
+  onKpi: (ev) => patternKpi.record(ev),
   createSocket: (url) => new WebSocket(url) as unknown as WsLike,
   logger: (level, message) => (level === 'error' ? console.error(message) : console.log(message)),
 });
@@ -234,26 +237,33 @@ function currentEvaluator() {
     const filters = config.patternFilters;
     let buy = false;
     let score = 50;
+    const tags: string[] = [];
     if (buyFlag) {
       const v = judgePattern(closed, at, filters);
       buy = v.allow;
       score = v.score;
+      if (buy && v.tag === '횡보돌파') tags.push('base-boost');
+      if (buy && v.reasons.some((r) => r.includes('조기'))) tags.push('early-buy');
     } else {
       const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
       buy = Boolean(late?.allow);
-      if (late) score = late.score;
+      if (late) {
+        score = late.score;
+        tags.push('delayed-buy');
+      }
     }
     let sell = sellFlag;
     if (sellFlag && !filterOn(filters, 'early-sell')) {
       const session = closed.length;
       const firstExit = exits.findIndex(Boolean);
       if (firstExit === at && session > 20) sell = false;
-    }
+    } else if (sellFlag && filterOn(filters, 'early-sell')) tags.push('early-sell');
     if (!sell) {
       const lateSell = delayedExit(closed, at, (i) => Boolean(exits[i]), filters);
       sell = Boolean(lateSell?.allow);
+      if (lateSell) tags.push('delayed-sell');
     }
-    return {buy, sell, score};
+    return {buy, sell, score, filters: tags};
   };
 }
 
@@ -390,6 +400,7 @@ app.get('/api/state', (_req, res) =>
     audit: audit.list(20),
     orderMode: hub.book.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed-fill',
     book: hub.book.snapshot(),
+    patternKpi: patternKpi.snapshot(),
   }),
 );
 app.post('/api/chart', async (req, res) => {
