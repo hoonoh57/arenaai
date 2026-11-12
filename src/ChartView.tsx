@@ -43,6 +43,10 @@ export function Chart({
   delayContext,
   strengthReady,
   strengthLabel,
+  paneById,
+  selectedPane = 0,
+  onSelectPane,
+  onMoveIndicator,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -65,6 +69,10 @@ export function Chart({
   delayContext?: DelayContext;
   strengthReady?: boolean;
   strengthLabel?: string;
+  paneById?: Record<string, number>;
+  selectedPane?: number;
+  onSelectPane?: (slot: number) => void;
+  onMoveIndicator?: (id: string, slot: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -88,7 +96,12 @@ export function Chart({
   const yModeRef = useRef(yMode);
   yModeRef.current = yMode;
   const pendingRef = useRef<{t: number; p: number} | null>(null);
+  const valuesById = useRef<Record<string, (number | null)[]>>({});
+  const paneByIdRef = useRef(paneById);
+  paneByIdRef.current = paneById;
   const [frame, setFrame] = useState(0);
+  const [hoverIdx, setHoverIdx] = useState(-1);
+  const [legends, setLegends] = useState<{slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[]>([]);
   hintRef.current = visibleHint;
   countCb.current = onVisibleCount;
   pickCb.current = onPick;
@@ -103,7 +116,7 @@ export function Chart({
   onDrawingsRef.current = onDrawings;
   const formulaSig = formulas
     .filter((f) => f.enabled)
-    .map((f) => `${f.id}:${f.name}:${f.expression}:${JSON.stringify(f.variables || {})}:${f.pane || ''}`)
+    .map((f) => `${f.id}:${f.name}:${f.expression}:${JSON.stringify(f.variables || {})}:${f.pane || ''}:${f.paneShare || ''}:${paneById?.[f.id] ?? ''}`)
     .join('|');
   const filterSig = patternFilters ? Object.keys(patternFilters).filter((k) => patternFilters[k]).join(',') : '';
   const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
@@ -161,21 +174,62 @@ export function Chart({
       extras.current.push(line);
     }
     const markers: SeriesMarker<UTCTimestamp>[] = [];
-    for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
+    const inds = formulas.filter((x) => x.enabled && x.kind === 'indicator');
+    const slotOf: Record<string, number> = {};
+    const valMap: Record<string, (number | null)[]> = {};
+    const pxMid = (() => {
+      const px = bars.map((c) => c.close).filter((c) => c > 0).sort((a, b) => a - b);
+      return px.length ? px[Math.floor(px.length / 2)] : 0;
+    })();
+    const used = new Set<number>();
+    for (const f of inds) {
       const values = evaluate(f.expression, bars, f.variables, formulas);
+      valMap[f.id] = values;
+      const pinned = paneByIdRef.current?.[f.id];
+      if (typeof pinned === 'number' && pinned >= 0) {
+        slotOf[f.id] = pinned;
+        if (pinned > 0) used.add(pinned);
+        continue;
+      }
+      const sample = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0);
+      const mv = sample.length ? Math.abs([...sample].sort((a, b) => a - b)[Math.floor(sample.length / 2)]) : 0;
+      const priceLike = mv > 0 && pxMid > 0 && mv > pxMid * 0.2 && mv < pxMid * 4;
+      const separate = f.pane === 'separate' || !priceLike;
+      if (!separate) slotOf[f.id] = 0;
+      else if (f.paneShare === 'overlay') {
+        slotOf[f.id] = 1;
+        used.add(1);
+      } else slotOf[f.id] = -1;
+    }
+    let next = 1;
+    for (const f of inds) {
+      if (slotOf[f.id] !== -1) continue;
+      while (used.has(next)) next += 1;
+      slotOf[f.id] = next;
+      used.add(next);
+      next += 1;
+    }
+    valuesById.current = valMap;
+    const extraSlots = [...new Set(Object.values(slotOf).filter((s) => s > 0))].sort((a, b) => a - b);
+    const chartEx = chart as IChartApi & {panes: () => {getHeight?: () => number; paneIndex: () => number}[]; removePane: (n: number) => void};
+    try {
+      while ((chartEx.panes?.() || []).length > 1) chartEx.removePane((chartEx.panes() || []).length - 1);
+    } catch {
+      /* pane */
+    }
+    const paneIdx = new Map<number, number>([[0, 0]]);
+    for (const s of extraSlots) {
+      try {
+        paneIdx.set(s, chart.addPane().paneIndex());
+      } catch {
+        paneIdx.set(s, 1);
+      }
+    }
+    for (const f of formulas.filter((x) => x.enabled && x.kind !== 'function')) {
+      const values = valMap[f.id] || evaluate(f.expression, bars, f.variables, formulas);
       if (f.kind === 'indicator') {
-        const sample = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0);
-        const px = bars.map((c) => c.close).filter((c) => c > 0).sort((a, b) => a - b);
-        const mid = (xs: number[]) => (xs.length ? xs[Math.floor(xs.length / 2)] : 0);
-        const mv = Math.abs(mid([...sample].sort((a, b) => a - b)));
-        const mp = mid(px);
-        const priceLike = mv > 0 && mp > 0 && mv > mp * 0.2 && mv < mp * 4;
-        const separate = f.pane === 'separate' || !priceLike;
-        let paneIndex = 0;
-        if (separate) {
-          const panes = (chart as unknown as {panes?: () => {paneIndex: () => number}[]}).panes?.() || [];
-          paneIndex = panes.length > 1 ? 1 : chart.addPane().paneIndex();
-        }
+        const separate = (slotOf[f.id] ?? 0) > 0;
+        const paneIndex = paneIdx.get(slotOf[f.id] ?? 0) ?? 0;
         const lines = [{name: f.name, expression: f.expression, color: f.color, alternateColor: f.alternateColor, ...f.primaryLine, visible: f.primaryLine?.visible !== false}, ...(f.extraLines || [])];
         const styles = {solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted};
         let baselineAdded = false;
@@ -185,7 +239,7 @@ export function Chart({
             color: lineSpec.color,
             priceLineVisible: false,
             lastValueVisible: true,
-            priceScaleId: 'right',
+            priceScaleId: separate || (slotOf[f.id] === 0 && f.pane === 'separate') ? `ps-${f.id}` : 'right',
           };
           const line =
             lineSpec.type === 'histogram'
@@ -267,6 +321,32 @@ export function Chart({
         });
       }
     }
+    const paneRows: {slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[] = [];
+    try {
+      const panes = chartEx.panes?.() || [];
+      let top = 0;
+      const order = [0, ...extraSlots];
+      for (let i = 0; i < order.length; i++) {
+        const slot = order[i];
+        const pi = paneIdx.get(slot) ?? i;
+        const ph = panes[pi]?.getHeight?.() || (i === 0 ? Math.max(80, height * 0.62) : 88);
+        const items = inds
+          .filter((x) => slotOf[x.id] === slot)
+          .map((x) => ({
+            id: x.id,
+            name: x.name,
+            param: Object.entries(x.variables || {})
+              .map(([k, v]) => `${k} ${v}`)
+              .join(' '),
+            color: x.color,
+          }));
+        paneRows.push({slot, top, height: ph, items});
+        top += ph;
+      }
+    } catch {
+      /* legend */
+    }
+    setLegends(paneRows);
     const sorted = markers.sort((a, b) => Number(a.time) - Number(b.time));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(series, []);
     markersRef.current?.setMarkers(sorted);
@@ -307,6 +387,22 @@ export function Chart({
       wickDownColor: '#5d96e8',
     });
     chart.priceScale('right').applyOptions({mode: PriceScaleMode.Normal});
+    chart.subscribeCrosshairMove((param) => {
+      const t = param.time !== undefined ? Number(param.time) : NaN;
+      if (!Number.isFinite(t)) {
+        setHoverIdx(-1);
+        return;
+      }
+      const list = dataRef.current;
+      let bi = -1;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].time === t) {
+          bi = i;
+          break;
+        }
+      }
+      setHoverIdx(bi);
+    });
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range) return;
       rangeRef.current = range;
@@ -448,6 +544,46 @@ export function Chart({
   return (
     <div className="chart-host" style={{height, width: '100%', minHeight: 120, position: 'relative'}} onContextMenu={onContextMenu}>
       <div ref={host} className="chart" style={{height: '100%', width: '100%'}} />
+      {legends.map((row) => (
+        <div
+          key={row.slot}
+          className={'pane-legend' + (selectedPane === row.slot ? ' on' : '')}
+          style={{top: row.top, height: row.height}}
+          onClick={() => onSelectPane?.(row.slot)}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData('text/plain');
+            if (id) onMoveIndicator?.(id, row.slot);
+          }}
+        >
+          {row.items.map((it) => {
+            const raw = hoverIdx >= 0 ? valuesById.current[it.id]?.[hoverIdx] : undefined;
+            const hv = typeof raw === 'number' && Number.isFinite(raw) ? raw.toFixed(2) : '';
+            return (
+              <button
+                key={it.id}
+                draggable
+                className="lg"
+                style={{color: it.color}}
+                title="드래그하여 패널 이동 · 클릭하여 변수 수정"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectPane?.(row.slot);
+                  onPick?.(it.id);
+                }}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', it.id);
+                }}
+              >
+                {it.name}
+                {it.param ? ` ${it.param}` : ''}
+                {hv ? ` ${hv}` : ''}
+              </button>
+            );
+          })}
+        </div>
+      ))}
       {strengthReady === false ? <div className="strength-pending">체결강도 다운로드 중 · 최근봉→{strengthLabel || '세션 시작'} 확인 전 · 전략 미사용</div> : null}
       <svg className="chart-draw" width={w} height={hbox} style={{position: 'absolute', inset: 0, pointerEvents: 'none'}}>
         {allDraw.map((d) => {

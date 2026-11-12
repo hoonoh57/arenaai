@@ -107,6 +107,8 @@ export function ChartPane({
   const [drawTool, setDrawTool] = useState('cursor');
   const [magnet, setMagnet] = useState(true);
   const [varPatch, setVarPatch] = useState<Record<string, Record<string, number>>>({});
+  const [selPane, setSelPane] = useState(0);
+  const paneById = win.indicatorPanes || {};
   const timeframe = win.timeframe || '1';
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
@@ -207,9 +209,21 @@ export function ChartPane({
                   checked={enabled.has(f.id)}
                   onChange={() => {
                     const next = new Set(enabled);
-                    if (next.has(f.id)) next.delete(f.id);
-                    else next.add(f.id);
-                    patchWin({enabledFormulas: [...next]});
+                    const panes = {...paneById};
+                    if (next.has(f.id)) {
+                      next.delete(f.id);
+                      delete panes[f.id];
+                    } else {
+                      next.add(f.id);
+                      if (f.kind === 'indicator') {
+                        if (f.paneShare === 'overlay') panes[f.id] = selPane > 0 ? selPane : 1;
+                        else if (f.pane === 'separate') {
+                          const used = Object.values(panes);
+                          panes[f.id] = Math.max(0, ...used, 0) + 1;
+                        } else panes[f.id] = 0;
+                      }
+                    }
+                    patchWin({enabledFormulas: [...next], indicatorPanes: panes});
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -347,6 +361,10 @@ export function ChartPane({
             drawings={win.drawings || []}
             drawTool={drawTool}
             magnet={magnet}
+            paneById={paneById}
+            selectedPane={selPane}
+            onSelectPane={setSelPane}
+            onMoveIndicator={(id, slot) => patchWin({indicatorPanes: {...paneById, [id]: slot}})}
             yMode={win.yMode === 'percent' ? 'percent' : 'price'}
             daySep={win.daySep}
             refLines={win.refLines}

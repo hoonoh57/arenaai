@@ -35,6 +35,8 @@ export type ChildWindow = {
   visibleBars?: number;
   formulaOpen?: boolean;
   enabledFormulas?: string[];
+  /** 지표 id → 패널 번호(0=가격, 1+=서브). 드래그·오버레이 위치. */
+  indicatorPanes?: Record<string, number>;
   compareMode?: 'replace' | 'overlay';
   overlayCode?: string;
   /** 멀티차트 열 수 (1~4). */
