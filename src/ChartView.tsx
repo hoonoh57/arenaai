@@ -104,6 +104,8 @@ export function Chart({
   const formulasRef = useRef(formulas);
   const dataRef = useRef(data);
   const overlayRef = useRef(overlay);
+  const overlaySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const scaleLock = useRef(false);
   const logRef = useRef(logScale);
   const gridRef = useRef(grid);
   const drawToolRef = useRef(drawTool);
@@ -168,9 +170,43 @@ export function Chart({
     } catch {
       /* view */
     }
+    syncAllPriceScales();
     if (!save) return;
     const range = rangeRef.current;
     if (range) viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: stretch});
+  };
+
+  const syncAllPriceScales = () => {
+    if (scaleLock.current) return;
+    type ScaleVis = {
+      getVisibleRange?: () => {from: number; to: number} | null;
+      setVisibleRange?: (r: {from: number; to: number}) => void;
+      setAutoScale?: (on: boolean) => void;
+    };
+    const chart = chartRef.current;
+    const over = overlaySeriesRef.current;
+    const oBars = overlayRef.current;
+    const bars = dataRef.current;
+    if (!chart || !over || !oBars?.length || !bars.length) return;
+    const right = chart.priceScale('right') as ScaleVis;
+    const left = over.priceScale() as ScaleVis;
+    const rv = right.getVisibleRange?.();
+    const o0 = oBars[0].close;
+    const m0 = bars[0].close;
+    if (!rv || !(o0 > 0) || !(m0 > 0)) return;
+    const pctOn = yModeRef.current === 'percent';
+    const next = pctOn
+      ? {from: rv.from, to: rv.to}
+      : {from: (o0 * rv.from) / m0, to: (o0 * rv.to) / m0};
+    if (next.from === next.to) return;
+    scaleLock.current = true;
+    try {
+      left.setAutoScale?.(false);
+      left.setVisibleRange?.(next);
+    } catch {
+      /* scale */
+    }
+    scaleLock.current = false;
   };
 
   const applyRefLines = () => {
@@ -264,11 +300,28 @@ export function Chart({
         };
       }),
     );
+    overlaySeriesRef.current = null;
     if (overlay?.length) {
-      const line = chart.addSeries(LineSeries, {color: '#e8bd64', lineWidth: 1, title: '추', priceLineVisible: false, lastValueVisible: true, priceScaleId: 'left'});
-      chart.applyOptions({leftPriceScale: {visible: true, borderVisible: false}});
-      line.setData(overlay.map((c) => ({time: c.time as UTCTimestamp, value: c.close})));
+      const o0 = overlay[0].close > 0 ? overlay[0].close : 1;
+      const line = chart.addSeries(LineSeries, {
+        color: '#e8bd64',
+        lineWidth: 1,
+        title: '추',
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceScaleId: pctOn ? 'right' : 'left',
+      });
+      chart.applyOptions({leftPriceScale: {visible: !pctOn, borderVisible: false}});
+      line.setData(
+        overlay.map((c) => ({
+          time: c.time as UTCTimestamp,
+          value: pctOn ? corePercent(c.close, o0, true) : c.close,
+        })),
+      );
       extras.current.push(line);
+      overlaySeriesRef.current = line;
+    } else {
+      chart.applyOptions({leftPriceScale: {visible: false}});
     }
     applyRefLines();
     const markers: SeriesMarker<UTCTimestamp>[] = [];
@@ -495,6 +548,7 @@ export function Chart({
       rangeRef.current = {from: bars.length - hint, to: bars.length - 1} as LogicalRange;
     }
     chart.timeScale().setVisibleLogicalRange(rangeRef.current);
+    requestAnimationFrame(() => syncAllPriceScales());
   };
 
   useEffect(() => {
