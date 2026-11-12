@@ -75,7 +75,7 @@ export class SimulationBook {
   private readonly now: () => number;
   private readonly hooks: () => BookHooks;
   private broker?: MockOrderBroker;
-  private readonly allowBroker: boolean;
+  private allowBroker: boolean;
   private fillMode: FillMode;
   private readonly holdings = new Map<string, SimHolding>();
   private readonly orders = new Map<string, SimOrder>();
@@ -97,6 +97,11 @@ export class SimulationBook {
 
   setBroker(broker: MockOrderBroker | undefined): void {
     this.broker = broker;
+  }
+
+  setAllowBroker(on: boolean): void {
+    this.allowBroker = on;
+    if (!on && this.fillMode === 'kiwoom-mock') this.fillMode = 'assumed';
   }
 
   setFillMode(mode: FillMode): FillMode {

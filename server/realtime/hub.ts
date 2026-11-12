@@ -118,6 +118,7 @@ export class RealtimeHub {
   private readonly loginTimeoutMs: number;
   private readonly requestTimeoutMs: number;
   private readonly staleMs: number;
+  private url: string;
   private readonly debounceMs: number;
   private readonly pending = new Map<string, {resolve: (frame: RealtimeFrame) => void; reject: (error: Error) => void; timer: any}>();
   private readonly refreshTimers = new Map<string, any>();
@@ -156,6 +157,7 @@ export class RealtimeHub {
     this.loginTimeoutMs = deps.loginTimeoutMs ?? 10000;
     this.requestTimeoutMs = deps.requestTimeoutMs ?? 15000;
     this.staleMs = deps.staleMs ?? 60000;
+    this.url = deps.url;
     this.debounceMs = deps.candleRefreshDebounceMs ?? 2000;
     this.dedup = new KeyedDedup({ttlMs: 5000, max: 20000});
     this.signalDedup = new SignalDedup(deps.signalDedupSize ?? 20000);
@@ -326,7 +328,7 @@ export class RealtimeHub {
       throw new Error('WebSocket 구현이 주입되지 않았습니다.');
     }
     this.caps.assertConnection(1);
-    const socket = createSocket(this.deps.url);
+    const socket = createSocket(this.url);
     this.socket = socket;
     socket.on('message', (data: unknown) => this.handleMessage(data));
     socket.on('error', (error: unknown) => {
@@ -744,6 +746,11 @@ export class RealtimeHub {
   }
 
   /** Force a reconnect (watchdog, operator request, or fatal frame handling). */
+  setWsUrl(url: string): void {
+    if (!url) throw new Error('실시간 URL이 비었습니다.');
+    this.url = url;
+  }
+
   forceReconnect(reason: string): void {
     if (this.state === 'closed') return;
     this.audit.record('connection', '실시간 연결을 재설정합니다.', {reason});

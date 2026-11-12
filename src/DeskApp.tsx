@@ -342,6 +342,12 @@ export function DeskApp() {
         <span className={'mode' + (state.config.running ? ' trading' : '')}>
           <i /> {state.config.running ? '자동매매 중' : state.mode === 'mock' ? '모의 조회·주문' : '실전 조회(주문 없음)'}
         </span>
+        <button type="button" className={'hts-tool' + (state.mode === 'mock' ? ' on' : '')} title="모의투자 API. 15:30 이후 체결강도가 없으면 실계좌와 비교하세요." onClick={() => { void post('/api/host', {mode: 'mock'}).then(() => load()).catch((e) => setNotice((e as Error).message)); }}>
+          모의계좌 인증
+        </button>
+        <button type="button" className={'hts-tool' + (state.mode === 'real' ? ' on' : '')} title="실전 API. 조회만 하며 실전 주문은 보내지 않습니다." onClick={() => { void post('/api/host', {mode: 'real'}).then(() => load()).catch((e) => setNotice((e as Error).message)); }}>
+          실계좌 인증
+        </button>
       </header>
       <div className="hts-workspace">
         {desk.windows

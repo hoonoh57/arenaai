@@ -171,8 +171,8 @@ export type KiwoomOptions = {
 export class Kiwoom {
   private token = '';
   private expires = 0;
-  private readonly base: string;
-  readonly hostMode: 'mock' | 'real';
+  private base: string;
+  hostMode: 'mock' | 'real';
   private readonly governor: LimitGovernor;
   private readonly options: KiwoomOptions;
   private readonly timeoutMs: number;
@@ -189,6 +189,13 @@ export class Kiwoom {
   invalidateToken(): void {
     this.token = '';
     this.expires = 0;
+  }
+
+  setHostMode(mode: 'mock' | 'real'): void {
+    if (mode !== 'mock' && mode !== 'real') throw new Error('호스트는 mock 또는 real 입니다.');
+    this.hostMode = mode;
+    this.base = mode === 'real' ? 'https://api.kiwoom.com' : 'https://mockapi.kiwoom.com';
+    this.invalidateToken();
   }
 
   /** Access token for the realtime LOGIN packet (re-issued when expired or forced). */

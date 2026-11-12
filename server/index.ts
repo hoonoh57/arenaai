@@ -31,8 +31,7 @@ import {RiskManager} from './realtime/risk';
 import {PatternKpiStore} from './realtime/patternKpi';
 import {wsUrl} from './realtime/protocol';
 
-const mode = process.env.KIWOOM_MODE || 'real';
-if (!['mock', 'real'].includes(mode)) throw new Error('Invalid KIWOOM_MODE');
+let mode: 'mock' | 'real' = process.env.KIWOOM_MODE === 'mock' ? 'mock' : 'real';
 const interval = Number(process.env.KIWOOM_REQUEST_INTERVAL_MS || 300);
 if (!Number.isFinite(interval) || interval < 200) throw new Error('KIWOOM_REQUEST_INTERVAL_MS must be >= 200');
 
@@ -436,6 +435,24 @@ app.get('/api/state', (_req, res) =>
     market: {indexRet: delayContextNow().indexRet, ma120Slope: delayContextNow().ma120Slope},
   }),
 );
+app.post('/api/host', async (req, res) => {
+  try {
+    const next = req.body?.mode;
+    if (next !== 'mock' && next !== 'real') throw new Error('모의계좌 또는 실계좌만 고를 수 있습니다.');
+    mode = next;
+    api.setHostMode(next);
+    hub.setWsUrl(wsUrl(next));
+    hub.book.setAllowBroker(next === 'mock');
+    hub.book.setFillMode(next === 'mock' ? 'kiwoom-mock' : 'assumed');
+    chartGate.clear();
+    await api.accessToken(true);
+    hub.forceReconnect('호스트 전환');
+    audit.record('state', next === 'mock' ? '모의계좌 호스트로 인증했습니다.' : '실계좌 호스트로 인증했습니다.', {mode: next});
+    res.json({ok: true, mode});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '호스트 전환 실패'});
+  }
+});
 app.post('/api/chart', async (req, res) => {
   try {
     const code = typeof req.body?.code === 'string' ? req.body.code : '';
