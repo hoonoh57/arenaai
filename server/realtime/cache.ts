@@ -27,6 +27,8 @@ export class SharedCache {
   private readonly quotesByCode = new Map<string, Quote>();
   private readonly infoByCode = new Map<string, StockInfo>();
   private readonly candlesByCode = new Map<string, CandleRing>();
+  /** 창이 아닌 종목·분봉 키. 차트 인스턴스는 여기만 읽는다. */
+  private readonly pagesByKey = new Map<string, Candle[]>();
   private readonly sectorsByCode = new Map<string, SectorSnapshot>();
   private readonly captures = new Map<string, Map<string, {action: 'insert' | 'delete'; at: number}>>();
   private readonly warningMap = new Map<string, string>();
@@ -99,6 +101,34 @@ export class SharedCache {
     return this.infoByCode.get(code);
   }
 
+  static pageKey(code: string, timeframe = '1', baseDate = ''): string {
+    return `${code}|${timeframe}|${baseDate || ''}`;
+  }
+
+  putChartPage(code: string, timeframe: string, baseDate: string, candles: readonly Candle[]): void {
+    const key = SharedCache.pageKey(code, timeframe, baseDate);
+    this.pagesByKey.set(key, candles.slice());
+    this.prune(this.pagesByKey);
+    if (timeframe === '1' && candles.length) this.mergeCandles(code, candles as Candle[]);
+    this.emit({kind: 'chart-page', code, lastTime: candles.at(-1)?.time ?? null});
+  }
+
+  chartPage(code: string, timeframe = '1', baseDate = ''): Candle[] {
+    return this.pagesByKey.get(SharedCache.pageKey(code, timeframe, baseDate))?.slice() ?? [];
+  }
+
+  chartPages(): Record<string, Candle[]> {
+    const out: Record<string, Candle[]> = {};
+    for (const [key, bars] of this.pagesByKey) {
+      if (bars.length) out[key] = bars.slice();
+    }
+    for (const code of this.candlesByCode.keys()) {
+      const bars = this.candles(code);
+      if (bars.length && !out[code]) out[code] = bars;
+    }
+    return out;
+  }
+
   /** Merge REST-sourced candles into the per-code ring. */
   mergeCandles(code: string, candles: readonly Candle[]): void {
     let ring = this.candlesByCode.get(code);
@@ -127,6 +157,15 @@ export class SharedCache {
     if (result !== 'none') {
       this.candleVersion += 1;
       this.emit({kind: 'candles', code, lastTime: ring.lastTime()});
+      const last = ring.toArray().at(-1);
+      if (last) {
+        for (const [key, bars] of this.pagesByKey) {
+          if (!key.startsWith(`${code}|`) || !bars.length) continue;
+          const i = bars.length - 1;
+          if (bars[i].time !== last.time) continue;
+          bars[i] = {...bars[i], close: last.close, high: Math.max(bars[i].high, last.high), low: Math.min(bars[i].low, last.low)};
+        }
+      }
     }
     return result;
   }

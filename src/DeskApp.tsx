@@ -597,7 +597,11 @@ function Pane(props: {
         desk={props.desk}
         formulas={state.formulas}
         rankingName={state.ranking.find((s) => s.code === code)?.name}
-        cached={state.candles[code] || []}
+        cached={
+          state.candles[`${code}|${win.timeframe || '1'}|${win.baseDate || ''}`] ||
+          state.candles[code] ||
+          []
+        }
         grid={props.grid}
         logScale={props.logScale}
         patchWin={(patch) => props.patchWin(win.id, patch)}

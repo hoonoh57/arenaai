@@ -299,6 +299,20 @@ test('지연·미래 봉은 신호를 만들지 않고 경고를 남긴다', asy
   }
 });
 
+test('차트 페이지는 중앙 캐시에 두고 실시간 체결은 같은 종목 마지막 봉만 갱신한다', () => {
+  const cache = new SharedCache();
+  const t = 1_700_000_060;
+  const bars = [
+    {time: t - 60, open: 1, high: 1, low: 1, close: 1},
+    {time: t, open: 2, high: 2, low: 2, close: 2},
+  ];
+  cache.putChartPage('005930', '1', '', bars);
+  assert.equal(cache.chartPage('005930', '1', '').length, 2);
+  cache.applyLiveQuote('005930', t + 10, 8);
+  assert.equal(cache.candles('005930').at(-1)?.close, 8);
+  assert.equal(cache.chartPage('005930', '1', '').at(-1)?.close, 8);
+});
+
 test('종료 후에는 구독을 시도할 수 없고 타이머가 남지 않는다', async () => {
   const server = await startFakeServer();
   const {hub} = createHub(server);

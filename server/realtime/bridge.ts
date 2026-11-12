@@ -281,6 +281,10 @@ export class DemandBridge {
     return result;
   }
 
+  chartPages(): Record<string, Candle[]> {
+    return this.cache.chartPages();
+  }
+
   warnings(): Record<string, string> {
     return this.cache.warnings();
   }

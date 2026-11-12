@@ -148,7 +148,6 @@ const bridge = new DemandBridge({
 });
 
 const chartGate = new ChartGate();
-const lastChartBars = new Map<string, Candle[]>();
 const REFRESH_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
 type AppConfig = {
   condition: string;
@@ -419,7 +418,7 @@ app.get('/api/state', (_req, res) =>
     ranking,
     captured: bridge.capturedList(),
     lastSearch: bridge.lastSearch,
-    candles: bridge.candlesByCode(config.chartCodes),
+    candles: {...bridge.candlesByCode(config.chartCodes), ...cache.chartPages()},
     updatedAt,
     error,
     busy,
@@ -469,10 +468,9 @@ app.post('/api/chart', async (req, res) => {
       const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
       page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
       candles = page.candles;
-      if (candles.length) lastChartBars.set(`${code}|${timeframe}|${baseDate}`, candles);
-      if (timeframe === '1' && candles.length) cache.mergeCandles(code, candles);
+      if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
     } else {
-      candles = lastChartBars.get(`${code}|${timeframe}|${baseDate}`) || [];
+      candles = cache.chartPage(code, timeframe, baseDate);
     }
     let strengthHasMore = false;
     let strengthKey = '';
@@ -483,6 +481,7 @@ app.post('/api/chart', async (req, res) => {
         const sKey = chartGate.key({kind: 'strength', code, timeframe, next: strengthNextKey});
         const attached = await chartGate.load(sKey, () => api.attachStrength(code, timeframe, candles, strengthNextKey || undefined));
         candles = attached.candles;
+        if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
         strengthHasMore = attached.hasMore;
         strengthKey = attached.nextKey;
         strengthReady = attached.ready;
