@@ -66,3 +66,19 @@ test('잘못된 워크스페이스는 거부한다', () => {
   assert.throws(() => validateWorkspace({active: 1, desks: []}));
   assert.throws(() => validateWorkspace({active: 1, desks: [{id: 'a', number: 9, name: 'x', vars: {}, windows: []}]}));
 });
+
+test('차트 줌·패널 높이·지표 위치는 저장 후 그대로 복원', () => {
+  const ws = defaultWorkspace();
+  const desk = ws.desks[0];
+  const win = {
+    ...insertWindow(desk, 'chart').windows[0],
+    indicatorPanes: {adx: 2},
+    chartView: {from: 10, to: 80, paneStretch: [0.7, 0.3], magnet: false, selectedPane: 2},
+  };
+  const round = validateWorkspace({active: 1, desks: [{...desk, windows: [win]}]}).desks[0].windows[0];
+  assert.equal(round.indicatorPanes?.adx, 2);
+  assert.equal(round.chartView?.from, 10);
+  assert.equal(round.chartView?.to, 80);
+  assert.equal(round.chartView?.magnet, false);
+  assert.deepEqual(round.chartView?.paneStretch, [0.7, 0.3]);
+});

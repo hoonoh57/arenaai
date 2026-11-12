@@ -14,6 +14,10 @@ export type ChartPersistV1 = {
   daySep?: boolean;
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
   addons?: string[];
+  from?: number;
+  to?: number;
+  paneStretch?: number[];
+  selectedPane?: number;
 };
 
 export function chartStateFromWindow(win: Pick<ChildWindow, 'code' | 'timeframe' | 'yMode' | 'indicatorPanes' | 'drawings' | 'enabledFormulas' | 'visibleBars' | 'daySep' | 'refLines'>): ChartPersistV1 {

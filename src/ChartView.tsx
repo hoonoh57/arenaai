@@ -49,6 +49,8 @@ export function Chart({
   selectedPane = 0,
   onSelectPane,
   onMoveIndicator,
+  viewState,
+  onViewState,
 }: {
   data: Candle[];
   formulas: Formula[];
@@ -75,13 +77,22 @@ export function Chart({
   selectedPane?: number;
   onSelectPane?: (slot: number) => void;
   onMoveIndicator?: (id: string, slot: number) => void;
+  viewState?: {from?: number; to?: number; paneStretch?: number[]; magnet?: boolean; selectedPane?: number};
+  onViewState?: (s: {from: number; to: number; paneStretch?: number[]}) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const extras = useRef<ISeriesApi<'Line' | 'Histogram'>[]>([]);
   const markersRef = useRef<{setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void} | null>(null);
-  const rangeRef = useRef<LogicalRange | null>(null);
+  const rangeRef = useRef<LogicalRange | null>(
+    viewState && Number.isFinite(viewState.from) && Number.isFinite(viewState.to)
+      ? ({from: viewState.from as number, to: viewState.to as number} as LogicalRange)
+      : null,
+  );
+  const viewCb = useRef(onViewState);
+  viewCb.current = onViewState;
+  const stretchRef = useRef(viewState?.paneStretch);
   const meta = useRef({len: 0, first: 0});
   const hintRef = useRef(visibleHint);
   const countCb = useRef(onVisibleCount);
@@ -253,8 +264,13 @@ export function Chart({
     extraSlots.forEach((s, i) => paneIdx.set(s, i + 1));
     try {
       const panes = chartEx.panes?.() || [];
-      panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
-      for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
+      const saved = stretchRef.current;
+      if (saved && saved.length === panes.length) {
+        panes.forEach((p, i) => p.setStretchFactor?.(Math.max(0.15, saved[i] || 1)));
+      } else {
+        panes[0]?.setStretchFactor?.(Math.max(2, extraSlots.length + 1));
+        for (let i = 1; i < panes.length; i++) panes[i]?.setStretchFactor?.(1);
+      }
     } catch {
       /* stretch */
     }
@@ -458,6 +474,14 @@ export function Chart({
       rangeRef.current = range;
       countCb.current?.(Math.max(1, Math.round((range.to as number) - (range.from as number))));
       setFrame((n) => n + 1);
+      try {
+        const panes = (chart as IChartApi & {panes: () => {getHeight?: () => number}[]}).panes?.() || [];
+        const hs = panes.map((p) => p.getHeight?.() || 1);
+        const sum = hs.reduce((a, b) => a + b, 0) || 1;
+        viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: hs.map((h) => h / sum)});
+      } catch {
+        viewCb.current?.({from: Number(range.from), to: Number(range.to)});
+      }
     });
     chart.subscribeClick((param) => {
       const tool = drawToolRef.current;

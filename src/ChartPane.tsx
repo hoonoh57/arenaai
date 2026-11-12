@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import type {Candle} from '../server/core';
 import type {Formula} from '../shared/formula';
 import type {ChildWindow, VirtualDesk} from '../shared/desk';
@@ -105,9 +105,10 @@ export function ChartPane({
   const [menu, setMenu] = useState<{x: number; y: number} | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [drawTool, setDrawTool] = useState('cursor');
-  const [magnet, setMagnet] = useState(true);
+  const [magnet, setMagnet] = useState(win.chartView?.magnet !== false);
   const [varPatch, setVarPatch] = useState<Record<string, Record<string, number>>>({});
-  const [selPane, setSelPane] = useState(0);
+  const [selPane, setSelPane] = useState(win.chartView?.selectedPane || 0);
+  const viewTimer = useRef(0);
   const paneById = win.indicatorPanes || {};
   const timeframe = win.timeframe || '1';
   const baseDate = win.baseDate || '';
@@ -313,7 +314,17 @@ export function ChartPane({
               {t.label}
             </button>
           ))}
-          <button className={'hts-tool' + (magnet ? ' on' : '')} onClick={() => setMagnet((v) => !v)} title="자석: 봉 시고저종에 붙임">
+          <button
+            className={'hts-tool' + (magnet ? ' on' : '')}
+            onClick={() => {
+              setMagnet((v) => {
+                const next = !v;
+                patchWin({chartView: {...win.chartView, magnet: next, selectedPane: selPane}});
+                return next;
+              });
+            }}
+            title="자석: 봉 시고저종에 붙임"
+          >
             자석
           </button>
           <button className={'hts-tool' + (win.yMode === 'percent' ? ' on' : '')} onClick={() => patchWin({yMode: win.yMode === 'percent' ? 'price' : 'percent'})} title="Y축 가격/등락률">
@@ -361,6 +372,13 @@ export function ChartPane({
             drawings={win.drawings || []}
             drawTool={drawTool}
             magnet={magnet}
+            viewState={win.chartView}
+            onViewState={(s) => {
+              if (viewTimer.current) window.clearTimeout(viewTimer.current);
+              viewTimer.current = window.setTimeout(() => {
+                patchWin({chartView: {...win.chartView, ...s, magnet, selectedPane: selPane}});
+              }, 400);
+            }}
             paneById={paneById}
             selectedPane={selPane}
             onSelectPane={setSelPane}

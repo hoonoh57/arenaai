@@ -137,10 +137,27 @@ export function DeskApp() {
 
   const persist = useCallback((next: DeskWorkspace) => {
     setWorkspace(next);
+    workspaceRef.current = next;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       void put('/api/desks', next).catch((e) => setNotice((e as Error).message));
-    }, 8000);
+    }, 1500);
+  }, []);
+
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      void put('/api/desks', workspaceRef.current).catch(() => {});
+    };
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      flush();
+    };
   }, []);
 
   useEffect(() => {

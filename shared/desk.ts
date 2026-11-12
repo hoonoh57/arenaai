@@ -37,6 +37,14 @@ export type ChildWindow = {
   enabledFormulas?: string[];
   /** 지표 id → 패널 번호(0=가격, 1+=서브). 드래그·오버레이 위치. */
   indicatorPanes?: Record<string, number>;
+  /** 줌·스크롤·패널 높이. 재시작·화면 이동 후 복원. */
+  chartView?: {
+    from?: number;
+    to?: number;
+    paneStretch?: number[];
+    magnet?: boolean;
+    selectedPane?: number;
+  };
   compareMode?: 'replace' | 'overlay';
   overlayCode?: string;
   /** 멀티차트 열 수 (1~4). */
@@ -285,8 +293,29 @@ function validateWindow(win: ChildWindow): ChildWindow {
     timeframe: typeof win.timeframe === 'string' ? win.timeframe.slice(0, 8) : undefined,
     baseDate: typeof win.baseDate === 'string' ? win.baseDate.slice(0, 10) : undefined,
     visibleBars: Number.isInteger(win.visibleBars) ? Math.min(2000, Math.max(20, win.visibleBars as number)) : undefined,
-    formulaOpen: Boolean(win.formulaOpen),
+    formulaOpen: typeof win.formulaOpen === 'boolean' ? win.formulaOpen : undefined,
     enabledFormulas: Array.isArray(win.enabledFormulas) ? win.enabledFormulas.filter((id): id is string => typeof id === 'string').slice(0, 50) : undefined,
+    indicatorPanes:
+      win.indicatorPanes && typeof win.indicatorPanes === 'object' && !Array.isArray(win.indicatorPanes)
+        ? Object.fromEntries(
+            Object.entries(win.indicatorPanes)
+              .filter((e): e is [string, number] => typeof e[0] === 'string' && Number.isFinite(e[1]))
+              .slice(0, 40)
+              .map(([k, v]) => [k.slice(0, 80), Math.max(0, Math.min(8, Math.round(Number(v))))]),
+          )
+        : undefined,
+    chartView:
+      win.chartView && typeof win.chartView === 'object'
+        ? {
+            from: Number.isFinite(win.chartView.from) ? Number(win.chartView.from) : undefined,
+            to: Number.isFinite(win.chartView.to) ? Number(win.chartView.to) : undefined,
+            paneStretch: Array.isArray(win.chartView.paneStretch)
+              ? win.chartView.paneStretch.filter((n): n is number => Number.isFinite(n)).slice(0, 8)
+              : undefined,
+            magnet: typeof win.chartView.magnet === 'boolean' ? win.chartView.magnet : undefined,
+            selectedPane: Number.isInteger(win.chartView.selectedPane) ? Math.max(0, Math.min(8, win.chartView.selectedPane as number)) : undefined,
+          }
+        : undefined,
     compareMode: win.compareMode === 'overlay' ? 'overlay' : win.compareMode === 'replace' ? 'replace' : undefined,
     overlayCode: typeof win.overlayCode === 'string' && CODE.test(win.overlayCode) ? win.overlayCode : undefined,
     gridCols: Number.isInteger(win.gridCols) ? Math.min(4, Math.max(1, win.gridCols as number)) : undefined,
