@@ -143,8 +143,24 @@ export function measureSurge(session: Candle[]): {ok: boolean; parts: string[]; 
   if (strOk) parts.push('강도급증');
   if (rangeOk) parts.push('변동급증');
   if (retOk) parts.push('봉급등');
-  const ok = parts.length >= 2 || (retOk && (volOk || rangeOk));
+  const ok = parts.length >= 2 || (retOk && (volOk || rangeOk)) || (retOk && strOk);
   return {ok, parts, bonus: Math.min(25, parts.length * 8)};
+}
+
+function confirmAfterSkip(session: Candle[], skip: Candle): {ok: boolean; parts: string[]; bonus: number} {
+  const surge = measureSurge(session);
+  const last = session[session.length - 1];
+  if (!last) return surge;
+  const body = last.open > 0 ? (last.close - last.open) / last.open : 0;
+  const green = last.close > last.open;
+  const lift = last.close > skip.high || last.close >= skip.close * 1.008;
+  const str = typeof last.strength === 'number' && last.strength >= 120;
+  const extra: string[] = [...surge.parts];
+  if (green && lift) extra.push('건너뜀고점돌파');
+  if (str) extra.push('강도확인');
+  if (body >= 0.008 && green) extra.push('양봉확인');
+  const ok = surge.ok || (green && (lift || str || body >= 0.008));
+  return {ok, parts: extra, bonus: Math.min(25, extra.length * 8)};
 }
 
 /**
@@ -168,16 +184,17 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
     else lastSkip = -1;
   }
   if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;
-  if (hadSignal(at)) return null;
-  const surge = measureSurge(sessionSlice(candles, at));
+  const session = sessionSlice(candles, at);
+  const surge = confirmAfterSkip(session, candles[lastSkip]);
   if (!surge.ok) return null;
   const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
+  const recross = hadSignal(at);
   return {
     score,
     allow: true,
     delayed: true,
-    tag: '지연확인',
-    reasons: [`건너뜀 후 ${surge.parts.join('·')}`],
+    tag: recross ? '확인매수' : '지연확인',
+    reasons: [`건너뜀 후 ${surge.parts.join('·')}${recross ? '·이평재교차' : ''}`],
   };
 }
 
@@ -203,7 +220,7 @@ export function delayedExit(candles: Candle[], at: number, hadExit: (i: number) 
 
 export function patternMarkerText(side: 'buy' | 'skip' | 'sell', v: PatternVerdict): string {
   if (v.delayed && v.tag === '지연매도') return `지연매도${v.score}`;
-  if (v.delayed) return `지연매수${v.score} ${v.tag}`;
+  if (v.delayed) return `${v.tag === '확인매수' ? '확인매수' : '지연매수'}${v.score} ${v.tag}`;
   if (side === 'skip') return `건너뜀${v.score} ${v.tag}`;
   if (side === 'sell') return `매도${v.score}`;
   return `매수${v.score} ${v.tag}`;

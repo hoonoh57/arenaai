@@ -163,15 +163,20 @@ export function Chart({
           if (values[i]) {
             if (f.kind === 'system') {
               const v = judgePattern(bars, i, patternFilters);
-              if (v.allow) lastSkip = -1;
-              else if (v.tag !== '급등후횡보') lastSkip = i;
+              const late = !v.allow && lastSkip >= 0 && !delayedUsed ? delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters) : null;
+              const take = v.allow || Boolean(late?.allow);
+              if (take) {
+                lastSkip = -1;
+                if (late?.allow) delayedUsed = true;
+              } else if (v.tag !== '급등후횡보') lastSkip = i;
               else lastSkip = -1;
+              const shown = late?.allow ? late : v;
               markers.push({
                 time: c.time as UTCTimestamp,
                 position: 'belowBar',
                 shape: 'arrowUp',
-                color: v.allow ? f.color : '#718395',
-                text: patternMarkerText(v.allow ? 'buy' : 'skip', v),
+                color: take ? f.color : '#718395',
+                text: patternMarkerText(take ? 'buy' : 'skip', shown),
               });
             } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
           } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {

@@ -244,6 +244,14 @@ function currentEvaluator() {
       score = v.score;
       if (buy && v.tag === '횡보돌파') tags.push('base-boost');
       if (buy && v.reasons.some((r) => r.includes('조기'))) tags.push('early-buy');
+      if (!buy) {
+        const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
+        buy = Boolean(late?.allow);
+        if (late) {
+          score = late.score;
+          tags.push('delayed-buy');
+        }
+      }
     } else {
       const late = delayedEntry(closed, at, (i) => Boolean(buys[i]), filters);
       buy = Boolean(late?.allow);

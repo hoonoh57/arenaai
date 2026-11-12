@@ -59,3 +59,18 @@ test('건너뜀 뒤 거래량·봉 급증이면 이평 없이 지연 진입', ()
   assert.equal(late?.allow, true);
   assert.equal(late?.delayed, true);
 });
+
+test('건너뜀 뒤 같은 봉에 이평이 다시 나와도 양봉 급등이면 확인 매수', () => {
+  const c = bars(40, (i) => 100 + Math.sin(i) * 0.12);
+  for (const b of c) b.volume = 100;
+  const last = c[c.length - 1];
+  last.open = 100;
+  last.close = 103;
+  last.high = 103.4;
+  last.low = 99.8;
+  last.volume = 400;
+  const sig = (i: number) => i === 20 || i === c.length - 1;
+  const late = delayedEntry(c, c.length - 1, sig);
+  assert.equal(late?.allow, true);
+  assert.equal(late?.tag, '확인매수');
+});
