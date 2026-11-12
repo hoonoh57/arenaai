@@ -141,11 +141,6 @@ export function ChartPane({
     if (/^\d{6}$/.test(code)) void load({code});
   }, [code, timeframe, baseDate]);
 
-  useEffect(() => {
-    if (strengthReady || !strengthHasMore || busy) return;
-    const t = window.setTimeout(() => void load({strengthOnly: true, force: true}), 8000);
-    return () => window.clearTimeout(t);
-  }, [strengthReady, strengthHasMore, strengthNextKey, busy]);
 
   const commitCode = (value: string) => {
     const next = value.replace(/\D/g, '').slice(0, 6);
@@ -252,8 +247,16 @@ export function ChartPane({
             onChange={(e) => patchWin({visibleBars: Number(e.target.value) || 200})}
             title="화면 표시 봉수"
           />
-          <button className="hts-tool" disabled={!hasMore || busy} onClick={() => void load({append: true})} title="이전 페이지 추가">
+          <button className="hts-tool" disabled={!hasMore || busy} onClick={() => void load({append: true})} title="가격 이전 페이지">
             +이전
+          </button>
+          <button
+            className={'hts-tool' + (strengthReady ? ' on' : '')}
+            disabled={busy}
+            onClick={() => void load({strengthOnly: true, force: true})}
+            title={strengthReady ? '체결강도 세션 시작까지 채움' : '체결강도 이전 페이지를 한 장 더 붙입니다'}
+          >
+            {strengthReady ? '강도완료' : '강도+이전'}
           </button>
           <button className="hts-tool" disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => void load({force: true})}>
             조회
