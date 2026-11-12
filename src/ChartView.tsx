@@ -33,6 +33,7 @@ export function Chart({
   onPick,
   drawings = [],
   drawTool = 'cursor',
+  magnet = true,
   yMode = 'price',
   daySep,
   refLines,
@@ -54,6 +55,7 @@ export function Chart({
   onPick?: (formulaId: string | null) => void;
   drawings?: ChartDrawing[];
   drawTool?: string;
+  magnet?: boolean;
   yMode?: 'price' | 'percent';
   daySep?: boolean;
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
@@ -79,6 +81,7 @@ export function Chart({
   const logRef = useRef(logScale);
   const gridRef = useRef(grid);
   const drawToolRef = useRef(drawTool);
+  const magnetRef = useRef(magnet);
   const drawingsRef = useRef(drawings);
   const onDrawingsRef = useRef(onDrawings);
   const yModeRef = useRef(yMode);
@@ -94,9 +97,13 @@ export function Chart({
   logRef.current = logScale;
   gridRef.current = grid;
   drawToolRef.current = drawTool;
+  magnetRef.current = magnet;
   drawingsRef.current = drawings;
   onDrawingsRef.current = onDrawings;
-  const formulaSig = formulas.filter((f) => f.enabled).map((f) => f.id).join(',');
+  const formulaSig = formulas
+    .filter((f) => f.enabled)
+    .map((f) => `${f.id}:${f.name}:${f.expression}:${JSON.stringify(f.variables || {})}:${f.pane || ''}`)
+    .join('|');
   const filterSig = patternFilters ? Object.keys(patternFilters).filter((k) => patternFilters[k]).join(',') : '';
   const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
@@ -173,11 +180,11 @@ export function Chart({
         let baselineAdded = false;
         for (const lineSpec of lines.filter((l) => l.visible)) {
           const common = {
-            title: f.id,
+            title: (f.name || f.id).slice(0, 12),
             color: lineSpec.color,
             priceLineVisible: false,
-            lastValueVisible: separate,
-            priceScaleId: separate ? `ind-${f.id}` : 'right',
+            lastValueVisible: true,
+            priceScaleId: 'right',
           };
           const line =
             lineSpec.type === 'histogram'
@@ -193,12 +200,15 @@ export function Chart({
             const v = overlayPx ? ax(value) : value;
             return {time: bars[i].time as UTCTimestamp, value: v, color: colors[i]};
           }));
-          if (separate) {
-            try {
-              line.priceScale().applyOptions({mode: PriceScaleMode.Normal, autoScale: true});
-            } catch {
-              /* scale */
-            }
+          try {
+            line.priceScale().applyOptions({
+              visible: true,
+              borderVisible: false,
+              mode: PriceScaleMode.Normal,
+              autoScale: true,
+            });
+          } catch {
+            /* scale */
           }
           extras.current.push(line);
           if (!baselineAdded) {
@@ -274,7 +284,6 @@ export function Chart({
       layout: {background: {type: ColorType.Solid, color: '#111923'}, textColor: '#718395'},
       localization: {timeFormatter: (t: number | string | object) => new Date(Number(t) * 1000).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul'})},
       grid: {vertLines: {color: '#1a2733', visible: gridRef.current}, horzLines: {color: '#1a2733', visible: gridRef.current}},
-      rightPriceScale: {borderVisible: false},
       timeScale: {
         borderVisible: false,
         timeVisible: true,
@@ -282,7 +291,11 @@ export function Chart({
         tickMarkFormatter: (t: number | string | object) =>
           new Date(Number(t) * 1000).toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}),
       },
-      crosshair: {vertLine: {color: '#516576'}, horzLine: {color: '#516576'}},
+      rightPriceScale: {borderVisible: false, visible: true},
+      crosshair: {
+        vertLine: {color: '#516576', labelVisible: true, labelBackgroundColor: '#1c2a35'},
+        horzLine: {color: '#516576', labelVisible: true, labelBackgroundColor: '#1c2a35'},
+      },
     });
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#ed6b72',
@@ -300,8 +313,27 @@ export function Chart({
     });
     chart.subscribeClick((param) => {
       const tool = drawToolRef.current;
-      const price = param.point && series.coordinateToPrice(param.point.y);
-      const time = param.time !== undefined ? Number(param.time) : NaN;
+      let price = param.point && series.coordinateToPrice(param.point.y);
+      let time = param.time !== undefined ? Number(param.time) : NaN;
+      const barsNow = dataRef.current;
+      if (magnetRef.current && barsNow.length && Number.isFinite(time) && price !== null && price !== undefined) {
+        let bi = 0;
+        let best = Infinity;
+        for (let i = 0; i < barsNow.length; i++) {
+          const d = Math.abs(barsNow[i].time - time);
+          if (d < best) {
+            best = d;
+            bi = i;
+          }
+        }
+        const b = barsNow[bi];
+        time = b.time;
+        const pctOn = yModeRef.current === 'percent';
+        const refPx = barsNow[0].close > 0 ? barsNow[0].close : 1;
+        const axp = (px: number) => (pctOn ? 100 * (px / refPx - 1) : px);
+        const cands = [b.open, b.high, b.low, b.close].map(axp);
+        price = cands.reduce((p, x) => (Math.abs(x - price!) < Math.abs(p - price!) ? x : p));
+      }
       if (tool && tool !== 'cursor' && Number.isFinite(time) && price !== null && price !== undefined) {
         const color = tool === 'stop' ? '#ed6b72' : tool === 'target' ? '#a8ec6a' : tool === 'entry' ? '#e8bd64' : '#b9ef78';
         const make = (kind: ChartDrawing['kind'], extra: Partial<ChartDrawing> = {}): ChartDrawing => ({
@@ -327,8 +359,9 @@ export function Chart({
         }
         return;
       }
-      const id = param.hoveredSeries ? ((param.hoveredSeries as {options?: () => {title?: string}}).options?.().title ?? null) : null;
-      pickCb.current?.(id);
+      const title = param.hoveredSeries ? ((param.hoveredSeries as {options?: () => {title?: string}}).options?.().title ?? null) : null;
+      const hit = title ? formulasRef.current.find((f) => f.id === title || f.name === title || f.name.slice(0, 12) === title) : null;
+      pickCb.current?.(hit?.id ?? title);
     });
     chartRef.current = chart;
     candleRef.current = series;

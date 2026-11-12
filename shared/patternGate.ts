@@ -284,11 +284,12 @@ export function delayedExit(candles: Candle[], at: number, hadExit: (i: number) 
 }
 
 export function patternMarkerText(side: 'buy' | 'skip' | 'sell', v: PatternVerdict): string {
-  if (v.delayed && v.tag === '지연매도') return `지연매도${v.score}`;
-  if (v.delayed) return `${v.tag === '확인매수' ? '확인매수' : '지연매수'}${v.score} ${v.tag}`;
-  if (side === 'skip') return `건너뜀${v.score} ${v.tag}`;
-  if (side === 'sell') return `매도${v.score}`;
-  return `매수${v.score} ${v.tag}`;
+  const n = Math.round(v.score);
+  if (v.delayed && v.tag === '지연매도') return `지매${n}`;
+  if (v.delayed) return v.tag === '확인매수' ? `확${n}` : `지${n}`;
+  if (side === 'skip') return `건${n}`;
+  if (side === 'sell') return `매${n}`;
+  return `매${n}`;
 }
 
 export const PATTERN_ENTER_MIN = ENTER_MIN;

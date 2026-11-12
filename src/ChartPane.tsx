@@ -66,6 +66,7 @@ export function ChartPane({
   logScale,
   patchWin,
   setNotice,
+  onReload,
   onCommonCode,
   patternFilters,
   delayContext,
@@ -79,6 +80,7 @@ export function ChartPane({
   logScale: boolean;
   patchWin: (patch: Partial<ChildWindow>) => void;
   setNotice: (v: string) => void;
+  onReload?: () => Promise<void>;
   onCommonCode?: (code: string) => void;
   patternFilters?: import('../shared/patternFilters').FilterEnabled;
   delayContext?: import('../shared/patternFilters').DelayContext;
@@ -102,6 +104,8 @@ export function ChartPane({
   const [menu, setMenu] = useState<{x: number; y: number} | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [drawTool, setDrawTool] = useState('cursor');
+  const [magnet, setMagnet] = useState(true);
+  const [varPatch, setVarPatch] = useState<Record<string, Record<string, number>>>({});
   const timeframe = win.timeframe || '1';
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
@@ -174,7 +178,11 @@ export function ChartPane({
     if (!win.locked) onCommonCode?.(next);
   };
 
-  const applied = formulas.map((f) => ({...f, enabled: enabled.has(f.id)}));
+  const applied = formulas.map((f) => ({
+    ...f,
+    enabled: enabled.has(f.id),
+    variables: {...(f.variables || {}), ...(varPatch[f.id] || {})},
+  }));
   const groups = [
     {kind: 'indicator', label: '지표'},
     {kind: 'signal', label: '신호'},
@@ -299,6 +307,9 @@ export function ChartPane({
               {label}
             </button>
           ))}
+          <button className={'hts-tool' + (magnet ? ' on' : '')} onClick={() => setMagnet((v) => !v)} title="자석: 봉 시고저종에 붙임">
+            자석
+          </button>
           <button className={'hts-tool' + (win.yMode === 'percent' ? ' on' : '')} onClick={() => patchWin({yMode: win.yMode === 'percent' ? 'price' : 'percent'})} title="Y축 가격/등락률">
             {win.yMode === 'percent' ? '등락률' : '가격'}
           </button>
@@ -343,6 +354,7 @@ export function ChartPane({
             }}
             drawings={win.drawings || []}
             drawTool={drawTool}
+            magnet={magnet}
             yMode={win.yMode === 'percent' ? 'percent' : 'price'}
             daySep={win.daySep}
             refLines={win.refLines}
@@ -390,16 +402,31 @@ export function ChartPane({
                 차트에서 제거
               </button>
             </label>
-            {Object.entries(editor.variables || {}).map(([key, value]) => (
+            {Object.entries({...(editor.variables || {}), ...(varPatch[editor.id] || {})}).map(([key, value]) => (
               <label key={key}>
                 {key}
-                <input defaultValue={value} onBlur={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isFinite(n)) {
-                    /* variables live on the shared formula set; open 수식 관리자 to persist */
-                    setNotice('지표변수 저장은 수식 관리자에서 합니다.');
-                  }
-                }} />
+                <input
+                  defaultValue={value}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) return;
+                    setVarPatch((prev) => ({...prev, [editor.id]: {...(prev[editor.id] || {}), [key]: n}}));
+                    const next = formulas.map((f) =>
+                      f.id === editor.id ? {...f, variables: {...(f.variables || {}), ...(varPatch[editor.id] || {}), [key]: n}} : f,
+                    );
+                    void fetch('/api/formulas', {
+                      method: 'PUT',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({formulas: next}),
+                    })
+                      .then((r) => r.json().then((d) => ({ok: r.ok, d})))
+                      .then(({ok, d}) => {
+                        if (!ok) throw new Error(d.error || '저장 실패');
+                        return onReload?.();
+                      })
+                      .catch((err) => setNotice(err instanceof Error ? err.message : '지표변수 저장 실패'));
+                  }}
+                />
               </label>
             ))}
             <button onClick={() => setEditId(null)}>닫기</button>

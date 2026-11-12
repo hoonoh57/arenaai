@@ -571,6 +571,7 @@ function Pane(props: {
         logScale={props.logScale}
         patchWin={(patch) => props.patchWin(win.id, patch)}
         setNotice={props.setNotice}
+        onReload={props.load}
         onCommonCode={props.onCommonCode}
         patternFilters={state.config.patternFilters}
         delayContext={{
