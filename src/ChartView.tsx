@@ -167,13 +167,7 @@ export function Chart({
             return;
           }
           const v = values[i] ? judgePattern(bars, i, patternFilters, delayContext) : null;
-          let late = lastSkip >= 0 && i > lastSkip ? delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext) : null;
-          if (!late?.allow && lastSkip >= 0 && i === lastSkip + 1) {
-            const prev = bars[lastSkip];
-            if (c.close >= c.open || c.close > prev.close || c.high > prev.high) {
-              late = {score: 70, allow: true, delayed: true, tag: '지연확인', reasons: ['건너뜀 다음 봉 확인']};
-            }
-          }
+          const late = lastSkip >= 0 && i > lastSkip ? delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext) : null;
           if (late?.allow) {
             lastSkip = -1;
             markers.push({

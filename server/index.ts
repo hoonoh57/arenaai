@@ -8,6 +8,7 @@ import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patternGate';
 import {extractMaLegs, MA_MIN_EDGE} from '../shared/maRoundTrip';
+import {adaptiveJumpNeed} from '../shared/skipJump';
 import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
@@ -238,6 +239,7 @@ function delayContextNow(): DelayContext {
     maAvgPct: patternKpi.maSummary().avgPct,
     maReady: patternKpi.maSummary().ready,
     maAvgLoserRange: patternKpi.maSummary().avgLoserRange,
+    jumpNeed: adaptiveJumpNeed([], config.skip001N) * (patternKpi.maSummary().ready && patternKpi.maSummary().avgPct < 0 ? 1.3 : 1),
   };
 }
 

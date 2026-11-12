@@ -1,6 +1,6 @@
 import type {Candle} from '../server/core';
-import {filterOn, skip001Threshold, type DelayContext, type FilterEnabled} from './patternFilters';
-import {MA_MIN_EDGE} from './maRoundTrip';
+import {filterOn, type DelayContext, type FilterEnabled} from './patternFilters';
+import {adaptiveJumpNeed, failEnvelope, jumpVsFail, skipFeat, smaAt} from './skipJump';
 
 export type PatternMarket = {indexRet?: number; ma120Slope?: number};
 
@@ -234,25 +234,12 @@ export function delayedAfterSkip(candles: Candle[], skipIndex: number, at: numbe
   const skip = candles[skipIndex];
   const last = candles[at];
   if (!skip || !last) return null;
-  const nextBar = at === skipIndex + 1;
-  const slice = candles.slice(skipIndex, at + 1);
-  const surge = confirmAfterSkip(slice, skip, true);
-  const green = last.close >= last.open;
-  const upClose = last.close > skip.close;
-  const brokeHigh = last.high > skip.high;
-  if (!(surge.ok || green || upClose || brokeHigh)) return null;
-  if (!nextBar) {
-    if (delay?.maReady && (delay.maAvgPct ?? 0) < MA_MIN_EDGE) {
-      const move = skip.close > 0 ? Math.abs(last.close - skip.close) / skip.close : 0;
-      if (move < (delay.maAvgLoserRange || 0.01) * (delay.skip001N ?? 1.2)) return null;
-    }
-    if (filterOn(filters, 'skip001')) {
-      const need = skip001Threshold(delay?.skip001Score ?? 50, delay?.skip001N ?? 1.2);
-      if (surge.quality < need) return null;
-    }
-  }
-  const score = Math.max(ENTER_MIN, Math.min(100, 70 + surge.bonus));
-  return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`건너뜀 다음 ${surge.parts.join('·') || '양봉확인'}`]};
+  const nowMa = smaAt(candles, at, 120);
+  const skipMa = smaAt(candles, skipIndex, 120);
+  const jumped = jumpVsFail(skipFeat(last, nowMa), failEnvelope([skipFeat(skip, skipMa)]), delay?.jumpNeed ?? adaptiveJumpNeed([], delay?.skip001N ?? 1));
+  if (jumped.belowMa120 || !jumped.ok) return null;
+  const score = Math.max(ENTER_MIN, Math.min(100, 70 + jumped.beats * 6));
+  return {score, allow: true, delayed: true, tag: '지연확인', reasons: [`실패피처 초월 jump${jumped.jump.toFixed(2)} ${jumped.parts.join('·')}`]};
 }
 
 /**

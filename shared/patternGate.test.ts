@@ -83,17 +83,16 @@ test('건너뜀 뒤 거래량·봉 급증이면 이평 없이 지연 진입', ()
   assert.equal(late?.delayed, true);
 });
 
-test('건너뜀 바로 다음 봉이 종가·고저 상향이면 즉시 매수', () => {
+test('건너뜀 다음이 약한 양봉·고점만이면 지연하지 않는다', () => {
   const c = bars(22, () => 100);
+  for (const b of c) b.volume = 100;
   c[20].high = 100.2;
-  c[20].low = 99.8;
-  c[20].close = 100;
   c[21].open = 100.05;
-  c[21].low = 100;
-  c[21].high = 100.6;
-  c[21].close = 100.5;
+  c[21].high = 100.4;
+  c[21].close = 100.3;
+  c[21].volume = 110;
   const late = delayedEntry(c, 21, (i) => i === 20);
-  assert.equal(late?.allow, true, late?.reasons.join(',') || 'no delayed');
+  assert.equal(late?.allow ?? false, false);
 });
 
 test('건너뜀 뒤 같은 봉에 이평이 다시 나와도 양봉 급등이면 확인 매수', () => {
