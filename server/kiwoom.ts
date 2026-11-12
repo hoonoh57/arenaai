@@ -294,7 +294,6 @@ export class Kiwoom {
         if (kind === 'rate-limit' && !retriedRateLimit) {
           retriedRateLimit = true;
           this.governor.penalize();
-          this.options.onEvent?.({kind: 'rate-limit', message: '키움 요청 한도 오류를 받아 잠시 대기 후 재시도합니다.', detail: {apiId: id, returnCode: info.returnCode}});
           continue;
         }
         if (kind === 'auth-expired' && !retriedAuth) {

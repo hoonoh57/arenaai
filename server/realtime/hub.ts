@@ -464,7 +464,6 @@ export class RealtimeHub {
       const capture = conditionEvent(event, today);
       if (capture) {
         this.cache.applyCondition(capture);
-        this.audit.record('state', '조건검색 포착 종목이 갱신되었습니다.', capture);
         continue;
       }
       // 00(주문체결)/04(잔고)/0D(호가) 등은 구독하지 않으며, 도착해도 캐시에 쓰지 않는다.

@@ -30,6 +30,8 @@ export class AuditLog {
   private readonly now: () => number;
   private nextId = 1;
   private readonly sink?: (entry: AuditEntry) => void;
+  private lastKey = '';
+  private lastAt = 0;
 
   constructor(options: {capacity?: number; now?: () => number; sink?: (entry: AuditEntry) => void} = {}) {
     this.capacity = options.capacity ?? 2000;
@@ -40,7 +42,14 @@ export class AuditLog {
 
   record(category: AuditCategory, message: string, detail?: Record<string, unknown>): AuditEntry {
     if (typeof message !== 'string' || !message.trim()) throw new Error('감사 로그 메시지가 필요합니다.');
-    const entry: AuditEntry = {id: this.nextId++, at: this.now(), category, message, ...(detail ? {detail} : {})};
+    const key = `${category}:${message}`;
+    const at = this.now();
+    if (key === this.lastKey && at - this.lastAt < 60_000) {
+      return {id: this.nextId, at, category, message, ...(detail ? {detail} : {})};
+    }
+    this.lastKey = key;
+    this.lastAt = at;
+    const entry: AuditEntry = {id: this.nextId++, at, category, message, ...(detail ? {detail} : {})};
     this.entries.push(entry);
     if (this.entries.length > this.capacity) this.entries.splice(0, this.entries.length - this.capacity);
     try {

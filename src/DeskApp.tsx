@@ -106,6 +106,8 @@ export function DeskApp() {
   const [chartHeight, setChartHeight] = useState(250);
   const saveTimer = useRef<number | null>(null);
   const drag = useRef<{id: string; dx: number; dy: number; mode: 'move' | 'resize'} | null>(null);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
 
   const load = async () => {
     try {
@@ -141,7 +143,7 @@ export function DeskApp() {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       void put('/api/desks', next).catch((e) => setNotice((e as Error).message));
-    }, 400);
+    }, 8000);
   }, []);
 
   useEffect(() => {
@@ -196,13 +198,14 @@ export function DeskApp() {
       const win = current.windows.find((w) => w.id === session.id);
       if (!win || win.state !== 'normal') return;
       if (session.mode === 'move') {
-        updateDesk(patchWindow(current, session.id, {x: Math.max(0, e.clientX - session.dx), y: Math.max(0, e.clientY - session.dy)}));
+        setWorkspace(replaceDesk({...workspace, active: current.number}, patchWindow(current, session.id, {x: Math.max(0, e.clientX - session.dx), y: Math.max(0, e.clientY - session.dy)})));
       } else {
-        updateDesk(patchWindow(current, session.id, {w: Math.max(280, e.clientX - win.x), h: Math.max(180, e.clientY - win.y)}));
+        setWorkspace(replaceDesk({...workspace, active: current.number}, patchWindow(current, session.id, {w: Math.max(280, e.clientX - win.x), h: Math.max(180, e.clientY - win.y)})));
       }
     };
     const up = () => {
       drag.current = null;
+      persist(workspaceRef.current);
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -816,8 +819,7 @@ function StockMiniChart({
     if (!/^\d{6}$/.test(code)) return;
     let stop = false;
     if (!cached.length) setWait(true);
-    const withStrength = formulas.some((f) => f.enabled && (f.id === 'cntrstr' || /STRENGTH|체결강도/.test(f.expression)));
-    void queuedChart(code, timeframe, withStrength)
+    void queuedChart(code, timeframe, false)
       .then((d) => {
         if (!stop && d.candles?.length) {
           setBars(d.candles);

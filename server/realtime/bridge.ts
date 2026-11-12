@@ -176,16 +176,6 @@ export class DemandBridge {
     if (removed.length) await this.hub.unsubscribe('bridge:quotes', removed, ['0B']);
     this.watched = desired;
 
-    const today = kstDate(this.now());
-    for (const code of selectedCodes) {
-      if (this.cache.lastCandleTime(code) !== null) continue;
-      try {
-        await this.hub.refreshCandles(code, {baseDate: today});
-      } catch (error) {
-        this.cache.setWarning(code, error instanceof Error ? error.message : '분봉 조회 실패');
-        this.audit.record('error', '분봉 초기 조회에 실패했습니다.', {code, error: error instanceof Error ? error.message : '오류'});
-      }
-    }
     this.hub.setActiveCodes(selectedCodes);
     return this.computeRanking(config);
   }

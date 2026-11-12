@@ -132,8 +132,8 @@ const bridge = new DemandBridge({
   broker: {
     candles: (code: string) => api.candles(code),
     daily: (code: string, baseDate: string) => api.daily(code, baseDate),
-    strengthSnapshot: (code: string) => api.strengthSnapshot(code),
   },
+  fallbackBudget: 0,
   quoteBudget: positiveInt('KIWOOM_QUOTE_BUDGET', 40),
   quoteTtlMs: positiveNumber('QUOTE_TTL_MS', 30000),
   maxSubscriptions: caps.limits.maxSubscriptions,
@@ -275,11 +275,8 @@ async function followTopCharts(): Promise<void> {
     updatedAt = Date.now();
     for (const code of fill) {
       if (cache.candles(code).length) continue;
-      try {
-        await bridge.refreshChart(code);
-      } catch (e) {
-        cache.setWarning(code, e instanceof Error ? e.message : '분봉 갱신 실패');
-      }
+      const local = loadLocalBars(code, '1');
+      if (local.length) cache.mergeCandles(code, local);
     }
     if (config.tradeMode === 'auto') bridge.reevaluate(top);
   } catch (e) {
@@ -303,7 +300,7 @@ function scheduleRanking(): void {
     void refreshRanking().catch((e: unknown) => {
       error = e instanceof Error ? e.message : '순위 계산 오류';
     });
-  }, 1000);
+  }, 5000);
   rankingTimer.unref?.();
 }
 cache.onUpdate(() => scheduleRanking());
@@ -368,17 +365,6 @@ app.post('/api/chart', async (req, res) => {
       return [...map.values()].sort((a, b) => a.time - b.time);
     };
     let candles = mergeByTime(localBars, liveBars);
-    const todayOpen = Math.floor(Date.parse(`${new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'})}T08:00:00+09:00`) / 1000);
-    const last = candles.at(-1)?.time ?? 0;
-    if (!nextKey && last < todayOpen) {
-      try {
-        const page = await api.chartPage({code, timeframe, baseDate, nextKey: undefined});
-        candles = mergeByTime(candles, page.candles);
-        if (timeframe === '1' && page.candles.length) cache.mergeCandles(code, page.candles);
-      } catch {
-        /* 오늘 봉 REST 실패 시 로컬만 */
-      }
-    }
     if (candles.length && !nextKey) {
       if (req.body?.withStrength) {
         try {
@@ -488,7 +474,6 @@ app.get('/api/desks', (_req, res) => {
 app.put('/api/desks', (req, res) => {
   try {
     const workspace = saveDesks(req.body);
-    audit.record('state', '가상화면 배치를 저장했습니다.', {desks: workspace.desks.length, active: workspace.active});
     res.json(workspace);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '가상화면 저장 실패'});
