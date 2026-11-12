@@ -10,7 +10,7 @@ import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patter
 import {extractMaLegs, MA_MIN_EDGE} from '../shared/maRoundTrip';
 import {adaptiveJumpNeed} from '../shared/skipJump';
 import {strengthSyncStatus} from '../shared/strength';
-import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
+import {filterOn, filtersFromFormulas, normalizeFilterEnabled, normalizeSkip001N, skip001NFromFormulas, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
 import {CONDITION_CATALOG, SAMPLE_0150} from '../shared/conditionCatalog';
@@ -232,7 +232,7 @@ function delayContextNow(): DelayContext {
   const daily = loadLocalBars('001', 'D');
   const indexRet = daily.length >= 2 ? (daily[daily.length - 1].close - daily[daily.length - 2].close) / daily[daily.length - 2].close : undefined;
   return {
-    skip001N: config.skip001N,
+    skip001N: skip001NFromFormulas(formulas, config.skip001N),
     skip001Score: skip?.ready ? skip.score : 50,
     indexRet: Number.isFinite(indexRet) ? indexRet : undefined,
     ma120Slope: maSlope(daily.map((c) => c.close)),
@@ -256,7 +256,7 @@ function currentEvaluator() {
     const buyFlag = Boolean(buys.at(-1));
     const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
-    const filters = config.patternFilters;
+    const filters = filtersFromFormulas(formulas, config.patternFilters);
     const delay: DelayContext = {...delayContextNow(), strengthReady: strengthSyncStatus(closed).ready};
     let buy = false;
     let score = 50;

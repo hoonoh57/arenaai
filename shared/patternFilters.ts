@@ -48,6 +48,24 @@ export function filterOn(enabled: FilterEnabled | undefined, id: PatternFilterId
   return PATTERN_FILTERS.find((f) => f.id === id)?.defaultOn ?? false;
 }
 
+/** 수식관리자에서 켠 건너뜀·지연 신호가 하드코드 필터보다 우선한다. */
+export function filtersFromFormulas(
+  formulas: readonly {id: string; enabled: boolean; variables?: Record<string, number>}[],
+  fallback?: FilterEnabled,
+): FilterEnabled {
+  const next = {...(fallback && Object.keys(fallback).length ? fallback : defaultFilterEnabled())};
+  for (const f of PATTERN_FILTERS) {
+    const hit = formulas.find((x) => x.id === f.id);
+    if (hit) next[f.id] = hit.enabled;
+  }
+  return next;
+}
+
+export function skip001NFromFormulas(formulas: readonly {id: string; variables?: Record<string, number>}[], fallback = 1.2): number {
+  const n = formulas.find((f) => f.id === 'skip001')?.variables?.N;
+  return Number.isFinite(n) ? Math.min(5, Math.max(0.5, n as number)) : fallback;
+}
+
 export type DelayContext = {skip001N: number; skip001Score: number; indexRet?: number; ma120Slope?: number; maAvgPct?: number; maReady?: boolean; maAvgLoserRange?: number; jumpNeed?: number; strengthReady?: boolean};
 
 export function defaultDelayContext(): DelayContext {

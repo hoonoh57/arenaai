@@ -377,8 +377,12 @@ export function ChartPane({
             overlay={overlay}
             formulas={applied}
             patternFilters={patternFilters}
-            delayContext={{...(delayContext || {skip001N: 1.2, skip001Score: 50}), strengthReady}}
-            strengthReady={strengthReady}
+            delayContext={{
+              ...(delayContext || {skip001N: 1.2, skip001Score: 50}),
+              skip001N: applied.find((f) => f.id === 'skip001')?.variables?.N ?? delayContext?.skip001N ?? 1.2,
+              strengthReady: enabled.has('cntrstr') ? strengthReady : true,
+            }}
+            strengthReady={enabled.has('cntrstr') ? strengthReady : true}
             strengthLabel={strengthNxt ? 'NXT 08:30' : 'KRX 09:00'}
             chartHeight={Math.max(160, (win.h || 380) - 56)}
             grid={grid}

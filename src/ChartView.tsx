@@ -20,7 +20,7 @@ import {seriesColors, type Formula} from '../shared/formula';
 import {chartHub, corePercent, createChartRuntime} from '../shared/chart';
 import './chart/register';
 import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '../shared/patternGate';
-import type {DelayContext, FilterEnabled} from '../shared/patternFilters';
+import {filtersFromFormulas, PATTERN_FILTERS, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
 export function Chart({
@@ -423,8 +423,10 @@ export function Chart({
           }
         }
       }
+      if (PATTERN_FILTERS.some((p) => p.id === f.id)) continue;
       if (f.kind === 'signal' || f.kind === 'system') {
         const exits = f.kind === 'system' ? chartHub.evaluate(f.exitExpression, bars, f.variables, formulas) : [];
+        const gates = filtersFromFormulas(formulas, patternFilters);
         let lastSkip = -1;
         bars.forEach((c, i) => {
           const step = bars.length >= 2 ? Math.max(60, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
@@ -434,8 +436,8 @@ export function Chart({
             if (values[i]) markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
             return;
           }
-          const v = values[i] ? judgePattern(bars, i, patternFilters, delayContext) : null;
-          const late = lastSkip >= 0 && i > lastSkip ? delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext) : null;
+          const v = values[i] ? judgePattern(bars, i, gates, delayContext) : null;
+          const late = lastSkip >= 0 && i > lastSkip ? delayedAfterSkip(bars, lastSkip, i, gates, delayContext) : null;
           if (late?.allow) {
             lastSkip = -1;
             markers.push({
@@ -466,7 +468,7 @@ export function Chart({
           }
           if (exits[i]) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: '매도'});
           else if (f.kind === 'system') {
-            const lateSell = delayedExit(bars, i, (j) => Boolean(exits[j]), patternFilters);
+            const lateSell = delayedExit(bars, i, (j) => Boolean(exits[j]), gates);
             if (lateSell?.allow) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: patternMarkerText('sell', lateSell)});
           }
         });
@@ -738,7 +740,9 @@ export function Chart({
           })}
         </div>
       ))}
-      {strengthReady === false ? <div className="strength-pending">체결강도 다운로드 중 · 최근봉→{strengthLabel || '세션 시작'} 확인 전 · 전략 미사용</div> : null}
+      {formulas.some((f) => f.enabled && f.id === 'cntrstr') && strengthReady === false ? (
+        <div className="strength-pending">체결강도 다운로드 중 · 최근봉→{strengthLabel || '세션 시작'} 확인 전 · 전략 미사용</div>
+      ) : null}
       <svg className="chart-draw" width={w} height={hbox} style={{position: 'absolute', inset: 0, pointerEvents: 'none'}}>
         {allDraw.map((d) => {
           if (d.kind === 'hline') {
