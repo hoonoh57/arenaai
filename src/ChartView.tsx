@@ -158,45 +158,49 @@ export function Chart({
       if (f.kind === 'signal' || f.kind === 'system') {
         const exits = f.kind === 'system' ? evaluate(f.exitExpression, bars, f.variables, formulas) : [];
         let lastSkip = -1;
-        let delayedUsed = false;
         bars.forEach((c, i) => {
           const step = bars.length >= 2 ? Math.max(60, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
           if (c.time + step > Math.floor(Date.now() / 1000)) return;
           if (values[i] && exits[i]) return;
-          if (values[i]) {
-            if (f.kind === 'system') {
-              const v = judgePattern(bars, i, patternFilters, delayContext);
-              let late = null as ReturnType<typeof delayedAfterSkip>;
-              if (!v.allow) {
-                lastSkip = v.tag === '급등후횡보' ? -1 : i;
-              } else if (lastSkip >= 0 && !delayedUsed) {
-                late = delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext);
-                if (late?.allow) delayedUsed = true;
-                lastSkip = -1;
-              } else lastSkip = -1;
-              const take = v.allow || Boolean(late?.allow);
-              const shown = late?.allow ? late : v;
-              markers.push({
-                time: c.time as UTCTimestamp,
-                position: 'belowBar',
-                shape: 'arrowUp',
-                color: take ? f.color : '#718395',
-                text: patternMarkerText(take ? 'buy' : 'skip', shown),
-              });
-            } else markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
-          } else if (f.kind === 'system' && lastSkip >= 0 && !delayedUsed) {
-            const late = delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext);
-            if (late?.allow) {
-              delayedUsed = true;
-              lastSkip = -1;
-              markers.push({
-                time: c.time as UTCTimestamp,
-                position: 'belowBar',
-                shape: 'arrowUp',
-                color: f.color,
-                text: patternMarkerText('buy', late),
-              });
+          if (f.kind !== 'system') {
+            if (values[i]) markers.push({time: c.time as UTCTimestamp, position: 'belowBar', shape: 'arrowUp', color: f.color, text: f.name});
+            return;
+          }
+          const v = values[i] ? judgePattern(bars, i, patternFilters, delayContext) : null;
+          let late = lastSkip >= 0 && i > lastSkip ? delayedAfterSkip(bars, lastSkip, i, patternFilters, delayContext) : null;
+          if (!late?.allow && lastSkip >= 0 && i === lastSkip + 1) {
+            const prev = bars[lastSkip];
+            if (c.close >= c.open || c.close > prev.close || c.high > prev.high) {
+              late = {score: 70, allow: true, delayed: true, tag: '지연확인', reasons: ['건너뜀 다음 봉 확인']};
             }
+          }
+          if (late?.allow) {
+            lastSkip = -1;
+            markers.push({
+              time: c.time as UTCTimestamp,
+              position: 'belowBar',
+              shape: 'arrowUp',
+              color: f.color,
+              text: patternMarkerText('buy', late),
+            });
+          } else if (v && !v.allow) {
+            lastSkip = v.tag === '급등후횡보' ? -1 : i;
+            markers.push({
+              time: c.time as UTCTimestamp,
+              position: 'belowBar',
+              shape: 'arrowUp',
+              color: '#718395',
+              text: patternMarkerText('skip', v),
+            });
+          } else if (v?.allow) {
+            lastSkip = -1;
+            markers.push({
+              time: c.time as UTCTimestamp,
+              position: 'belowBar',
+              shape: 'arrowUp',
+              color: f.color,
+              text: patternMarkerText('buy', v),
+            });
           }
           if (exits[i]) markers.push({time: c.time as UTCTimestamp, position: 'aboveBar', shape: 'arrowDown', color: '#ed6b72', text: '매도'});
           else if (f.kind === 'system') {
