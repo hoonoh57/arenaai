@@ -273,10 +273,19 @@ async function followTopCharts(): Promise<void> {
     const result = await bridge.syncSubscriptions(bridgeCfg());
     ranking = result.ranking;
     updatedAt = Date.now();
+    const todayOpen = Math.floor(Date.parse(`${new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'})}T08:00:00+09:00`) / 1000);
     for (const code of fill) {
-      if (cache.candles(code).length) continue;
-      const local = loadLocalBars(code, '1');
-      if (local.length) cache.mergeCandles(code, local);
+      if (!cache.candles(code).length) {
+        const local = loadLocalBars(code, '1');
+        if (local.length) cache.mergeCandles(code, local);
+      }
+      const last = cache.lastCandleTime(code) ?? 0;
+      if (last >= todayOpen) continue;
+      try {
+        await bridge.refreshChart(code);
+      } catch {
+        /* 한 번만 오늘 봉을 채움. 실패해도 갭 신호는 품질검사에서 막음 */
+      }
     }
     if (config.tradeMode === 'auto') bridge.reevaluate(top);
   } catch (e) {
@@ -365,6 +374,16 @@ app.post('/api/chart', async (req, res) => {
       return [...map.values()].sort((a, b) => a.time - b.time);
     };
     let candles = mergeByTime(localBars, liveBars);
+    const todayOpen = Math.floor(Date.parse(`${new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'})}T08:00:00+09:00`) / 1000);
+    if (!nextKey && timeframe === '1' && (candles.at(-1)?.time ?? 0) < todayOpen) {
+      try {
+        const page = await api.chartPage({code, timeframe, baseDate, nextKey: undefined});
+        candles = mergeByTime(candles, page.candles);
+        if (page.candles.length) cache.mergeCandles(code, page.candles);
+      } catch {
+        /* 오늘 봉 1회 보충 실패 시 공백 신호는 차단 */
+      }
+    }
     if (candles.length && !nextKey) {
       if (req.body?.withStrength) {
         try {

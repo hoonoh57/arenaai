@@ -86,6 +86,7 @@ export class CandleRing {
       return 'update';
     }
     if (bucket > last.time) {
+      if (bucket - last.time > 180) return 'none';
       this.ring.push({time: bucket, open: price, high: price, low: price, close: price, ...(volume ? {volume} : {})});
       return 'new';
     }
