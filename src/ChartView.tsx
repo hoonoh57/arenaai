@@ -165,7 +165,7 @@ export function Chart({
           if (values[i] && exits[i]) return;
           if (values[i]) {
             if (f.kind === 'system') {
-              const v = judgePattern(bars, i, patternFilters);
+              const v = judgePattern(bars, i, patternFilters, delayContext);
               const late = !v.allow && lastSkip >= 0 && !delayedUsed ? delayedEntry(bars, i, (j) => Boolean(values[j]), patternFilters, delayContext) : null;
               const take = v.allow || Boolean(late?.allow);
               if (take) {

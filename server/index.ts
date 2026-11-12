@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import {Kiwoom} from './kiwoom';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
-import {delayedEntry, delayedExit, judgePattern} from '../shared/patternGate';
+import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patternGate';
 import {filterOn, normalizeFilterEnabled, normalizeSkip001N, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import {listLocalCodes, loadLocalBars} from './localBars';
 import {syncCybosOnStart} from './syncCybos';
@@ -224,6 +224,19 @@ function strategyFor(code: string) {
   return formulas.find((f) => f.enabled && f.kind === 'system') ?? null;
 }
 
+function delayContextNow(): DelayContext {
+  const sums = patternKpi.snapshot().summaries;
+  const skip = sums.find((s) => s.filterId === 'skip001') || sums.find((s) => s.filterId === 'delayed-buy');
+  const daily = loadLocalBars('001', 'D');
+  const indexRet = daily.length >= 2 ? (daily[daily.length - 1].close - daily[daily.length - 2].close) / daily[daily.length - 2].close : undefined;
+  return {
+    skip001N: config.skip001N,
+    skip001Score: skip?.ready ? skip.score : 50,
+    indexRet: Number.isFinite(indexRet) ? indexRet : undefined,
+    ma120Slope: maSlope(daily.map((c) => c.close)),
+  };
+}
+
 function currentEvaluator() {
   return (code: string, closed: Candle[]) => {
     if (!closed.length) return null;
@@ -237,16 +250,12 @@ function currentEvaluator() {
     const sellFlag = Boolean(exits.at(-1));
     const at = closed.length - 1;
     const filters = config.patternFilters;
-    const delay: DelayContext = (() => {
-      const sums = patternKpi.snapshot().summaries;
-      const skip = sums.find((s) => s.filterId === 'skip001') || sums.find((s) => s.filterId === 'delayed-buy');
-      return {skip001N: config.skip001N, skip001Score: skip?.ready ? skip.score : 50};
-    })();
+    const delay: DelayContext = delayContextNow();
     let buy = false;
     let score = 50;
     const tags: string[] = [];
     if (buyFlag) {
-      const v = judgePattern(closed, at, filters);
+      const v = judgePattern(closed, at, filters, delay);
       buy = v.allow;
       score = v.score;
       if (buy && v.tag === '횡보돌파') tags.push('base-boost');
@@ -416,6 +425,7 @@ app.get('/api/state', (_req, res) =>
     orderMode: hub.book.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed-fill',
     book: hub.book.snapshot(),
     patternKpi: patternKpi.snapshot(),
+    market: {indexRet: delayContextNow().indexRet, ma120Slope: delayContextNow().ma120Slope},
   }),
 );
 app.post('/api/chart', async (req, res) => {

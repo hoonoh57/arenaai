@@ -1,6 +1,8 @@
 import type {Candle} from '../server/core';
 import {filterOn, skip001Threshold, type DelayContext, type FilterEnabled} from './patternFilters';
 
+export type PatternMarket = {indexRet?: number; ma120Slope?: number};
+
 export type PatternVerdict = {
   score: number;
   allow: boolean;
@@ -42,6 +44,18 @@ function swings(bars: Candle[]): number {
   return n;
 }
 
+export function analysisWindow(candles: Candle[], at: number): Candle[] {
+  const session = sessionSlice(candles, at);
+  if (session.length >= 8) return session;
+  if (at < 0) return [];
+  for (let i = at; i >= 0; i--) {
+    const slice = candles.slice(i, at + 1);
+    if (slice.length >= 8 && rangePct(slice) >= 0.01) return slice;
+    if (slice.length >= 40) return slice;
+  }
+  return candles.slice(0, at + 1);
+}
+
 function rangePct(bars: Candle[]): number {
   if (!bars.length) return 0;
   const hi = Math.max(...bars.map((b) => b.high));
@@ -54,15 +68,29 @@ function rangePct(bars: Candle[]): number {
  * 사람 눈으로 보는 당일 경로: 급등 후 내리막 횡보는 금지,
  * 긴 횡보 뒤 강한 돌파는 가점. 지표 신호와 곱해 쓸 점수.
  */
-export function judgePattern(candles: Candle[], at = candles.length - 1, filters?: FilterEnabled): PatternVerdict {
-  const session = sessionSlice(candles, at);
+export function judgePattern(candles: Candle[], at = candles.length - 1, filters?: FilterEnabled, market?: PatternMarket): PatternVerdict {
+  const session = analysisWindow(candles, at);
   const reasons: string[] = [];
   let score = 50;
-  if (session.length < 8) {
-    return {score: 40, allow: false, tag: '표본부족', reasons: ['당일 봉이 적어 판정하지 않음']};
+  if (session.length < 3) {
+    return {score: 50, allow: true, tag: '대기', reasons: ['변동 구간을 아직 재는 중']};
   }
   const last = session[session.length - 1];
   const first = session[0];
+  const dayOpen = sessionSlice(candles, at)[0]?.open || first.open;
+  const prevClose = last.previousDay?.close;
+  const gap = prevClose ? pct(dayOpen, prevClose) : 0;
+  const vsOpen = pct(last.close, dayOpen);
+  const barRet = pct(last.close, last.open);
+  if ((vsOpen >= 0.085 && vsOpen <= 0.105) || (barRet >= 0.075 && barRet <= 0.11) || (gap >= 0.05 && vsOpen >= 0.06)) {
+    return {score: 15, allow: false, tag: 'VI근접', reasons: [vsOpen >= 0.085 ? 'VI 근접 과열' : '갭상승 과열']};
+  }
+  if (typeof market?.indexRet === 'number' && Math.abs(market.indexRet) >= 0.02) {
+    return {score: 18, allow: false, tag: '지수급변', reasons: [market.indexRet > 0 ? '지수 폭등' : '지수 폭락']};
+  }
+  if (typeof market?.ma120Slope === 'number' && market.ma120Slope <= 0) {
+    return {score: 22, allow: false, tag: '지수하락추세', reasons: ['지수 120이평 하락 기울기']};
+  }
   const peak = session.reduce((m, b) => (b.high > m.high ? b : m), first);
   const trough = session.reduce((m, b) => (b.low < m.low ? b : m), first);
   const run = pct(peak.high, first.open);
@@ -111,6 +139,20 @@ export function judgePattern(candles: Candle[], at = candles.length - 1, filters
   if (!reasons.length) reasons.push(allow ? '경로 중립·지표 대기' : '자리 확신 부족');
   const tag = tightBase && strongBounce ? '횡보돌파' : allow ? `신뢰${score}` : '보류';
   return {score, allow, tag, reasons};
+}
+
+export function maSlope(closes: number[], period = 120, look = 10): number | undefined {
+  if (closes.length < period + look) return undefined;
+  const sma: number[] = [];
+  for (let i = period - 1; i < closes.length; i++) {
+    let s = 0;
+    for (let j = i - period + 1; j <= i; j++) s += closes[j];
+    sma.push(s / period);
+  }
+  const a = sma[sma.length - look];
+  const b = sma[sma.length - 1];
+  if (!(a > 0)) return undefined;
+  return (b - a) / a / look;
 }
 
 function mean(xs: number[]): number {
@@ -190,7 +232,7 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
   let lastSkip = -1;
   for (let i = 0; i < at; i++) {
     if (!hadSignal(i)) continue;
-    const j = judgePattern(candles, i, filters);
+    const j = judgePattern(candles, i, filters, delay);
     if (j.tag === '급등후횡보') {
       lastSkip = -1;
       continue;
@@ -200,7 +242,7 @@ export function delayedEntry(candles: Candle[], at: number, hadSignal: (i: numbe
   }
   const nextBar = lastSkip >= 0 && at - lastSkip === 1;
   if (!nextBar) {
-    const now = judgePattern(candles, at, filters);
+    const now = judgePattern(candles, at, filters, delay);
     if (now.tag === '급등후횡보') return null;
   }
   if (lastSkip < 0 || at - lastSkip < 1 || at - lastSkip > 80) return null;

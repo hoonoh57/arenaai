@@ -67,6 +67,7 @@ type State = {
     fillMode?: 'assumed' | 'kiwoom-mock';
   };
   patternKpi?: {summaries: {filterId: string; n: number; avgPct: number; score: number; ready: boolean}[]};
+  market?: {indexRet?: number; ma120Slope?: number};
 };
 
 const fmt = (n: number) => new Intl.NumberFormat('ko-KR').format(n);
@@ -569,6 +570,8 @@ function Pane(props: {
         delayContext={{
           skip001N: state.config.skip001N ?? 1.2,
           skip001Score: state.patternKpi?.summaries.find((s) => s.filterId === 'skip001' || s.filterId === 'delayed-buy')?.score ?? 50,
+          indexRet: state.market?.indexRet,
+          ma120Slope: state.market?.ma120Slope,
         }}
       />
     );

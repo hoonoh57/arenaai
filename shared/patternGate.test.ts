@@ -13,6 +13,29 @@ function bars(n: number, closeAt: (i: number) => number): Candle[] {
   });
 }
 
+test('당일 봉이 짧으면 이전 구간을 거슬러 보고 표본부족으로 막지 않는다', () => {
+  const y = bars(20, () => 100).map((b) => ({...b, time: b.time - 86400}));
+  const today = bars(3, () => 101);
+  const c = [...y, ...today];
+  assert.notEqual(judgePattern(c, c.length - 1).tag, '표본부족');
+});
+
+test('시가 대비 1.09 부근이면 VI근접 건너뜀', () => {
+  const c = bars(20, (i) => 100 + i * 0.01);
+  c[0].open = 100;
+  const last = c[c.length - 1];
+  last.open = 100;
+  last.close = 109;
+  last.high = 109.2;
+  assert.equal(judgePattern(c).tag, 'VI근접');
+});
+
+test('지수 폭락·120이평 하락이면 건너뜀', () => {
+  const c = bars(20, () => 100);
+  assert.equal(judgePattern(c, 19, undefined, {indexRet: -0.03}).tag, '지수급변');
+  assert.equal(judgePattern(c, 19, undefined, {ma120Slope: -0.001}).tag, '지수하락추세');
+});
+
 test('당일은 08시 이후 봉만 본다', () => {
   const extra: Candle = {time: t0 + 7 * 3600, open: 1, high: 1, low: 1, close: 1};
   const s = bars(10, () => 100);

@@ -48,7 +48,7 @@ export function filterOn(enabled: FilterEnabled | undefined, id: PatternFilterId
   return PATTERN_FILTERS.find((f) => f.id === id)?.defaultOn ?? false;
 }
 
-export type DelayContext = {skip001N: number; skip001Score: number};
+export type DelayContext = {skip001N: number; skip001Score: number; indexRet?: number; ma120Slope?: number};
 
 export function defaultDelayContext(): DelayContext {
   return {skip001N: 1.2, skip001Score: 50};
