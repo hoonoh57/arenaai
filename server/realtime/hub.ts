@@ -21,6 +21,9 @@ import {AuditLog} from './audit';
 import {SharedCache} from './cache';
 import {classifyMessage, LimitGovernor, RealtimeCaps, type RealtimeLimits} from './limits';
 import {KeyedDedup, SignalDedup} from './ring';
+import {ChartGate} from './chartGate';
+import {HubOps} from './hubOps';
+import {planSubscriptions} from './plan';
 import {signalDataStatus} from '../data-quality';
 import {SimulationBook, type BookHooks, type MockOrderBroker} from './book';
 
@@ -39,6 +42,20 @@ export type WsFactory = (url: string) => WsLike;
 export type BrokerLike = {
   candles(code: string): Promise<Candle[]>;
   daily(code: string, baseDate: string): Promise<{date: string; open?: number; high?: number; low?: number; close?: number}[]>;
+  chartPage?: (input: {
+    code: string;
+    timeframe: string;
+    baseDate?: string;
+    nextKey?: string;
+    singlePage?: boolean;
+  }) => Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}>;
+  attachStrength?: (
+    code: string,
+    timeframe: string,
+    candles: Candle[],
+    nextKey?: string,
+  ) => Promise<{candles: Candle[]; hasMore: boolean; nextKey: string; ready: boolean; nxt: boolean}>;
+  stockName?: (code: string) => Promise<string>;
 };
 
 export type SignalEvaluator = (code: string, closed: Candle[]) => {buy: boolean; sell: boolean; score?: number; filters?: string[]} | null;
@@ -131,6 +148,8 @@ export class RealtimeHub {
   private readonly refreshTimers = new Map<string, any>();
   private readonly events: SimulatedEvent[] = [];
   readonly book: SimulationBook;
+  readonly ops: HubOps;
+  private readonly chartGate = new ChartGate();
   private loginWaiter: {resolve: () => void; reject: (error: Error) => void} | null = null;
   private watchdog: any = null;
   private reconnectTimer: any = null;
@@ -170,6 +189,7 @@ export class RealtimeHub {
     this.debounceMs = deps.candleRefreshDebounceMs ?? 2000;
     this.dedup = new KeyedDedup({ttlMs: 5000, max: 20000});
     this.signalDedup = new SignalDedup(deps.signalDedupSize ?? 20000);
+    this.ops = new HubOps(this.now);
     this.book = new SimulationBook({
       cache: this.cache,
       audit: this.audit,
@@ -223,6 +243,93 @@ export class RealtimeHub {
     this.activeCodes = new Set(codes);
   }
 
+  /** 창은 REST를 치지 않는다. 허브 게이트 한 장. */
+  async ensureChartPage(input: {
+    code: string;
+    timeframe: string;
+    baseDate?: string;
+    nextKey?: string;
+  }): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
+    return this.ops.run('ensureChartPage', async () => {
+      const broker = this.deps.broker;
+      if (!broker?.chartPage) throw new Error('차트 REST가 허브에 없습니다.');
+      const key = this.chartGate.key({
+        kind: 'chart',
+        code: input.code,
+        timeframe: input.timeframe,
+        baseDate: input.baseDate || '',
+        nextKey: input.nextKey || '',
+      });
+      const page = await this.chartGate.load(key, () =>
+        broker.chartPage!({
+          code: input.code,
+          timeframe: input.timeframe,
+          baseDate: input.baseDate,
+          nextKey: input.nextKey,
+          singlePage: true,
+        }),
+      );
+      if (page.candles.length) {
+        this.ops.runSync('putChartPage', () => {
+          this.cache.putChartPage(input.code, input.timeframe, input.baseDate || '', page.candles);
+        });
+      }
+      return page;
+    });
+  }
+
+  /** 체결강도 한 페이지. 연속 조회는 허브 큐만. */
+  async ensureStrengthPage(input: {
+    code: string;
+    timeframe: string;
+    baseDate?: string;
+    nextKey?: string;
+  }): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string; ready: boolean; nxt: boolean}> {
+    return this.ops.run('ensureStrengthPage', async () => {
+      const broker = this.deps.broker;
+      if (!broker?.attachStrength) throw new Error('체결강도 REST가 허브에 없습니다.');
+      const candles =
+        this.ops.runSync('chartPage', () => this.cache.chartPage(input.code, input.timeframe, input.baseDate || '')) || [];
+      const key = this.chartGate.key({kind: 'strength', code: input.code, timeframe: input.timeframe, next: input.nextKey || ''});
+      const attached = await this.chartGate.load(key, () =>
+        broker.attachStrength!(input.code, input.timeframe, candles, input.nextKey || undefined),
+      );
+      if (attached.candles.length) {
+        this.ops.runSync('putChartPage', () => {
+          this.cache.putChartPage(input.code, input.timeframe, input.baseDate || '', attached.candles);
+        });
+      }
+      return attached;
+    });
+  }
+
+  stockName(code: string): Promise<string> {
+    return this.deps.broker?.stockName ? this.deps.broker.stockName(code) : Promise.resolve(code);
+  }
+
+  clearChartMemo(): void {
+    this.chartGate.clear();
+  }
+
+  planWatch(input: {chartCodes: readonly string[]; captured: readonly string[]; selected?: readonly string[]; budget?: number}) {
+    return this.ops.runSync('planWatch', () =>
+      planSubscriptions({
+        selected: [...input.chartCodes, ...(input.selected || [])],
+        captured: input.captured,
+        maxSubscriptions: this.caps.limits.maxSubscriptions,
+        budget: input.budget ?? 40,
+      }),
+    );
+  }
+
+  bookSnapshot() {
+    return this.ops.runSync('bookSnapshot', () => this.book.snapshot());
+  }
+
+  quoteOf(code: string) {
+    return this.ops.runSync('getQuote', () => this.cache.getQuote(code));
+  }
+
   positionsSnapshot(): Record<string, number> {
     return Object.fromEntries(this.book.snapshot().holdings.map((row) => [row.code, row.qty]));
   }
@@ -232,6 +339,10 @@ export class RealtimeHub {
   }
 
   status(): HubStatus {
+    return this.ops.runSync('status', () => this.statusUnmetered());
+  }
+
+  private statusUnmetered(): HubStatus {
     const byType: Record<string, number> = {};
     for (const sub of this.subscriptions.values()) byType[sub.type] = (byType[sub.type] ?? 0) + 1;
     const now = this.now();
@@ -477,11 +588,17 @@ export class RealtimeHub {
           this.pushEvent({time: fill.fillAt ?? receivedAt, code: fill.code, side: fill.side === 'buy' ? '모의 매수 체결' : '모의 매도 체결', price: fill.fillPrice ?? quote.price});
         }
         if (quote.time !== null) {
-          const bar = this.cache.applyLiveQuote(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined);
-          this.cache.applyLiveTick(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined);
+          const bar = this.ops.runSync('applyLiveQuote', () =>
+            this.cache.applyLiveQuote(quote.code, quote.time!, quote.price, quote.tradeVolume ?? undefined),
+          );
+          this.ops.runSync('applyLiveTick', () =>
+            this.cache.applyLiveTick(quote.code, quote.time!, quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined),
+          );
           if (bar === 'new') this.evaluateSignals(quote.code);
         } else if (quote.price > 0) {
-          this.cache.applyLiveTick(quote.code, Math.floor(receivedAt / 1000), quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined);
+          this.ops.runSync('applyLiveTick', () =>
+            this.cache.applyLiveTick(quote.code, Math.floor(receivedAt / 1000), quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined),
+          );
         }
         continue;
       }
@@ -550,6 +667,10 @@ export class RealtimeHub {
    * 종목 신호. 닫힌 봉만. 화면이 가려져 있어도 시세가 오면 평가한다.
    */
   evaluateSignals(code: string): void {
+    this.ops.runSync('evaluateSignals', () => this.evaluateSignalsUnmetered(code));
+  }
+
+  private evaluateSignalsUnmetered(code: string): void {
     const evaluator = this.evaluator;
     if (!evaluator || !this.activeCodes.has(code)) return;
     const candles = this.cache.candles(code);
@@ -640,6 +761,10 @@ export class RealtimeHub {
 
   /** Register a demand (owner) for realtime types of the given items. Idempotent per owner. */
   async subscribe(owner: string, items: readonly string[], types: readonly string[]): Promise<void> {
+    return this.ops.run('subscribe', () => this.subscribeUnmetered(owner, items, types));
+  }
+
+  private async subscribeUnmetered(owner: string, items: readonly string[], types: readonly string[]): Promise<void> {
     if (typeof owner !== 'string' || !owner.trim()) throw new Error('구독 소유자 식별자가 필요합니다.');
     if (!items.length || !types.length) throw new Error('구독할 종목과 타입이 필요합니다.');
     await this.withSubscriptionLock(async () => {
@@ -688,6 +813,10 @@ export class RealtimeHub {
 
   /** Drop one owner's interest; the packet is sent only when nobody else needs it. */
   async unsubscribe(owner: string, items: readonly string[], types: readonly string[]): Promise<void> {
+    return this.ops.run('unsubscribe', () => this.unsubscribeUnmetered(owner, items, types));
+  }
+
+  private async unsubscribeUnmetered(owner: string, items: readonly string[], types: readonly string[]): Promise<void> {
     const toRemove: {item: string; type: string}[] = [];
     for (const type of types) {
       for (const item of items) {

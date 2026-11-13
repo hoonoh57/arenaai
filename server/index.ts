@@ -24,7 +24,7 @@ import {AuditLog} from './realtime/audit';
 import {appendAuditFile, loadAppConfig, readAuditFiles, saveAppConfig, listAuditDays, setTradeSession} from './appState';
 import {DemandBridge} from './realtime/bridge';
 import {SharedCache} from './realtime/cache';
-import {ChartGate} from './realtime/chartGate';
+
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
@@ -147,7 +147,7 @@ const bridge = new DemandBridge({
   maxSubscriptions: caps.limits.maxSubscriptions,
 });
 
-const chartGate = new ChartGate();
+
 const REFRESH_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
 type AppConfig = {
   condition: string;
@@ -465,6 +465,9 @@ app.get('/api/state', (_req, res) =>
     market: {indexRet: delayContextNow().indexRet, ma120Slope: delayContextNow().ma120Slope},
   }),
 );
+app.get('/api/hub/ops', (_req, res) => {
+  res.json(hub.ops.report());
+});
 app.post('/api/host', async (req, res) => {
   try {
     const next = req.body?.mode;
@@ -474,7 +477,7 @@ app.post('/api/host', async (req, res) => {
     hub.setWsUrl(wsUrl(next));
     hub.book.setAllowBroker(next === 'mock');
     hub.book.setFillMode(next === 'mock' ? 'kiwoom-mock' : 'assumed');
-    chartGate.clear();
+    hub.clearChartMemo();
     await api.accessToken(true);
     hub.forceReconnect('호스트 전환');
     audit.record('state', next === 'mock' ? '모의계좌 호스트로 인증했습니다.' : '실계좌 호스트로 인증했습니다.', {mode: next});
@@ -495,10 +498,8 @@ app.post('/api/chart', async (req, res) => {
     let candles: Candle[] = [];
     let page = {candles: [] as Candle[], hasMore: false, nextKey: ''};
     if (!strengthOnly) {
-      const pageKey = chartGate.key({kind: 'chart', code, timeframe, baseDate, nextKey});
-      page = await chartGate.load(pageKey, () => api.chartPage({code, timeframe, baseDate, nextKey: nextKey || undefined, singlePage: true}));
+      page = await hub.ensureChartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
       candles = page.candles;
-      if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
     } else {
       candles = cache.chartPage(code, timeframe, baseDate);
     }
@@ -508,10 +509,8 @@ app.post('/api/chart', async (req, res) => {
     let strengthNxt = false;
     if (withStrength) {
       try {
-        const sKey = chartGate.key({kind: 'strength', code, timeframe, next: strengthNextKey});
-        const attached = await chartGate.load(sKey, () => api.attachStrength(code, timeframe, candles, strengthNextKey || undefined));
+        const attached = await hub.ensureStrengthPage({code, timeframe, baseDate, nextKey: strengthNextKey || undefined});
         candles = attached.candles;
-        if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
         strengthHasMore = attached.hasMore;
         strengthKey = attached.nextKey;
         strengthReady = attached.ready;
@@ -521,7 +520,7 @@ app.post('/api/chart', async (req, res) => {
       }
     }
     const listed = ranking.find((s) => s.code === code);
-    const fetched = await api.stockName(code).catch(() => '');
+    const fetched = await hub.stockName(code).catch(() => '');
     const name = fetched && fetched !== code ? fetched : listed?.name && listed.name !== code ? listed.name : fetched || listed?.name || code;
     res.json({
       code,
