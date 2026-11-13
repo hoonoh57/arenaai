@@ -626,9 +626,23 @@ app.get('/api/live-bars', (req, res) => {
   const baseDate = typeof req.query.baseDate === 'string' ? req.query.baseDate : '';
   if (!/^\d{6}$/.test(code)) return res.status(400).json({error: '종목코드'});
   const hub = bridge.status().hub;
+  const quote = cache.getQuote(code) || null;
+  let candles = cache.chartPage(code, timeframe, baseDate);
+  if (quote && quote.price > 0 && candles.length) {
+    const last = candles[candles.length - 1];
+    if (last.close !== quote.price) {
+      candles = candles.slice();
+      candles[candles.length - 1] = {
+        ...last,
+        close: quote.price,
+        high: Math.max(last.high, quote.price),
+        low: last.low > 0 ? Math.min(last.low, quote.price) : quote.price,
+      };
+    }
+  }
   res.json({
-    candles: cache.chartPage(code, timeframe, baseDate),
-    quote: cache.getQuote(code) || null,
+    candles,
+    quote,
     wss: {link: hub.link, silentMs: hub.silentMs, emergency: hub.emergency, state: hub.state},
   });
 });

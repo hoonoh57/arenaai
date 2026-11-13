@@ -154,7 +154,9 @@ export function Chart({
     .map((f) => `${f.id}:${f.name}:${f.expression}:${JSON.stringify(f.variables || {})}:${f.pane || ''}:${f.paneShare || ''}:${paneById?.[f.id] ?? ''}`)
     .join('|');
   const filterSig = patternFilters ? Object.keys(patternFilters).filter((k) => patternFilters[k]).join(',') : '';
-  const dataSig = data.length ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].time}` : '0';
+  const dataSig = data.length
+    ? `${data.length}:${data[0].time}:${data[data.length - 1].close}:${data[data.length - 1].high}:${data[data.length - 1].time}`
+    : '0';
   const overlaySig = overlay?.length ? `${overlay.length}:${overlay[0].time}` : '0';
   const height = Math.max(120, chartHeight);
 
@@ -285,10 +287,18 @@ export function Chart({
         skipSync.current = false;
       }, 400);
     }
-    const prepend = meta.current.first !== 0 && bars[0].time < meta.current.first;
-    const added = prepend ? Math.max(0, bars.length - meta.current.len) : 0;
+    const oldLen = meta.current.len;
+    const oldFirst = meta.current.first;
+    const prepend = oldFirst !== 0 && bars[0].time < oldFirst;
+    const added = prepend ? Math.max(0, bars.length - oldLen) : 0;
     if (rangeRef.current && added) {
       rangeRef.current = {from: (rangeRef.current.from as number) + added, to: (rangeRef.current.to as number) + added} as LogicalRange;
+    } else if (rangeRef.current && oldLen > 0 && bars.length !== oldLen) {
+      const to = Number(rangeRef.current.to);
+      if (to >= oldLen - 3) {
+        const vis = Math.max(20, to - Number(rangeRef.current.from));
+        rangeRef.current = {from: bars.length - vis, to: bars.length - 1} as LogicalRange;
+      }
     }
     meta.current = {len: bars.length, first: bars[0].time};
     for (const extra of extras.current) {
