@@ -244,3 +244,15 @@
 .hub-lab-bars table{width:100%;border-collapse:collapse;font-size:10px}
 .hub-lab-bars th,.hub-lab-bars td{border-bottom:1px solid #1e2b35;padding:3px 4px;text-align:right}
 .hub-lab-bars th:first-child,.hub-lab-bars td:first-child{text-align:left}
+.hub-spec{padding:10px 12px;color:#c5d4cc;font-size:11px;height:100%;overflow:auto}
+.hub-spec h3{margin:0 0 8px;font-size:13px;color:#d4f0a8}
+.hub-spec-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:8px}
+.hub-spec-kpis article{background:#102018;border:1px solid #3d5a48;padding:8px;border-radius:4px}
+.hub-spec-kpis b{display:block;color:#9fdf88;margin-bottom:4px}
+.hub-spec-kpis small{display:block;color:#7e918b;margin-top:4px}
+.hub-spec-note{color:#8fa79a;line-height:1.45}
+.hub-spec-api{margin-top:14px;border-top:1px solid #2a3d32;padding-top:10px}
+.hub-spec-api table{width:100%;border-collapse:collapse}
+.hub-spec-api th,.hub-spec-api td{border-bottom:1px solid #1e2b35;padding:6px 4px;vertical-align:top;text-align:left}
+.hub-spec-api code{color:#c2ef92}
+.hub-spec-sub{color:#7e918b;font-size:10px;margin-top:2px}
