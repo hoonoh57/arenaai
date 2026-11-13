@@ -201,6 +201,11 @@
 .work-overlay.err b{background:#2a1818;border-color:#8e555b;color:#ffd6d6}
 .hub-lab{padding:10px 12px;font-size:11px;color:#c5d4cc;height:100%;overflow:auto}
 .hub-lab-lead{color:#8fa79a;margin:0 0 10px;line-height:1.45}
+.hub-lab-presets{display:flex;gap:6px;margin-bottom:8px}
+.hub-lab-params{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px 10px;margin-bottom:10px}
+.hub-lab-params label{display:flex;flex-direction:column;gap:3px;color:#9db0a4;font-size:10px}
+.hub-lab-params input{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:5px 6px;border-radius:4px}
+.hub-lab-params small{color:#627783}
 .hub-lab-tools{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .hub-lab-tools select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:6px 8px;border-radius:4px}
 .hub-lab-err{color:#ed6b72;margin-bottom:8px}

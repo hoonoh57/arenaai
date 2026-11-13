@@ -27,6 +27,7 @@ import {SharedCache} from './realtime/cache';
 
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {isOfficialHubOp, loadReports, runHubLab, LAB_CASES} from './realtime/hubLab';
+import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS} from '../shared/hubLabParams';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
 import {PatternKpiStore} from './realtime/patternKpi';
@@ -470,7 +471,13 @@ app.get('/api/hub/ops', (_req, res) => {
   res.json({...hub.ops.report(), official: LAB_CASES.map((c) => c.id)});
 });
 app.get('/api/hub/lab', (_req, res) => {
-  res.json({cases: LAB_CASES, reports: loadReports()});
+  res.json({
+    cases: LAB_CASES,
+    reports: loadReports(),
+    params: LAB_PARAM_DEFAULT,
+    fields: LAB_PARAM_FIELDS,
+    presets: LAB_PARAM_PRESETS,
+  });
 });
 app.post('/api/hub/lab', async (req, res) => {
   try {
@@ -480,8 +487,7 @@ app.post('/api/hub/lab', async (req, res) => {
       res.status(400).json({error: `정식 등록되지 않은 기능은 측정·사용할 수 없습니다: ${scope}`});
       return;
     }
-    const report = await runHubLab(hub, scope);
-    res.json(report);
+    const report = await runHubLab(hub, scope, req.body?.params);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '테스트랩 실행 실패'});
   }
