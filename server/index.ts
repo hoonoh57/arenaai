@@ -1068,6 +1068,13 @@ app.post('/api/charts', async (req, res) => {
       hub.setActiveCodes(chartCodes);
     }
     const added = chartCodes.filter((code) => !previous.includes(code));
+    const removed = previous.filter((code) => !chartCodes.includes(code));
+    audit.record('state', '허브가 멀티차트 종목을 배분했습니다.', {
+      added,
+      removed,
+      n: chartCodes.length,
+      slots: config.tradeSlots ?? 4,
+    });
     res.json({ok: true, config, ranking});
     void (async () => {
       for (const code of added) {

@@ -265,8 +265,9 @@ export function DeskApp() {
   };
   const toggleChart = async (code: string) => {
     const on = chartCodes.includes(code);
-    if (!on && chartCodes.length >= MULTI_CHART_MAX) {
-      setNotice(`멀티차트는 최대 ${MULTI_CHART_MAX}종목입니다.`);
+    const cap = Math.min(MULTI_CHART_MAX, draft?.tradeSlots ?? state.config.tradeSlots ?? 4);
+    if (!on && chartCodes.length >= cap) {
+      setNotice(`동시 매매 차트 ${cap}개까지. 설정창에서 늘리세요.`);
       return;
     }
     try {
@@ -828,6 +829,19 @@ function Pane(props: {
   if (win.kind === 'logs') return <LogsPane />;
   if (win.kind === 'hub-lab') return <HubLabPane />;
   if (win.kind === 'hub-spec') return <HubSpecPane />;
+  if (win.kind === 'trade-dash') return <TradeDashPane state={state} />;
+  if (win.kind === 'trade-setup') {
+    return (
+      <TradeSetupPane
+        state={state}
+        draft={draft}
+        setDraft={props.setDraft}
+        systems={props.systems}
+        update={props.update}
+        onDesign={() => props.setShowFormulas(true)}
+      />
+    );
+  }
   return (
     <div className="activity">
       {state.events.length ? (
@@ -1307,7 +1321,7 @@ function ScannerPane(props: {
             <input
               type="checkbox"
               checked={chartCodes.includes(s.code)}
-              disabled={!chartCodes.includes(s.code) && chartCodes.length >= MULTI_CHART_MAX}
+              disabled={!chartCodes.includes(s.code) && chartCodes.length >= Math.min(MULTI_CHART_MAX, state.config.tradeSlots ?? 4)}
               onClick={(e) => e.stopPropagation()}
               onChange={() => void props.toggleChart(s.code)}
             />
@@ -1671,6 +1685,140 @@ function SystemTradePanel({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TradeDashPane({state}: {state: State}) {
+  const book = state.book;
+  const holdings = book?.holdings || [];
+  let evalAmt = 0;
+  let cost = 0;
+  for (const h of holdings) {
+    const live = state.ranking.find((s) => s.code === h.code);
+    const px = live?.price || h.avgPrice;
+    evalAmt += px * h.qty;
+    cost += h.avgPrice * h.qty;
+  }
+  const unreal = cost > 0 ? ((evalAmt - cost) / cost) * 100 : 0;
+  const filled = (book?.recent || []).filter((o: {status?: string; side?: string; fillPrice?: number | null; qty?: number}) => o.status === 'filled');
+  return (
+    <div className="trade-dash">
+      <div className="hub-spec-kpis">
+        <article>
+          <b>보유</b>
+          <span>{holdings.length}종목</span>
+          <small>평가 {evalAmt ? evalAmt.toFixed(0) : 0}</small>
+        </article>
+        <article>
+          <b>평가손익</b>
+          <span className={unreal >= 0 ? 'positive' : 'negative'}>{unreal >= 0 ? '+' : ''}{unreal.toFixed(2)}%</span>
+          <small>원가 {cost.toFixed(0)}</small>
+        </article>
+        <article>
+          <b>당일체결</b>
+          <span>{filled.length}건</span>
+          <small>{book?.fillMode || '-'}</small>
+        </article>
+        <article>
+          <b>미체결</b>
+          <span>{book?.working?.length ?? 0}건</span>
+          <small>허브 장부 실시간</small>
+        </article>
+      </div>
+    </div>
+  );
+}
+
+function TradeSetupPane({
+  state,
+  draft,
+  setDraft,
+  systems,
+  update,
+  onDesign,
+}: {
+  state: State;
+  draft: Config;
+  setDraft: React.Dispatch<React.SetStateAction<Config | null>>;
+  systems: Formula[];
+  update: (patch?: Partial<Config>) => Promise<void>;
+  onDesign: () => void;
+}) {
+  const [host, setHost] = useState(state.book?.fillMode === 'kiwoom-mock' ? 'mock' : 'virtual');
+  return (
+    <div className="scanner-pane">
+      <p className="panel-desc">상위 N · 동시 차트 수 · 모의주문. 월요일부터 키움 모의 체결.</p>
+      <label>
+        조건검색식
+        <select value={draft.condition} onChange={(e) => setDraft({...draft, condition: e.target.value})}>
+          <option value="">선택</option>
+          {state.conditions.map((c) => (
+            <option key={c.seq} value={c.seq}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        상위 N종목 {draft.count}
+        <input type="range" min={1} max={16} value={draft.count} onChange={(e) => setDraft({...draft, count: Number(e.target.value)})} />
+      </label>
+      <label>
+        동시 매매 차트 {draft.tradeSlots ?? 4}
+        <input type="range" min={1} max={8} value={draft.tradeSlots ?? 4} onChange={(e) => setDraft({...draft, tradeSlots: Number(e.target.value)})} />
+      </label>
+      <label>
+        시스템 수식
+        <select value={draft.strategyId || ''} onChange={(e) => setDraft({...draft, strategyId: e.target.value})}>
+          <option value="">선택</option>
+          {systems.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" className="hts-tool" onClick={onDesign}>
+        수식 관리자
+      </button>
+      <label>
+        주문
+        <select value={host} onChange={(e) => setHost(e.target.value)}>
+          <option value="virtual">가정 체결</option>
+          <option value="mock">키움 모의계좌</option>
+        </select>
+      </label>
+      <label>
+        방식
+        <select value={draft.tradeMode || 'auto'} onChange={(e) => setDraft({...draft, tradeMode: e.target.value as 'auto' | 'semi'})}>
+          <option value="auto">자동</option>
+          <option value="semi">반자동</option>
+        </select>
+      </label>
+      <label>
+        1회 수량
+        <input type="number" min={1} max={100} value={draft.orderQty ?? 1} onChange={(e) => setDraft({...draft, orderQty: Number(e.target.value)})} />
+      </label>
+      <button
+        className="start"
+        onClick={() =>
+          void update({
+            condition: draft.condition,
+            count: draft.count,
+            strategyId: draft.strategyId,
+            tradeMode: draft.tradeMode || 'auto',
+            tradeSlots: draft.tradeSlots ?? 4,
+            orderQty: draft.orderQty ?? 1,
+            autoTopCharts: draft.autoTopCharts !== false,
+            running: true,
+            weights: draft.weights,
+            refreshMs: draft.refreshMs || 60000,
+          }).then(() => post('/api/book/mode', {mode: host === 'mock' ? 'kiwoom-mock' : 'assumed'}))
+        }
+      >
+        적용 · 허브가 상위 N을 차트에 배분
+      </button>
     </div>
   );
 }

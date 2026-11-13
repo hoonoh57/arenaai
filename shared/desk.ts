@@ -7,7 +7,7 @@ export const DESK_MIN = 1;
 export const DESK_MAX = 8;
 /** 멀티차트 칸 수. 3×n 등 분할과 무관하게 한 화면에 16종목까지. */
 export const MULTI_CHART_MAX = 16;
-export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book', 'logs', 'hub-lab', 'hub-spec'] as const;
+export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book', 'logs', 'hub-lab', 'hub-spec', 'trade-setup', 'trade-dash'] as const;
 export const GLOBAL_LOG_ID = 'win-global-logs';
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
@@ -90,6 +90,8 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   logs: '전역 로그',
   'hub-lab': '중앙관리자 테스트랩',
   'hub-spec': '중앙관리자 스펙',
+  'trade-setup': '자동매매 설정',
+  'trade-dash': '매매 대시보드',
 };
 
 const CODE = /^\d{6}$/;
@@ -113,6 +115,44 @@ export function mockTradeDesk(): VirtualDesk {
   };
 }
 
+export function liveTradeDesk(): VirtualDesk {
+  return {
+    id: 'desk-5-live',
+    number: 5,
+    name: '실전매매',
+    vars: emptyVars(),
+    windows: [
+      {id: 'win-live-scan', kind: 'scanner', title: '실시간 조건검색', x: 8, y: 8, w: 340, h: 500, z: 1, state: 'normal', locked: false},
+      {id: 'win-live-dash', kind: 'trade-dash', title: '매매 대시보드', x: 356, y: 8, w: 520, h: 168, z: 2, state: 'normal', locked: false},
+      {id: 'win-live-setup', kind: 'trade-setup', title: '자동매매 설정', x: 1164, y: 8, w: 320, h: 500, z: 3, state: 'normal', locked: false},
+      {id: 'win-live-multi', kind: 'multi-chart', title: '멀티차트', x: 356, y: 184, w: 800, h: 324, z: 4, state: 'normal', locked: false, gridCols: 2, timeframe: '1', syncCharts: true},
+      {id: 'win-live-book', kind: 'book', title: '보유·미체결', x: 8, y: 516, w: 640, h: 220, z: 5, state: 'normal', locked: false},
+      {id: GLOBAL_LOG_ID, kind: 'logs', title: '시스템·매매 로그', x: 656, y: 516, w: 828, h: 220, z: 6, state: 'normal', locked: false},
+    ],
+  };
+}
+
+export function ensureLiveTradeWorkspace(workspace: DeskWorkspace): DeskWorkspace {
+  let desks = [...workspace.desks];
+  const have = new Set(desks.map((d) => d.number));
+  for (let n = DESK_MIN; n <= 5; n++) {
+    if (!have.has(n) && desks.length < DESK_MAX) {
+      desks.push({id: `desk-${n}`, number: n, name: n === 5 ? '실전매매' : `가상화면 ${n}`, vars: emptyVars(), windows: []});
+    }
+  }
+  const idx = desks.findIndex((d) => d.number === 5);
+  const layout = liveTradeDesk();
+  if (idx < 0) {
+    if (desks.length < DESK_MAX) desks.push(layout);
+  } else {
+    const kinds = new Set(desks[idx].windows.map((w) => w.kind));
+    if (!kinds.has('scanner') || !kinds.has('multi-chart') || !kinds.has('trade-setup')) {
+      desks[idx] = {...layout, id: desks[idx].id, vars: desks[idx].vars};
+    }
+  }
+  return {active: workspace.active || 5, desks: desks.sort((a, b) => a.number - b.number)};
+}
+
 export function ensureMockTradeWorkspace(workspace: DeskWorkspace): DeskWorkspace {
   const desks = [...workspace.desks];
   const idx = desks.findIndex((d) => d.number === 3);
@@ -127,13 +167,15 @@ export function ensureMockTradeWorkspace(workspace: DeskWorkspace): DeskWorkspac
 }
 
 export function defaultWorkspace(): DeskWorkspace {
-  return ensureMockTradeWorkspace({
-    active: 3,
-    desks: [
-      {id: 'desk-1', number: 1, name: '가상화면 1', vars: emptyVars(), windows: []},
-      mockTradeDesk(),
-    ],
-  });
+  return ensureLiveTradeWorkspace(
+    ensureMockTradeWorkspace({
+      active: 5,
+      desks: [
+        {id: 'desk-1', number: 1, name: '가상화면 1', vars: emptyVars(), windows: []},
+        mockTradeDesk(),
+      ],
+    }),
+  );
 }
 
 export function nextDeskNumber(desks: readonly VirtualDesk[]): number | null {

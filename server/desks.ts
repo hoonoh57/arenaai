@@ -1,12 +1,12 @@
 import {mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
-import {defaultWorkspace, ensureMockTradeWorkspace, validateWorkspace, type DeskWorkspace} from '../shared/desk';
+import {defaultWorkspace, ensureLiveTradeWorkspace, ensureMockTradeWorkspace, validateWorkspace, type DeskWorkspace} from '../shared/desk';
 
 const path = process.env.DESKS_PATH || 'data/desks.json';
 
 export function loadDesks(): DeskWorkspace {
   try {
-    const loaded = ensureMockTradeWorkspace(validateWorkspace(JSON.parse(readFileSync(path, 'utf8'))));
+    const loaded = ensureLiveTradeWorkspace(ensureMockTradeWorkspace(validateWorkspace(JSON.parse(readFileSync(path, 'utf8')))));
     return loaded;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaultWorkspace();
