@@ -640,8 +640,9 @@ function Pane(props: {
         rankingName={state.ranking.find((s) => s.code === code)?.name}
         cached={
           state.candles[`${code}|${win.timeframe || '1'}|${win.baseDate || ''}`] ||
-          state.candles[code] ||
-          []
+          ((win.timeframe || '1') === '1' || String(win.timeframe || '1').match(/^[0-9]+$/)
+            ? state.candles[code] || []
+            : [])
         }
         grid={props.grid}
         logScale={props.logScale}

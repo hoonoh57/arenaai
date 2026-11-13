@@ -382,12 +382,20 @@ export class Kiwoom {
     const extra = input.nextKey ? {contYn: 'Y', nextKey: input.nextKey} : {};
     if (input.timeframe === 'D' || input.timeframe === 'W' || input.timeframe === 'M') {
       const apiId = input.timeframe === 'D' ? 'ka10081' : input.timeframe === 'W' ? 'ka10082' : 'ka10083';
-      const table = input.timeframe === 'D' ? 'stk_dt_pole_chart_qry' : input.timeframe === 'W' ? 'stk_stk_pole_chart_qry' : 'stk_mth_pole_chart_qry';
+      const tables =
+        input.timeframe === 'D'
+          ? ['stk_dt_pole_chart_qry']
+          : input.timeframe === 'W'
+            ? ['stk_wk_pole_chart_qry', 'stk_stk_pole_chart_qry', 'stk_week_pole_chart_qry']
+            : ['stk_mth_pole_chart_qry', 'stk_mon_pole_chart_qry'];
       const base = (input.baseDate || '').replace(/-/g, '');
       const body: Record<string, string> = {stk_cd: input.code, upd_stkpc_tp: '1'};
       if (/^\d{8}$/.test(base)) body.base_dt = base;
       const d = await this.rest('/api/dostk/chart', apiId, body, extra);
-      const candles = dailyToCandles(parseDailyRows(d[table]));
+      const rows =
+        tables.map((t) => d[t]).find((x) => Array.isArray(x) && x.length) ||
+        Object.values(d).find((x) => Array.isArray(x) && x.length && typeof x[0] === 'object');
+      const candles = dailyToCandles(parseDailyRows(rows || []));
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
     const pullMore = async (candles: Candle[], hasMore: boolean, nextKey: string, load: (ex: {contYn?: string; nextKey?: string}) => Promise<Candle[]>): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> => {

@@ -213,8 +213,12 @@ export function ChartPane({
     if (!/^\d{6}$/.test(code)) return;
     setOverlay([]);
     setNextKey('');
-    setBars(cached.length ? cached : []);
-    if (cached.length) return;
+    const period = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
+    if (!period && cached.length) {
+      setBars(cached);
+      return;
+    }
+    setBars([]);
     void load({code, force: true});
   }, [code, timeframe, baseDate]);
 
@@ -231,6 +235,15 @@ export function ChartPane({
         if (px > 0) setLivePx(px);
         setBars((prev) => {
           const str = Number(d.quote?.strength);
+          const period = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
+          if (period) {
+            if (!(px > 0) || !prev.length) return prev;
+            const last = prev[prev.length - 1];
+            if (last.close === px) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = {...last, close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px};
+            return next;
+          }
           if (Array.isArray(d.candles) && d.candles.length) {
             const kept = new Map(prev.map((c) => [c.time, c]));
             const next = (d.candles as Candle[]).map((c) => {
@@ -302,6 +315,7 @@ export function ChartPane({
       .then((r) => r.json())
       .then((d) => {
         if (!Array.isArray(d.candles) || !d.candles.length) return;
+        if (timeframe === 'D' || timeframe === 'W' || timeframe === 'M') return;
         const hubLast = d.candles[d.candles.length - 1] as Candle;
         setBars((prev) => {
           const mine = prev[prev.length - 1];
