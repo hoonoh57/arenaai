@@ -201,7 +201,26 @@ export class SharedCache {
         changed = true;
         continue;
       }
-      bars[bars.length - 1] = bump(last);
+      const step =
+        tf === '1' || tf === '3' || tf === '5' || tf === '10' || tf === '15' || tf === '30' || tf === '45' || tf === '60'
+          ? Number(tf) * 60
+          : 0;
+      if (step > 0) {
+        const bucket = Math.floor(t / step) * step;
+        if (bucket > last.time) {
+          let cursor = last.time + step;
+          while (cursor < bucket) {
+            bars.push({time: cursor, open: last.close, high: last.close, low: last.close, close: last.close});
+            cursor += step;
+          }
+          bars.push({time: bucket, open: price, high: price, low: price, close: price});
+          if (bars.length > 4000) bars.splice(0, bars.length - 3500);
+        } else {
+          bars[bars.length - 1] = bump(last);
+        }
+      } else {
+        bars[bars.length - 1] = bump(last);
+      }
       changed = true;
     }
     if (changed) {

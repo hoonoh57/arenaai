@@ -451,6 +451,7 @@ export function DeskApp() {
                     systems={systems}
                     patchWin={(id, patch) => updateDesk(patchWindow(deskOf(id), id, patch))}
                     onCommonCode={applyCode}
+                    active={d.number === desk.number}
                   />
                 </ChildFrame>
               ))}
@@ -609,6 +610,7 @@ function Pane(props: {
   systems: Formula[];
   patchWin: (id: string, patch: Partial<ChildWindow>) => void;
   onCommonCode: (code: string) => void;
+  active?: boolean;
 }) {
   const {win, state, draft, selected, chartCodes} = props;
   const code = win.locked ? win.code || '' : props.desk.vars.code || win.code || '';
@@ -644,6 +646,7 @@ function Pane(props: {
         onReload={props.load}
         onCommonCode={props.onCommonCode}
         wssLink={state.realtime?.hub.link}
+        active={props.active !== false}
         patternFilters={state.config.patternFilters}
         delayContext={{
           skip001N: state.config.skip001N ?? 1.2,

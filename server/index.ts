@@ -629,6 +629,18 @@ app.get('/api/live-bars', (req, res) => {
   const st = bridge.status().hub;
   const quote = cache.getQuote(code) || null;
   let candles = cache.chartPage(code, timeframe, baseDate);
+  if (timeframe === '1') {
+    const ring = cache.candles(code);
+    if (ring.length && (!candles.length || (ring[ring.length - 1].time > (candles.at(-1)?.time || 0)))) {
+      const byTime = new Map(candles.map((c) => [c.time, c]));
+      for (const c of ring) {
+        const had = byTime.get(c.time);
+        byTime.set(c.time, had ? {...had, close: c.close, high: Math.max(had.high, c.high), low: had.low > 0 ? Math.min(had.low, c.low) : c.low} : c);
+      }
+      candles = [...byTime.values()].sort((a, b) => a.time - b.time);
+      if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
+    }
+  }
   if (quote && quote.price > 0 && candles.length) {
     const last = candles[candles.length - 1];
     if (last.close !== quote.price) {

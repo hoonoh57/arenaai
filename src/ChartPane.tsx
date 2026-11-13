@@ -72,6 +72,7 @@ export function ChartPane({
   patternFilters,
   delayContext,
   wssLink,
+  active = true,
 }: {
   win: ChildWindow;
   desk: VirtualDesk;
@@ -87,6 +88,7 @@ export function ChartPane({
   patternFilters?: import('../shared/patternFilters').FilterEnabled;
   delayContext?: import('../shared/patternFilters').DelayContext;
   wssLink?: 'ok' | 'warn' | 'dead';
+  active?: boolean;
 }) {
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
@@ -237,6 +239,22 @@ export function ChartPane({
       window.clearInterval(id);
     };
   }, [code, timeframe, baseDate]);
+
+  useEffect(() => {
+    if (!active || !/^\d{6}$/.test(code)) return;
+    void fetch(`/api/live-bars?${new URLSearchParams({code, timeframe, baseDate})}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!Array.isArray(d.candles) || !d.candles.length) return;
+        const hubLast = d.candles[d.candles.length - 1] as Candle;
+        setBars((prev) => {
+          const mine = prev[prev.length - 1];
+          if (mine && hubLast.time === mine.time && hubLast.close === mine.close && d.candles.length <= prev.length) return prev;
+          return d.candles as Candle[];
+        });
+      })
+      .catch(() => {});
+  }, [active, code, timeframe, baseDate]);
 
 
   const commitCode = (value: string) => {
