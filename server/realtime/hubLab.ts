@@ -234,14 +234,21 @@ async function runOne(
         const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
         const name = await live.stockName(c).catch(() => c);
         const span = barSpan(s.candles);
-        markUnit(c, s.ready && (span.bars || 0) > 0, Date.now() - t, {name, ...span, simulated: false});
+        const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
       } catch {
         markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
       }
     });
     const units = endUnits();
-    const fail = units.filter((u) => !u.ok).length;
-    return {detail: `강도 ${units.length - fail}/${units.length}`, constraints: fail, units};
+    const held = units.filter((u) => u.held).length;
+    const got = units.filter((u) => u.ok && !u.held && (u.bars || 0) > 0).length;
+    const miss = units.filter((u) => !u.ok && !u.held).length;
+    return {
+      detail: `강도 실측 ${got} · 총량보류 ${held} · 실패 ${miss} · 세션 전체 준비 여부와 무관하게 받은 봉이면 통과`,
+      constraints: miss,
+      units,
+    };
   }
   if (id === 'putChartPage' || id === 'chartPage') {
     beginUnits(id, '종목', list.length, 1, '허브 캐시');
