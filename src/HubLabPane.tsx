@@ -222,11 +222,10 @@ export function HubLabPane() {
           expected,
           log,
         });
-        const report = await j<LabReport>(
-          '/api/hub/lab',
-          {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})},
-          bodyParams.deadlineMs + Math.ceil(bodyParams.codes / Math.max(1, bodyParams.chartConcurrency)) * 4000 + 8000,
-        );
+        const report = await j<LabReport>('/api/hub/lab', {
+          method: 'POST',
+          body: JSON.stringify({id: c.id, params: bodyParams}),
+        });
         const row = report.results[0];
         const per = row?.perTargetMs ?? bodyParams.deadlineMs;
         if (row?.units?.length) {
