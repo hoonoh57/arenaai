@@ -6,7 +6,19 @@ type LabReport = {
   at: number;
   scope: string;
   params?: LabParams;
-  results: {id: string; title: string; group: string; ms: number; targetMs: number; ok: boolean; pass: boolean; detail: string; constraints: number}[];
+  results: {
+    id: string;
+    title: string;
+    group: string;
+    ms: number;
+    targetMs: number;
+    ok: boolean;
+    pass: boolean;
+    detail: string;
+    constraints: number;
+    units?: {code: string; ms: number; ok: boolean; bars?: number}[];
+    perTargetMs?: number;
+  }[];
   bottlenecks: string[];
   missingOfficial?: string[];
 };
@@ -52,7 +64,7 @@ type Overlay = {
   elapsed?: number;
   eta?: number;
   expected?: number;
-  log?: {title: string; ms: number; pass: boolean; detail: string}[];
+  log?: {title: string; ms: number; pass: boolean; detail: string; targetMs?: number}[];
 };
 
 type UnitLive = {
@@ -197,17 +209,38 @@ export function HubLabPane() {
           bodyParams.deadlineMs + 3000,
         );
         const row = report.results[0];
-        log.push({
-          title: c.title,
-          ms: row?.ms ?? Date.now() - caseStarted.current,
-          pass: row ? row.ok && row.pass : false,
-          detail: row?.detail || '',
-        });
+        const per = row?.perTargetMs ?? bodyParams.deadlineMs;
+        if (row?.units?.length) {
+          for (const u of row.units) {
+            log.push({
+              title: `${c.title} ${u.code}`,
+              ms: u.ms,
+              pass: u.ok && u.ms <= per,
+              detail: `봉 ${u.bars ?? '-'} · 목표 ${fmtMs(per)} · 실적 ${fmtMs(u.ms)}`,
+              targetMs: per,
+            });
+          }
+          log.push({
+            title: `${c.title} 합계 ${row.units.length}종목`,
+            ms: row.ms,
+            pass: Boolean(row.pass),
+            detail: `벽시계 ${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)} · 1종목평균 ${fmtMs(row.units.reduce((s, u) => s + u.ms, 0) / row.units.length)}`,
+            targetMs: row.targetMs,
+          });
+        } else {
+          log.push({
+            title: c.title,
+            ms: row?.ms ?? Date.now() - caseStarted.current,
+            pass: row ? row.ok && row.pass : false,
+            detail: row?.detail || '',
+            targetMs: row?.targetMs,
+          });
+        }
         merged.results.push(...report.results);
         merged.params = report.params || bodyParams;
         merged.at = report.at;
         const elapsed = Date.now() - runStarted.current;
-        const avg = log.length ? elapsed / log.length : expected;
+        const avg = elapsed / (i + 1);
         const eta = avg * (queue.length - i - 1);
         setCurrent({...merged, bottlenecks: merged.results.filter((r) => !r.pass).map((r) => r.id)});
         setOverlay({
@@ -226,7 +259,14 @@ export function HubLabPane() {
       setCurrent(merged);
       setOverlay({
         kind: 'done',
-        title: merged.bottlenecks.length ? `끝 · 병목 ${merged.bottlenecks.length}` : `끝 · ${merged.results.length}건 통과`,
+        title: (() => {
+          const stocks = merged.results.flatMap((r) => r.units || []);
+          if (stocks.length) {
+            const okN = stocks.filter((u) => u.ok).length;
+            return `끝 · 종목 ${okN}/${stocks.length} 성공 · 벽시계 ${fmtMs(Date.now() - runStarted.current)} / 목표 ${fmtMs(bodyParams.deadlineMs)}`;
+          }
+          return merged.bottlenecks.length ? `끝 · 병목 ${merged.bottlenecks.length}` : `끝 · ${merged.results.length}기능 통과`;
+        })(),
         i: queue.length,
         n: queue.length,
         elapsed: Date.now() - runStarted.current,
@@ -293,7 +333,8 @@ export function HubLabPane() {
               <ol className="hub-lab-live">
                 {overlay.log.map((line, i) => (
                   <li key={i} className={line.pass ? 'ok' : 'bad'}>
-                    {line.pass ? '성공' : '실패'} · {line.title} · {fmtMs(line.ms)}
+                    {line.pass ? '성공' : '실패'} · {line.title} · 실적 {fmtMs(line.ms)}
+                    {line.targetMs != null ? ` / 목표 ${fmtMs(line.targetMs)}` : ''}
                     {line.detail ? ` · ${line.detail}` : ''}
                   </li>
                 ))}
@@ -363,7 +404,10 @@ export function HubLabPane() {
               <small>{c.group}</small>
               {row ? (
                 <span>
-                  {row.ms}ms / {row.targetMs}ms {row.pass ? '통과' : '미달'} · 제약 {row.constraints}
+                  {row.units?.length
+                    ? `${row.units.filter((u) => u.ok).length}/${row.units.length}종목 ${fmtMs(row.ms)}/${fmtMs(row.targetMs)}`
+                    : `${row.ms}ms / ${row.targetMs}ms`}{' '}
+                  {row.pass ? '통과' : '미달'}
                 </span>
               ) : (
                 <span>미측정</span>
@@ -398,18 +442,33 @@ export function HubLabPane() {
                 </tr>
               </thead>
               <tbody>
-                {shown.results.map((r) => (
-                  <tr key={r.id} className={r.pass ? '' : 'bad'}>
-                    <td>
-                      {r.title}
-                      <div className="hub-lab-detail">{r.detail}</div>
-                    </td>
-                    <td>{r.ms}</td>
-                    <td>{r.targetMs}</td>
-                    <td>{r.constraints}</td>
-                    <td>{r.ok ? (r.pass ? '통과' : '목표초과') : '실패'}</td>
-                  </tr>
-                ))}
+                {shown.results.flatMap((r) => {
+                  const head = (
+                    <tr key={r.id} className={r.pass ? '' : 'bad'}>
+                      <td>
+                        {r.title}
+                        <div className="hub-lab-detail">{r.detail}</div>
+                      </td>
+                      <td>{r.ms}</td>
+                      <td>{r.targetMs}</td>
+                      <td>{r.constraints}</td>
+                      <td>{r.ok ? (r.pass ? '통과' : '목표초과') : '실패'}</td>
+                    </tr>
+                  );
+                  const kids = (r.units || []).map((u) => (
+                    <tr key={`${r.id}-${u.code}`} className={u.ok && u.ms <= (r.perTargetMs || r.targetMs) ? '' : 'bad'}>
+                      <td>
+                        └ {u.code}
+                        <div className="hub-lab-detail">봉 {u.bars ?? '-'} · 목표 {r.perTargetMs || r.targetMs}ms</div>
+                      </td>
+                      <td>{u.ms}</td>
+                      <td>{r.perTargetMs || r.targetMs}</td>
+                      <td>{u.ok ? 0 : 1}</td>
+                      <td>{u.ok && u.ms <= (r.perTargetMs || r.targetMs) ? '통과' : '미달'}</td>
+                    </tr>
+                  ));
+                  return [head, ...kids];
+                })}
               </tbody>
             </table>
           </>

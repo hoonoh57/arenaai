@@ -62,6 +62,7 @@ export type LabUnitLive = {
 
 let unitLive: LabUnitLive | null = null;
 const unitTimes: number[] = [];
+let unitRows: LabUnitRow[] = [];
 
 export function getLabUnitLive(): LabUnitLive | null {
   return unitLive ? {...unitLive} : null;
@@ -69,11 +70,13 @@ export function getLabUnitLive(): LabUnitLive | null {
 
 function beginUnits(caseId: string, unit: string, total: number, parallel: number, note: string): void {
   unitTimes.length = 0;
+  unitRows = [];
   unitLive = {caseId, unit, done: 0, total, lastCode: '', lastOk: true, lastMs: 0, avgMs: 0, etaMs: 0, parallel, note};
 }
 
-function markUnit(code: string, ok: boolean, ms: number): void {
+function markUnit(code: string, ok: boolean, ms: number, bars?: number): void {
   if (!unitLive) return;
+  unitRows.push({code, ok, ms: Math.max(0, ms), bars});
   unitTimes.push(Math.max(0, ms));
   const avg = unitTimes.reduce((a, b) => a + b, 0) / unitTimes.length;
   const done = unitTimes.length;
@@ -90,9 +93,15 @@ function markUnit(code: string, ok: boolean, ms: number): void {
   };
 }
 
-function endUnits(): void {
+function endUnits(): LabUnitRow[] {
+  const rows = unitRows.slice();
   unitLive = null;
+  unitRows = [];
+  unitTimes.length = 0;
+  return rows;
 }
+
+export type LabUnitRow = {code: string; ms: number; ok: boolean; bars?: number};
 
 export type LabCaseResult = {
   id: HubOpName;
@@ -104,6 +113,8 @@ export type LabCaseResult = {
   pass: boolean;
   detail: string;
   constraints: number;
+  units?: LabUnitRow[];
+  perTargetMs?: number;
 };
 
 export type LabReport = {
@@ -197,7 +208,7 @@ function codes(n: number): string[] {
   return Array.from({length: n}, (_, i) => String(100000 + i).slice(-6));
 }
 
-async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: LabParams): Promise<{detail: string; constraints: number}> {
+async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: LabParams): Promise<{detail: string; constraints: number; units?: LabUnitRow[]}> {
   const t0 = 1_700_000_000;
   const list = codes(p.codes);
   const code = list[0] || '005930';
@@ -223,43 +234,40 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
     });
   };
   if (id === 'ensureChartPage') {
-    let n = 0;
     beginUnits(id, '종목', list.length, p.chartConcurrency, '분봉 페이지');
-    try {
-      await pool(list, p.chartConcurrency, async (c) => {
-        const t = Date.now();
-        try {
-          const page = await hub.ensureChartPage({code: c, timeframe: '1'});
-          n = page.candles.length;
-          markUnit(c, true, Date.now() - t);
-        } catch {
-          markUnit(c, false, Date.now() - t);
-        }
-      });
-    } finally {
-      endUnits();
-    }
-    return {detail: `종목 ${list.length} 병렬 ${p.chartConcurrency} 봉 ${n}`, constraints: 0};
+    await pool(list, p.chartConcurrency, async (c) => {
+      const t = Date.now();
+      try {
+        const page = await hub.ensureChartPage({code: c, timeframe: '1'});
+        markUnit(c, page.candles.length > 0, Date.now() - t, page.candles.length);
+      } catch {
+        markUnit(c, false, Date.now() - t, 0);
+      }
+    });
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    const sum = units.reduce((s, u) => s + u.ms, 0);
+    return {
+      detail: `${units.length}종목 중 ${units.length - fail}성공 병렬${p.chartConcurrency} 개별합 ${sum}ms`,
+      constraints: fail,
+      units,
+    };
   }
   if (id === 'ensureStrengthPage') {
-    let ready = 0;
     beginUnits(id, '종목', list.length, p.chartConcurrency, '체결강도 페이지');
-    try {
-      await pool(list, p.chartConcurrency, async (c) => {
-        const t = Date.now();
-        try {
-          await hub.ensureChartPage({code: c, timeframe: '1'});
-          const s = await hub.ensureStrengthPage({code: c, timeframe: '1'});
-          if (s.ready) ready += 1;
-          markUnit(c, s.ready, Date.now() - t);
-        } catch {
-          markUnit(c, false, Date.now() - t);
-        }
-      });
-    } finally {
-      endUnits();
-    }
-    return {detail: `강도 완료 ${ready}/${list.length}`, constraints: ready === list.length ? 0 : 1};
+    await pool(list, p.chartConcurrency, async (c) => {
+      const t = Date.now();
+      try {
+        await hub.ensureChartPage({code: c, timeframe: '1'});
+        const s = await hub.ensureStrengthPage({code: c, timeframe: '1'});
+        markUnit(c, s.ready, Date.now() - t, s.candles.length);
+      } catch {
+        markUnit(c, false, Date.now() - t, 0);
+      }
+    });
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `강도 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'putChartPage') {
     hub.ops.runSync('putChartPage', () => {
@@ -420,6 +428,7 @@ export async function runHubLab(live: RealtimeHub | null, scope: 'all' | HubOpNa
     let detail = '';
     let constraints = 0;
     let ok = true;
+    let units: LabUnitRow[] | undefined;
     try {
       const out = await Promise.race([
         runOne(c.id, hub, cache, params),
@@ -431,22 +440,28 @@ export async function runHubLab(live: RealtimeHub | null, scope: 'all' | HubOpNa
       ]);
       detail = out.detail;
       constraints = out.constraints;
+      units = out.units;
     } catch (e) {
       ok = false;
       detail = e instanceof Error ? e.message : String(e);
     }
     const ms = Date.now() - started;
     const targetMs = params.deadlineMs;
+    const perTargetMs = targetMs;
+    const unitFail = Boolean(units?.some((u) => !u.ok || u.ms > perTargetMs));
+    const okAll = ok && !unitFail;
     results.push({
       id: c.id,
       title: c.title,
       group: c.group,
       ms,
       targetMs,
-      ok,
-      pass: ok && ms <= targetMs,
+      ok: okAll,
+      pass: okAll && ms <= targetMs,
       detail,
       constraints,
+      units,
+      perTargetMs,
     });
   }
   const report: LabReport = {
