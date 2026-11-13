@@ -135,6 +135,8 @@
 .pane-legend{position:absolute;left:6px;right:52px;z-index:5;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start;padding:3px 4px;pointer-events:none;border-left:2px solid transparent;max-height:52px;overflow:hidden}
 .pane-legend.on{border-left-color:#b9ef78}
 .pane-legend .lg{pointer-events:auto;background:#111923e8;border:1px solid #2a3d33;border-radius:3px;font-size:10px;padding:2px 7px;cursor:grab;max-width:100%;text-align:left;color:inherit}
+.chart-hover-tip{position:absolute;right:58px;top:8px;z-index:8;background:#111923f2;border:1px solid #314554;border-radius:4px;padding:6px 8px;font-size:11px;color:#d5e0e8;line-height:1.55;pointer-events:none;min-width:148px}
+.chart-hover-tip .ht-time{color:#8aa0b0;margin-bottom:4px}
 .verify-pane label{display:flex;justify-content:space-between;gap:8px;margin:8px 0;color:#a9b7bf;font-size:11px}.verify-pane select,.verify-pane input[type=date]{background:#0e151e;border:1px solid #30404b;color:#d3dde2;border-radius:4px;padding:6px}.verify-stats{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#cfe3d3;margin:8px 0}.verify-result{margin-top:12px}
 .verify-1516{height:100%;overflow:auto;padding:8px 10px;font-size:12px}
 .v16-banner{background:#1a2740;color:#d5e2f0;padding:8px 10px;border-radius:4px;margin-bottom:8px}

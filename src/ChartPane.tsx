@@ -217,7 +217,7 @@ export function ChartPane({
     setOverlay([]);
     setNextKey('');
     const period = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
-    if (!period && cached.length) {
+    if (!period && !baseDate && cached.length) {
       setBars(cached);
       return;
     }
@@ -236,6 +236,9 @@ export function ChartPane({
         if (d.wss?.link) setLiveWss(d.wss.link);
         const px = Number(d.quote?.price);
         if (px > 0) setLivePx(px);
+        const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        const hist = Boolean(baseDate) && baseDate.slice(0, 10) < today;
+        if (hist) return;
         setBars((prev) => {
           const str = Number(d.quote?.strength);
           const period = timeframe === 'D' || timeframe === 'W' || timeframe === 'M';
@@ -320,6 +323,8 @@ export function ChartPane({
       .then((d) => {
         if (!Array.isArray(d.candles) || !d.candles.length) return;
         if (timeframe === 'D' || timeframe === 'W' || timeframe === 'M') return;
+        const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        if (baseDate && baseDate.slice(0, 10) < today) return;
         const hubLast = d.candles[d.candles.length - 1] as Candle;
         setBars((prev) => {
           const mine = prev[prev.length - 1];

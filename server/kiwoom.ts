@@ -22,6 +22,16 @@ function numeric(value: unknown, field: string): number {
   return n;
 }
 
+/** 기준일(KST) 종가 시각 이후 봉은 버린다. 마지막 캔들이 선택한 날이 되게. */
+function clipToBaseDate(candles: Candle[], yyyymmdd: string): Candle[] {
+  if (!/^\d{8}$/.test(yyyymmdd) || !candles.length) return candles;
+  const y = Number(yyyymmdd.slice(0, 4));
+  const m = Number(yyyymmdd.slice(4, 6));
+  const d = Number(yyyymmdd.slice(6, 8));
+  const end = Date.UTC(y, m - 1, d, 15, 0, 0) / 1000 - 1;
+  return candles.filter((c) => c.time <= end);
+}
+
 function optionalNumber(value: unknown): number | null {
   const text = String(value ?? '').trim().replace(/,/g, '');
   if (!text || !/^[+-]?\d+(\.\d+)?$/.test(text)) return null;
@@ -433,21 +443,30 @@ export class Kiwoom {
       }
       return {candles: bars, hasMore: more, nextKey: key};
     };
+    const baseRaw = (input.baseDate || '').replace(/-/g, '');
+    const base_dt = /^\d{8}$/.test(baseRaw) ? baseRaw : '';
+    const minBody = (tic: string): Record<string, string> => {
+      const body: Record<string, string> = {tic_scope: tic, upd_stkpc_tp: '1'};
+      if (base_dt) body.base_dt = base_dt;
+      return body;
+    };
+    const clip = (rows: Candle[]) => clipToBaseDate(rows, base_dt);
     if (input.timeframe.startsWith('T')) {
       const spec = parseTickTimeframe(input.timeframe);
       if (!spec) throw new Error('틱봉은 1/3/5/10/30 또는 30의 배수(최대 7200)만 지원합니다.');
-      const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10079', input.code, {tic_scope: spec.native, upd_stkpc_tp: '1'}, ex, 'stk_tic_chart_qry');
+      const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10079', input.code, minBody(spec.native), ex, 'stk_tic_chart_qry');
       let candles = await load(extra);
       let hasMore = this.lastContinuation.contYn === 'Y';
       let nextKey = this.lastContinuation.nextKey;
       const packed = await pullMore(candles, hasMore, nextKey, load);
-      return {candles: packed.candles, hasMore: packed.hasMore || Boolean(packed.nextKey), nextKey: packed.nextKey};
+      return {candles: clip(packed.candles), hasMore: packed.hasMore || Boolean(packed.nextKey), nextKey: packed.nextKey};
     }
     const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
     if (!allowed.has(input.timeframe)) throw new Error('지원 차트: 틱·분·일·주·월. 초봉 API는 명세에 없습니다.');
-    const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10080', input.code, {tic_scope: input.timeframe, upd_stkpc_tp: '1'}, ex, 'stk_min_pole_chart_qry');
+    const load = (ex: {contYn?: string; nextKey?: string}) => this.chartRows('/api/dostk/chart', 'ka10080', input.code, minBody(input.timeframe), ex, 'stk_min_pole_chart_qry');
     const first = await load(extra);
-    return pullMore(first, this.lastContinuation.contYn === 'Y', this.lastContinuation.nextKey, load);
+    const packed = await pullMore(first, this.lastContinuation.contYn === 'Y', this.lastContinuation.nextKey, load);
+    return {candles: clip(packed.candles), hasMore: packed.hasMore, nextKey: packed.nextKey};
   }
 
   private readonly names = new Map<string, string>();

@@ -23,6 +23,37 @@ import {delayedAfterSkip, delayedExit, judgePattern, patternMarkerText} from '..
 import {filtersFromFormulas, PATTERN_FILTERS, type DelayContext, type FilterEnabled} from '../shared/patternFilters';
 import type {ChartDrawing} from '../shared/desk';
 
+function kstParts(t: number) {
+  const d = new Date(Number(t) * 1000);
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const get = (type: string) => fmt.formatToParts(d).find((p) => p.type === type)?.value || '';
+  return {y: get('year'), m: get('month'), day: get('day'), h: get('hour'), min: get('minute')};
+}
+
+function tickLabel(t: number | string | object) {
+  const p = kstParts(Number(t));
+  const hm = `${p.h}:${p.min}`;
+  if (hm === '09:00' || hm === '08:00' || hm === '00:00' || hm === '08:30') return `${p.m}/${p.day} ${hm}`;
+  return hm;
+}
+
+function pctChg(cur: number | null | undefined, prev: number | null | undefined) {
+  if (typeof cur !== 'number' || !Number.isFinite(cur) || typeof prev !== 'number' || !(prev > 0) || !Number.isFinite(prev))
+    return {text: '', color: '#718395', up: 0};
+  const p = ((cur - prev) / prev) * 100;
+  const up = p > 0 ? 1 : p < 0 ? -1 : 0;
+  const sign = p > 0 ? '+' : '';
+  return {text: `(${sign}${p.toFixed(2)}%)`, color: up > 0 ? '#ed6b72' : up < 0 ? '#3dcc8c' : '#718395', up};
+}
+
 export function Chart({
   data,
   formulas,
@@ -138,6 +169,8 @@ export function Chart({
   paneByIdRef.current = paneById;
   const [frame, setFrame] = useState(0);
   const [hoverIdx, setHoverIdx] = useState(-1);
+  const [hoverTip, setHoverTip] = useState(-1);
+  const hoverTimer = useRef(0);
   const [legends, setLegends] = useState<{slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[]>([]);
   hintRef.current = visibleHint;
   countCb.current = onVisibleCount;
@@ -626,8 +659,7 @@ export function Chart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        tickMarkFormatter: (t: number | string | object) =>
-          new Date(Number(t) * 1000).toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}),
+        tickMarkFormatter: tickLabel,
       },
       rightPriceScale: {borderVisible: false, visible: true},
       crosshair: {
@@ -648,6 +680,8 @@ export function Chart({
       const t = param.time !== undefined ? Number(param.time) : NaN;
       if (!Number.isFinite(t)) {
         setHoverIdx(-1);
+        window.clearTimeout(hoverTimer.current);
+        setHoverTip(-1);
         return;
       }
       const list = dataRef.current;
@@ -659,6 +693,8 @@ export function Chart({
         }
       }
       setHoverIdx(bi);
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = window.setTimeout(() => setHoverTip(bi), 300);
     });
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range) return;
@@ -844,14 +880,16 @@ export function Chart({
     return {x, y};
   };
   const auto: ChartDrawing[] = [];
-  if (daySep && data.length) {
+  const dateMarks: {t: number; label: string}[] = [];
+  if (data.length) {
     let day = 0;
     for (const c of data) {
-      const d = new Date((c.time + 9 * 3600) * 1000);
-      const key = d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+      const p = kstParts(c.time);
+      const key = Number(p.y) * 10000 + Number(p.m) * 100 + Number(p.day);
       if (key !== day) {
         day = key;
-        auto.push({id: `day-${key}`, kind: 'vline', t1: c.time, p1: c.close, color: '#3a4a55'});
+        dateMarks.push({t: c.time, label: `${Number(p.m)}/${Number(p.day)}`});
+        if (daySep) auto.push({id: `day-${key}`, kind: 'vline', t1: c.time, p1: c.close, color: '#3a4a55'});
       }
     }
   }
@@ -887,7 +925,9 @@ export function Chart({
           </button>
           {row.items.map((it) => {
             const raw = hoverIdx >= 0 ? valuesById.current[it.id]?.[hoverIdx] : undefined;
+            const prevV = hoverIdx > 0 ? valuesById.current[it.id]?.[hoverIdx - 1] : undefined;
             const hv = typeof raw === 'number' && Number.isFinite(raw) ? raw.toFixed(2) : '';
+            const ch = pctChg(typeof raw === 'number' ? raw : null, typeof prevV === 'number' ? prevV : null);
             return (
               <button
                 key={it.id}
@@ -907,6 +947,7 @@ export function Chart({
                 {it.name}
                 {it.param ? ` ${it.param}` : ''}
                 {hv ? ` ${hv}` : ''}
+                {ch.text ? <span style={{color: ch.color}}> {ch.text}</span> : null}
               </button>
             );
           })}
@@ -953,7 +994,60 @@ export function Chart({
             </text>
           );
         })}
+        {dateMarks.map((m) => {
+          const a = xy(m.t, data[0]?.close || 0);
+          if (!a) return null;
+          return (
+            <text key={`dl-${m.t}`} x={a.x + 3} y={hbox - 4} fill="#9bb0c0" fontSize={10}>
+              {m.label}
+            </text>
+          );
+        })}
       </svg>
+      {hoverTip >= 0 && data[hoverTip] ? (
+        <div className="chart-hover-tip">
+          {(() => {
+            const b = data[hoverTip];
+            const p = hoverTip > 0 ? data[hoverTip - 1] : undefined;
+            const kp = kstParts(b.time);
+            const row = (name: string, cur: number, prev?: number) => {
+              const ch = pctChg(cur, prev);
+              return (
+                <div key={name}>
+                  {name} {cur.toLocaleString('ko-KR')}
+                  {ch.text ? <span style={{color: ch.color}}> {ch.text}</span> : null}
+                </div>
+              );
+            };
+            return (
+              <>
+                <div className="ht-time">
+                  {kp.y}-{kp.m}-{kp.day} {kp.h}:{kp.min}
+                </div>
+                {row('시가', b.open, p?.open)}
+                {row('고가', b.high, p?.high)}
+                {row('저가', b.low, p?.low)}
+                {row('종가', b.close, p?.close)}
+                {row('거래량', b.volume || 0, p?.volume)}
+                {legends.flatMap((rowL) =>
+                  rowL.items.map((it) => {
+                    const raw = valuesById.current[it.id]?.[hoverTip];
+                    const prevV = hoverTip > 0 ? valuesById.current[it.id]?.[hoverTip - 1] : undefined;
+                    if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+                    const ch = pctChg(raw, typeof prevV === 'number' ? prevV : null);
+                    return (
+                      <div key={it.id} style={{color: it.color}}>
+                        {it.name} {raw.toFixed(2)}
+                        {ch.text ? <span style={{color: ch.color}}> {ch.text}</span> : null}
+                      </div>
+                    );
+                  }),
+                )}
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
     </div>
   );
 }
