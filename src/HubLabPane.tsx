@@ -55,6 +55,20 @@ type Overlay = {
   log?: {title: string; ms: number; pass: boolean; detail: string}[];
 };
 
+type UnitLive = {
+  idle?: boolean;
+  unit?: string;
+  done?: number;
+  total?: number;
+  lastCode?: string;
+  lastOk?: boolean;
+  lastMs?: number;
+  avgMs?: number;
+  etaMs?: number;
+  parallel?: number;
+  note?: string;
+};
+
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, {headers: {'Content-Type': 'application/json'}, ...init});
   const d = await r.json();
@@ -72,6 +86,7 @@ export function HubLabPane() {
   const [err, setErr] = useState('');
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [nowTick, setNowTick] = useState(0);
+  const [unit, setUnit] = useState<UnitLive | null>(null);
   const runStarted = useRef(0);
   const caseStarted = useRef(0);
 
@@ -80,6 +95,28 @@ export function HubLabPane() {
     const id = window.setInterval(() => setNowTick(Date.now()), 200);
     return () => window.clearInterval(id);
   }, [overlay?.kind]);
+
+  useEffect(() => {
+    if (!overlay || overlay.kind !== 'run') {
+      setUnit(null);
+      return;
+    }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const d = await fetch('/api/hub/lab/live').then((r) => r.json());
+        if (!stop && !d.idle) setUnit(d);
+      } catch {
+        /* */ 
+      }
+    };
+    const id = window.setInterval(() => void pull(), 150);
+    void pull();
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [overlay?.kind, overlay?.title]);
 
   const load = async (silent = false) => {
     if (!silent) {
@@ -204,21 +241,34 @@ export function HubLabPane() {
           <div>
             <b>{overlay.kind === 'run' ? '측정 중' : overlay.kind === 'load' ? '불러오는 중' : overlay.kind === 'done' ? '완료' : '오류'}</b>
             <p className="hub-lab-work">{overlay.work || overlay.title}</p>
+            {unit && unit.total ? (
+              <p>
+                {unit.note || overlay.title} · <b>{unit.done}/{unit.total}</b>
+                {unit.unit || '종목'}
+                {unit.lastCode ? ` · 방금 ${unit.lastCode} ${unit.lastOk === false ? '실패' : '성공'} ${fmtMs(unit.lastMs || 0)}` : ''}
+              </p>
+            ) : null}
+            {unit && unit.done ? (
+              <p>
+                1{unit.unit || '종목'} 평균 {fmtMs(unit.avgMs || 0)}
+                {unit.parallel && unit.parallel > 1 ? ` · 병렬 ${unit.parallel}` : ''}
+                {unit.etaMs != null ? ` · 남은 ${unit.unit} 기준 이 단계는 앞으로 약 ${fmtMs(unit.etaMs)} 뒤 끝남` : ''}
+              </p>
+            ) : null}
             {overlay.kind === 'run' || overlay.kind === 'load' ? (
               <p>
                 이 단계 경과 {fmtMs((overlay.kind === 'run' ? nowTick || Date.now() : Date.now()) - (caseStarted.current || runStarted.current || Date.now()))}
-                {overlay.expected ? ` · 이 단계 예상 ${fmtMs(overlay.expected)}` : ''}
+                {overlay.expected ? ` · 시작 시 예상 ${fmtMs(overlay.expected)}` : ''}
               </p>
             ) : null}
             <p>
-              전체 경과 {fmtMs((overlay.elapsed || 0) + (overlay.kind === 'run' && caseStarted.current ? Math.max(0, (nowTick || Date.now()) - caseStarted.current) : 0))}
-              {overlay.kind === 'run' && overlay.eta != null ? ` · 남은 예상 ${fmtMs(overlay.eta)}` : ''}
-              {overlay.n ? ` · ${overlay.i}/${overlay.n}` : ''}
+              기능 {overlay.i}/{overlay.n} · 전체 경과 {fmtMs((overlay.elapsed || 0) + (overlay.kind === 'run' && caseStarted.current ? Math.max(0, (nowTick || Date.now()) - caseStarted.current) : 0))}
+              {overlay.kind === 'run' && overlay.eta != null ? ` · 다음 기능들 예상 ${fmtMs(overlay.eta)}` : ''}
             </p>
             <p className="hub-lab-wait">
               {overlay.kind === 'run'
-                ? overlay.eta && overlay.eta > 5000
-                  ? '오래 걸리는 부하입니다. 창이 멈춘 것이 아닙니다.'
+                ? unit?.etaMs
+                  ? `지금 단계는 약 ${fmtMs(unit.etaMs)} 뒤 끝납니다. 그다음 기능으로 넘어갑니다. 창이 멈춘 것이 아닙니다.`
                   : '닫기·클릭 불가. 허브가 이 건을 끝낼 때까지 기다립니다.'
                 : overlay.kind === 'load'
                   ? '저장을 읽는 중'

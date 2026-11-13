@@ -46,6 +46,54 @@ export function isOfficialHubOp(name: string): boolean {
   return OFFICIAL.has(name as HubOpName) && name in HUB_OP_TARGETS;
 }
 
+export type LabUnitLive = {
+  caseId: string;
+  unit: string;
+  done: number;
+  total: number;
+  lastCode: string;
+  lastOk: boolean;
+  lastMs: number;
+  avgMs: number;
+  etaMs: number;
+  parallel: number;
+  note: string;
+};
+
+let unitLive: LabUnitLive | null = null;
+const unitTimes: number[] = [];
+
+export function getLabUnitLive(): LabUnitLive | null {
+  return unitLive ? {...unitLive} : null;
+}
+
+function beginUnits(caseId: string, unit: string, total: number, parallel: number, note: string): void {
+  unitTimes.length = 0;
+  unitLive = {caseId, unit, done: 0, total, lastCode: '', lastOk: true, lastMs: 0, avgMs: 0, etaMs: 0, parallel, note};
+}
+
+function markUnit(code: string, ok: boolean, ms: number): void {
+  if (!unitLive) return;
+  unitTimes.push(Math.max(0, ms));
+  const avg = unitTimes.reduce((a, b) => a + b, 0) / unitTimes.length;
+  const done = unitTimes.length;
+  const remain = Math.max(0, unitLive.total - done);
+  const par = Math.max(1, unitLive.parallel);
+  unitLive = {
+    ...unitLive,
+    done,
+    lastCode: code,
+    lastOk: ok,
+    lastMs: ms,
+    avgMs: avg,
+    etaMs: avg * Math.ceil(remain / par),
+  };
+}
+
+function endUnits(): void {
+  unitLive = null;
+}
+
 export type LabCaseResult = {
   id: HubOpName;
   title: string;
@@ -176,21 +224,43 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
   };
   if (id === 'ensureChartPage') {
     let n = 0;
-    await pool(list, p.chartConcurrency, async (c, i) => {
-      if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
-      const page = await hub.ensureChartPage({code: c, timeframe: '1'});
-      n = page.candles.length;
-    });
+    beginUnits(id, '종목', list.length, p.chartConcurrency, '분봉 페이지');
+    try {
+      await pool(list, p.chartConcurrency, async (c, i) => {
+        if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
+        const t = Date.now();
+        try {
+          const page = await hub.ensureChartPage({code: c, timeframe: '1'});
+          n = page.candles.length;
+          markUnit(c, true, Date.now() - t);
+        } catch {
+          markUnit(c, false, Date.now() - t);
+        }
+      });
+    } finally {
+      endUnits();
+    }
     return {detail: `종목 ${list.length} 병렬 ${p.chartConcurrency} 봉 ${n}`, constraints: 0};
   }
   if (id === 'ensureStrengthPage') {
     let ready = 0;
-    await pool(list, p.chartConcurrency, async (c, i) => {
-      if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
-      await hub.ensureChartPage({code: c, timeframe: '1'});
-      const s = await hub.ensureStrengthPage({code: c, timeframe: '1'});
-      if (s.ready) ready += 1;
-    });
+    beginUnits(id, '종목', list.length, p.chartConcurrency, '체결강도 페이지');
+    try {
+      await pool(list, p.chartConcurrency, async (c, i) => {
+        if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
+        const t = Date.now();
+        try {
+          await hub.ensureChartPage({code: c, timeframe: '1'});
+          const s = await hub.ensureStrengthPage({code: c, timeframe: '1'});
+          if (s.ready) ready += 1;
+          markUnit(c, s.ready, Date.now() - t);
+        } catch {
+          markUnit(c, false, Date.now() - t);
+        }
+      });
+    } finally {
+      endUnits();
+    }
     return {detail: `강도 완료 ${ready}/${list.length}`, constraints: ready === list.length ? 0 : 1};
   }
   if (id === 'putChartPage') {
