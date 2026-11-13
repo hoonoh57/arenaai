@@ -176,7 +176,7 @@ export class DemandBridge {
     if (removed.length) await this.hub.unsubscribe('bridge:quotes', removed, ['0B']);
     this.watched = desired;
 
-    this.hub.setActiveCodes(selectedCodes);
+    this.hub.setActiveCodes([...new Set([...selectedCodes, ...config.chartCodes])]);
     return this.computeRanking(config);
   }
 

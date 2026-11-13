@@ -218,7 +218,7 @@ export class RealtimeHub {
     });
   }
 
-  /** Only these codes are evaluated for simulated signals. */
+  /** 신호 평가 종목. 차트 창 표시·가상화면과 무관하게 허브가 돌린다. */
   setActiveCodes(codes: readonly string[]): void {
     this.activeCodes = new Set(codes);
   }
@@ -547,8 +547,7 @@ export class RealtimeHub {
   }
 
   /**
-   * Simulated signal evaluation for one code, on closed bars only.
-   * One event per (code, closed bar, side) — enforced by the dedup set.
+   * 종목 신호. 닫힌 봉만. 화면이 가려져 있어도 시세가 오면 평가한다.
    */
   evaluateSignals(code: string): void {
     const evaluator = this.evaluator;

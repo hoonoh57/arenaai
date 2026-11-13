@@ -323,8 +323,19 @@ function normalizeStrategyId(id: unknown): string {
   return id;
 }
 
+function strategyCodes(): string[] {
+  const extra = Object.entries(config.tradeByCode)
+    .filter(([, status]) => status === 'run')
+    .map(([code]) => code);
+  return [...new Set([...config.chartCodes, ...deskChartCodes(), ...extra].filter((c) => /^\d{6}$/.test(c)))];
+}
+
 function syncSignals(): void {
-  const anyRun = config.chartCodes.some((code) => (config.tradeByCode[code] ?? 'wait') === 'run');
+  const codes = strategyCodes();
+  hub.setActiveCodes(codes);
+  const anyRun =
+    config.running &&
+    codes.some((code) => (config.tradeByCode[code] ?? (config.tradeMode === 'auto' ? 'run' : 'wait')) === 'run');
   hub.setSignalEvaluator(anyRun ? currentEvaluator() : null);
   hub.bestScoreOnly = filterOn(config.patternFilters, 'best-score');
 }
