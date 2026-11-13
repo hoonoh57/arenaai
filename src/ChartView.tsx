@@ -111,6 +111,7 @@ export function Chart({
   const seriesKeyRef = useRef(seriesKey);
   const fitScale = useRef(false);
   const skipSync = useRef(false);
+  const lastPainted = useRef({len: 0, time: 0, close: 0});
   if (seriesKey && seriesKey !== seriesKeyRef.current) {
     seriesKeyRef.current = seriesKey;
     fitScale.current = true;
@@ -762,7 +763,30 @@ export function Chart({
   }, [grid, logScale, yMode, magnet]);
 
   useEffect(() => {
+    const bars = dataRef.current;
+    const series = candleRef.current;
+    const last = bars[bars.length - 1];
+    const prev = lastPainted.current;
+    if (series && last && prev.len === bars.length && prev.time === last.time && prev.close !== last.close) {
+      const pctOn = yModeRef.current === 'percent';
+      const refPx = bars[0].close > 0 ? bars[0].close : 1;
+      const ax = (px: number) => corePercent(px, refPx, pctOn);
+      try {
+        series.update({
+          time: last.time as UTCTimestamp,
+          open: ax(last.open),
+          high: ax(last.high),
+          low: ax(last.low),
+          close: ax(last.close),
+        });
+        lastPainted.current = {len: bars.length, time: last.time, close: last.close};
+        return;
+      } catch {
+        /* full paint */
+      }
+    }
     paint();
+    if (last) lastPainted.current = {len: bars.length, time: last.time, close: last.close};
   }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady, yMode, logScale]);
 
   useEffect(() => {

@@ -625,7 +625,8 @@ app.get('/api/live-bars', (req, res) => {
   const timeframe = typeof req.query.timeframe === 'string' ? req.query.timeframe : '1';
   const baseDate = typeof req.query.baseDate === 'string' ? req.query.baseDate : '';
   if (!/^\d{6}$/.test(code)) return res.status(400).json({error: '종목코드'});
-  const hub = bridge.status().hub;
+  void hub.subscribe(`chart:${code}`, [code], ['0B']).catch(() => undefined);
+  const st = bridge.status().hub;
   const quote = cache.getQuote(code) || null;
   let candles = cache.chartPage(code, timeframe, baseDate);
   if (quote && quote.price > 0 && candles.length) {
@@ -643,7 +644,7 @@ app.get('/api/live-bars', (req, res) => {
   res.json({
     candles,
     quote,
-    wss: {link: hub.link, silentMs: hub.silentMs, emergency: hub.emergency, state: hub.state},
+    wss: {link: st.link, silentMs: st.silentMs, emergency: st.emergency, state: st.state},
   });
 });
 app.post('/api/tr', async (req, res) => {

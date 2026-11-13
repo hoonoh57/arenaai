@@ -180,43 +180,29 @@ export class SharedCache {
       ...bar,
       close: price,
       high: Math.max(bar.high, price),
-      low: Math.min(bar.low, price) || price,
-      ...(typeof volume === 'number' || typeof bar.volume === 'number' ? {volume: (bar.volume || 0) + (volume || 0)} : {}),
+      low: bar.low > 0 ? Math.min(bar.low, price) : price,
     });
     for (const [key, bars] of this.pagesByKey) {
       if (!key.startsWith(`${code}|`) || !bars.length) continue;
+      const last = bars[bars.length - 1];
+      if (!last) continue;
       const tf = key.split('|')[1] || '';
       if (tf.startsWith('T')) {
         const group = parseTickTimeframe(tf)?.ticks || 1;
-        const last = bars[bars.length - 1];
         const n = this.tickN.get(key) || 0;
-        if (last && ((group === 1 && last.time === t) || (group > 1 && n > 0 && n < group))) {
-          bars[bars.length - 1] = bump(last);
-          if (group > 1) this.tickN.set(key, n + 1);
-        } else if (last && group > 1 && n === 0) {
-          bars[bars.length - 1] = bump(last);
-          this.tickN.set(key, 1);
-        } else {
-          const tt = last && last.time >= t ? last.time + 1 : t;
-          bars.push({time: tt, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {})});
+        if (group === 1 && last.time !== t && last.time < t) {
+          bars.push({time: t, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {})});
           this.tickN.set(key, 1);
           if (bars.length > 4000) bars.splice(0, bars.length - 3500);
+        } else {
+          bars[bars.length - 1] = bump(last);
+          if (group > 1) this.tickN.set(key, n ? n + 1 : 1);
         }
         changed = true;
         continue;
       }
-      if (['1', '3', '5', '10', '15', '30', '45', '60'].includes(tf)) {
-        const step = Number(tf) * 60;
-        const bucket = Math.floor(t / step) * step;
-        const last = bars[bars.length - 1];
-        if (last && last.time === bucket) {
-          bars[bars.length - 1] = bump(last);
-          changed = true;
-        } else if (last && bucket > last.time) {
-          bars.push({time: bucket, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {})});
-          changed = true;
-        }
-      }
+      bars[bars.length - 1] = bump(last);
+      changed = true;
     }
     if (changed) {
       this.candleVersion += 1;

@@ -111,6 +111,7 @@ export function ChartPane({
   const [varPatch, setVarPatch] = useState<Record<string, Record<string, number>>>({});
   const [selPane, setSelPane] = useState(win.chartView?.selectedPane || 0);
   const [liveWss, setLiveWss] = useState(wssLink || 'dead');
+  const [livePx, setLivePx] = useState(0);
   const viewTimer = useRef(0);
   const paneById = win.indicatorPanes || {};
   const timeframe = win.timeframe || '1';
@@ -203,21 +204,32 @@ export function ChartPane({
         const d = await fetch(`/api/live-bars?${q}`).then((r) => r.json());
         if (stop) return;
         if (d.wss?.link) setLiveWss(d.wss.link);
-        if (Array.isArray(d.candles) && d.candles.length) {
-          setBars((prev) => {
+        const px = Number(d.quote?.price);
+        if (px > 0) setLivePx(px);
+        setBars((prev) => {
+          if (Array.isArray(d.candles) && d.candles.length) {
             const next = d.candles as Candle[];
-            if (!prev.length) return next;
+            if (px > 0) {
+              const last = next[next.length - 1];
+              next[next.length - 1] = {...last, close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px};
+            }
             const a = next[next.length - 1];
             const b = prev[prev.length - 1];
-            if (a && b && a.time === b.time && a.close === b.close && next.length === prev.length) return prev;
+            if (prev.length && a && b && a.time === b.time && a.close === b.close && next.length === prev.length) return prev;
             return next;
-          });
-        }
+          }
+          if (!(px > 0) || !prev.length) return prev;
+          const last = prev[prev.length - 1];
+          if (last.close === px) return prev;
+          const next = prev.slice();
+          next[next.length - 1] = {...last, close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px};
+          return next;
+        });
       } catch {
         /* hub */
       }
     };
-    const ms = timeframe.startsWith('T') ? 400 : 1000;
+    const ms = 300;
     const id = window.setInterval(pull, ms);
     void pull();
     return () => {
@@ -316,6 +328,7 @@ export function ChartPane({
           <span className="chart-name">{name || codeText || '종목명'}</span>
           <span className={'wss-pill mini ' + (liveWss || wssLink || 'dead')} title="중앙관리자 실시간 수신(이 창은 허브 시세만 표시)">
             {(liveWss || wssLink) === 'ok' ? 'WSS 수신' : (liveWss || wssLink) === 'warn' ? 'WSS 지연' : 'WSS 끊김'}
+            {livePx > 0 ? ` ${livePx.toLocaleString('ko-KR')}` : ''}
           </span>
           <select value={TF.some((t) => t.id === timeframe) ? timeframe : timeframe.startsWith('T') ? timeframe : '1'} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (
