@@ -125,10 +125,14 @@ export function parseDailyRows(rows: unknown): DailyRow[] {
   const result: DailyRow[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    const date = String(row?.dt ?? '');
-    if (!/^\d{8}$/.test(date)) throw new Error('일봉 일자가 올바르지 않습니다.');
-    const t = Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T00:00:00+09:00`);
-    if (!Number.isFinite(t) || new Date(t + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, '') !== date || seen.has(date)) throw new Error('일봉 일자가 중복되거나 유효하지 않습니다.');
+    const date = String(row?.dt ?? row?.date ?? row?.trd_dd ?? row?.yyyymmdd ?? '').replace(/-/g, '').slice(0, 8);
+    if (!/^\d{8}$/.test(date) || seen.has(date)) continue;
+    const y = Number(date.slice(0, 4));
+    const mo = Number(date.slice(4, 6));
+    const da = Number(date.slice(6, 8));
+    const utc = Date.UTC(y, mo - 1, da);
+    const chk = new Date(utc);
+    if (chk.getUTCFullYear() !== y || chk.getUTCMonth() + 1 !== mo || chk.getUTCDate() !== da) continue;
     seen.add(date);
     const optional = (value: unknown) => {
       try {
@@ -138,7 +142,13 @@ export function parseDailyRows(rows: unknown): DailyRow[] {
         return undefined;
       }
     };
-    result.push({date, open: optional(row.open_pric), high: optional(row.high_pric), low: optional(row.low_pric), close: optional(row.cur_prc)});
+    result.push({
+      date,
+      open: optional(row.open_pric ?? row.open),
+      high: optional(row.high_pric ?? row.high),
+      low: optional(row.low_pric ?? row.low),
+      close: optional(row.cur_prc ?? row.close ?? row.stck_clpr),
+    });
   }
   return result.sort((a, b) => a.date.localeCompare(b.date));
 }

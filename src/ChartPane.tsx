@@ -572,7 +572,7 @@ export function ChartPane({
             }}
           />
         ) : (
-          <div className="empty-chart">{busy ? '조회 중…' : '종목코드를 입력하고 조회하세요. 가상 시세는 만들지 않습니다.'}</div>
+          <div className="empty-chart">{busy ? '조회 중…' : workErr || '종목코드를 입력하고 조회하세요. 가상 시세는 만들지 않습니다.'}</div>
         )}
         {menu && (
           <div className="ctx-menu" style={{left: menu.x, top: menu.y}} onMouseLeave={() => setMenu(null)}>

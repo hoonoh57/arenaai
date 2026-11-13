@@ -584,10 +584,12 @@ app.post('/api/chart', async (req, res) => {
     const strengthOnly = Boolean(req.body?.strengthOnly);
     let candles: Candle[] = [];
     let page = {candles: [] as Candle[], hasMore: false, nextKey: ''};
+    let warning = '';
     if (!strengthOnly) {
       const got = await hub.ask({owner: 'desk:chart', op: 'chart', code, timeframe, baseDate, nextKey: nextKey || undefined});
       page = {candles: got.candles, hasMore: got.hasMore, nextKey: got.nextKey};
       candles = got.candles;
+      if (!candles.length && (got.held || got.reason)) warning = got.reason || '일봉 응답이 비었습니다';
     } else {
       candles = hub.liveBars(code, timeframe, baseDate);
     }
@@ -624,6 +626,7 @@ app.post('/api/chart', async (req, res) => {
       strengthReady,
       strengthNxt,
       timeframe,
+      warning: warning || undefined,
     });
   } catch (e) {
     const code = typeof req.body?.code === 'string' ? req.body.code : '';
