@@ -940,8 +940,13 @@ app.post('/api/trade', async (req, res) => {
     const status = req.body?.status;
     if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
     if (status !== 'wait' && status !== 'run' && status !== 'stop' && status !== 'backtest') throw new Error('상태는 대기/적용/백테스트입니다.');
-    if (!config.chartCodes.includes(code)) throw new Error('멀티차트에 없는 종목입니다.');
-    config = {...config, tradeByCode: {...config.tradeByCode, [code]: status}, running: status === 'run' || config.chartCodes.some((c) => (c === code ? status : config.tradeByCode[c]) === 'run')};
+    const chartCodes = config.chartCodes.includes(code) ? config.chartCodes : [...config.chartCodes, code];
+    config = {
+      ...config,
+      chartCodes,
+      tradeByCode: {...config.tradeByCode, [code]: status},
+      running: status === 'run' || chartCodes.some((c) => (c === code ? status : config.tradeByCode[c]) === 'run'),
+    };
     syncSignals();
     if (status === 'run') bridge.reevaluate([code]);
     res.json({ok: true, config});

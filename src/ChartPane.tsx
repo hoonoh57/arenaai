@@ -4,6 +4,7 @@ import type {Formula} from '../shared/formula';
 import type {ChildWindow, VirtualDesk} from '../shared/desk';
 import {Chart} from './ChartView';
 import {DRAW_TOOLS} from '../shared/chartMenu';
+import {TradeBar} from './chart/TradeBar';
 
 const TF = [
   {id: 'T1', label: '1틱'},
@@ -73,6 +74,16 @@ export function ChartPane({
   delayContext,
   wssLink,
   active = true,
+  tradeStatus,
+  inPos,
+  locked,
+  strategyId,
+  systems = [],
+  onTrade,
+  onStrategy,
+  onBuy,
+  onSell,
+  onLock,
 }: {
   win: ChildWindow;
   desk: VirtualDesk;
@@ -89,6 +100,16 @@ export function ChartPane({
   delayContext?: import('../shared/patternFilters').DelayContext;
   wssLink?: 'ok' | 'warn' | 'dead';
   active?: boolean;
+  tradeStatus?: 'wait' | 'run' | 'stop' | 'backtest';
+  inPos?: boolean;
+  locked?: boolean;
+  strategyId?: string;
+  systems?: Formula[];
+  onTrade?: (status: 'wait' | 'run' | 'stop' | 'backtest') => void;
+  onStrategy?: (id: string) => void;
+  onBuy?: () => void;
+  onSell?: () => void;
+  onLock?: () => void;
 }) {
   const code = win.locked ? win.code || '' : desk.vars.code || win.code || '';
   const [codeText, setCodeText] = useState(code);
@@ -348,6 +369,21 @@ export function ChartPane({
             {(liveWss || wssLink) === 'ok' ? 'WSS 수신' : (liveWss || wssLink) === 'warn' ? 'WSS 지연' : 'WSS 끊김'}
             {livePx > 0 ? ` ${livePx.toLocaleString('ko-KR')}` : ''}
           </span>
+          {onTrade && onBuy && onSell ? (
+            <TradeBar
+              code={code}
+              status={tradeStatus}
+              inPos={inPos}
+              locked={locked}
+              strategyId={strategyId}
+              systems={systems}
+              onTrade={onTrade}
+              onStrategy={onStrategy}
+              onBuy={onBuy}
+              onSell={onSell}
+              onLock={onLock}
+            />
+          ) : null}
           <select value={TF.some((t) => t.id === timeframe) ? timeframe : timeframe.startsWith('T') ? timeframe : '1'} onChange={(e) => patchWin({timeframe: e.target.value})}>
             {TF.map((t) => (
               <option key={t.id} value={t.id}>

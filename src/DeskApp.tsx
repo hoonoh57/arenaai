@@ -27,6 +27,7 @@ import {
 } from '../shared/desk';
 import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
+import {TradeBar} from './chart/TradeBar';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {DAY_HOLD_PRESETS, HOLD_PRESETS, parseSearchAt} from '../shared/verify';
@@ -647,6 +648,19 @@ function Pane(props: {
         onCommonCode={props.onCommonCode}
         wssLink={state.realtime?.hub.link}
         active={props.active !== false}
+        tradeStatus={(state.config.tradeByCode || {})[code] || 'wait'}
+        inPos={(state.book?.holdings || []).some((h) => h.code === code)}
+        locked={(state.config.lockedCodes || []).includes(code)}
+        strategyId={(state.config.strategyByCode || {})[code] || state.config.strategyId || ''}
+        systems={props.systems}
+        onTrade={(st) => void props.setTrade(code, st)}
+        onStrategy={(id) => void props.setStrategy(id, code)}
+        onBuy={() => void post('/api/book/buy', {code, type: 'market'}).then(() => props.load()).catch((e) => props.setNotice((e as Error).message))}
+        onSell={() => void post('/api/book/sell', {code, type: 'market'}).then(() => props.load()).catch((e) => props.setNotice((e as Error).message))}
+        onLock={() => {
+          const on = !((state.config.lockedCodes || []).includes(code));
+          void post('/api/lock', {code, locked: on}).then(() => props.load()).catch((e) => props.setNotice((e as Error).message));
+        }}
         patternFilters={state.config.patternFilters}
         delayContext={{
           skip001N: state.config.skip001N ?? 1.2,
@@ -748,55 +762,22 @@ function Pane(props: {
                     {s.change.toFixed(2)}%
                   </em>
                 </span>
-                {(() => {
-                  const st = (state.config.tradeByCode || {})[s.code] || 'wait';
-                  const inPos = (state.book?.holdings || []).some((h) => h.code === s.code);
-                  const label = inPos ? '매매중' : st === 'run' ? '적용' : st === 'backtest' ? '백테스트' : '대기';
-                  const next = st === 'wait' || st === 'stop' ? 'run' : st === 'run' ? 'backtest' : 'wait';
-                  return (
-                    <button
-                      className={'trade-tag ' + (inPos ? 'run' : st === 'run' ? 'run' : st === 'backtest' ? 'backtest' : 'wait')}
-                      title="클릭: 대기 → 적용(자동매매) → 백테스트"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void props.setTrade(s.code, next);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })()}
-                <button
-                  className={'hts-tool' + ((state.config.lockedCodes || []).includes(s.code) || (state.book?.holdings || []).some((h) => h.code === s.code) ? ' on' : '')}
-                  title="종목 잠금. 매매·미체결 중이면 순위에서 바뀌지 않습니다."
-                  onClick={(e) => {
-                    e.stopPropagation();
+                <TradeBar
+                  code={s.code}
+                  status={(state.config.tradeByCode || {})[s.code] || 'wait'}
+                  inPos={(state.book?.holdings || []).some((h) => h.code === s.code)}
+                  locked={(state.config.lockedCodes || []).includes(s.code)}
+                  strategyId={(state.config.strategyByCode || {})[s.code] || state.config.strategyId || ''}
+                  systems={props.systems}
+                  onTrade={(st) => void props.setTrade(s.code, st)}
+                  onStrategy={(id) => void props.setStrategy(id, s.code)}
+                  onBuy={() => void post('/api/book/buy', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message))}
+                  onSell={() => void post('/api/book/sell', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message))}
+                  onLock={() => {
                     const on = !((state.config.lockedCodes || []).includes(s.code));
                     void post('/api/lock', {code: s.code, locked: on}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
                   }}
-                >
-                  {(state.config.lockedCodes || []).includes(s.code) || (state.book?.holdings || []).some((h) => h.code === s.code) ? '잠김' : '풀림'}
-                </button>
-                <button
-                  className="hts-tool"
-                  title="시장 매수"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void post('/api/book/buy', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
-                  }}
-                >
-                  매수
-                </button>
-                <button
-                  className="hts-tool"
-                  title="시장 매도"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void post('/api/book/sell', {code: s.code, type: 'market'}).then(() => props.load()).catch((err) => props.setNotice((err as Error).message));
-                  }}
-                >
-                  매도
-                </button>
+                />
                 <button
                   className="cell-x"
                   title="제외"
