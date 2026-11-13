@@ -274,8 +274,8 @@ export class Kiwoom {
     if (!r.ok) throw new KiwoomApiError({returnCode: null, returnMsg: `HTTP ${r.status}`, httpStatus: r.status});
     if (d.return_code !== undefined && Number(d.return_code) !== 0) throw new KiwoomApiError({returnCode: Number(d.return_code), returnMsg: String(d.return_msg ?? '요청 실패')});
     this.lastContinuation = {
-      contYn: r.headers.get('cont-yn') || r.headers.get('Cont-Yn') || '',
-      nextKey: r.headers.get('next-key') || r.headers.get('Next-Key') || '',
+      contYn: r.headers.get('cont-yn') || r.headers.get('Cont-Yn') || String(d.cont_yn ?? d.contYn ?? ''),
+      nextKey: r.headers.get('next-key') || r.headers.get('Next-Key') || String(d.next_key ?? d.nextKey ?? ''),
     };
     return d;
   }
@@ -441,8 +441,7 @@ export class Kiwoom {
       let hasMore = this.lastContinuation.contYn === 'Y';
       let nextKey = this.lastContinuation.nextKey;
       const packed = await pullMore(candles, hasMore, nextKey, load);
-      candles = spec.group > 1 ? aggregateTickBars(packed.candles, spec.group) : packed.candles;
-      return {candles, hasMore: packed.hasMore, nextKey: packed.nextKey};
+      return {candles: packed.candles, hasMore: packed.hasMore || Boolean(packed.nextKey), nextKey: packed.nextKey};
     }
     const allowed = new Set(['1', '3', '5', '10', '15', '30', '45', '60']);
     if (!allowed.has(input.timeframe)) throw new Error('지원 차트: 틱·분·일·주·월. 초봉 API는 명세에 없습니다.');

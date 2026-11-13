@@ -5,6 +5,7 @@ import type {ChildWindow, VirtualDesk} from '../shared/desk';
 import {Chart} from './ChartView';
 import {DRAW_TOOLS} from '../shared/chartMenu';
 import {TradeBar} from './chart/TradeBar';
+import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
 
 const TF = [
   {id: 'T1', label: '1틱'},
@@ -138,6 +139,8 @@ export function ChartPane({
   const viewTimer = useRef(0);
   const paneById = win.indicatorPanes || {};
   const timeframe = win.timeframe || '1';
+  const tickSpec = parseTickTimeframe(timeframe);
+  const drawn = tickSpec && tickSpec.group > 1 ? aggregateTickBars(bars, tickSpec.group) : bars;
   const baseDate = win.baseDate || '';
   const visibleBars = win.visibleBars || 200;
   const formulaOpen = win.formulaOpen !== false;
@@ -171,7 +174,7 @@ export function ChartPane({
       if (opts.overlay) setOverlay(next);
       else if (opts.strengthOnly) setBars((prev) => mergeStrengthOnto(prev.length ? prev : next, next));
       else setBars((prev) => (opts.append ? mergeBars(prev, next) : next.length ? next : prev));
-      setHasMore(Boolean(d.hasMore));
+      setHasMore(Boolean(d.hasMore) || Boolean(d.nextKey));
       setStrengthHasMore(Boolean(d.strengthHasMore));
       setNextKey(d.nextKey || '');
       setStrengthNextKey(d.strengthNextKey || '');
@@ -275,6 +278,7 @@ export function ChartPane({
               next.length === prev.length
             )
               return prev;
+            if (prev.length > next.length) return mergeBars(prev, next);
             return next;
           }
           if (!prev.length) return prev;
@@ -472,7 +476,7 @@ export function ChartPane({
             onChange={(e) => patchWin({visibleBars: Number(e.target.value) || 200})}
             title="화면 표시 봉수"
           />
-          <button className="hts-tool" disabled={!hasMore || busy} onClick={() => void load({append: true})} title="가격 이전 페이지">
+          <button className="hts-tool" disabled={(!hasMore && !nextKey) || busy} onClick={() => void load({append: true})} title="가격 이전 페이지">
             +이전
           </button>
           <button
@@ -527,9 +531,9 @@ export function ChartPane({
             지우기
           </button>
         </div>
-        {bars.length ? (
+        {drawn.length ? (
           <Chart
-            data={bars}
+            data={drawn}
             overlay={overlay}
             formulas={applied}
             patternFilters={patternFilters}
@@ -597,7 +601,7 @@ export function ChartPane({
             </div>
             <div className="g"><b>데이터</b>
               <button disabled={busy || !/^\d{6}$/.test(codeText)} onClick={() => { void load({force: true}); setMenu(null); }}>조회</button>
-              <button disabled={!hasMore || busy} onClick={() => { void load({append: true}); setMenu(null); }}>+이전</button>
+              <button disabled={(!hasMore && !nextKey) || busy} onClick={() => { void load({append: true}); setMenu(null); }}>+이전</button>
               <button disabled={busy} onClick={() => { void load({strengthOnly: true, force: true}); setMenu(null); }}>{strengthReady ? '강도완료' : '강도+이전'}</button>
               <button onClick={() => { setOverlay([]); setMenu(null); }}>추종목 제거</button>
             </div>
