@@ -24,18 +24,15 @@ import {filtersFromFormulas, PATTERN_FILTERS, type DelayContext, type FilterEnab
 import type {ChartDrawing} from '../shared/desk';
 
 function kstParts(t: number) {
-  const d = new Date(Number(t) * 1000);
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const get = (type: string) => fmt.formatToParts(d).find((p) => p.type === type)?.value || '';
-  return {y: get('year'), m: get('month'), day: get('day'), h: get('hour'), min: get('minute')};
+  const d = new Date((Number(t) + 9 * 3600) * 1000);
+  const p2 = (n: number) => (n < 10 ? '0' : '') + n;
+  return {
+    y: String(d.getUTCFullYear()),
+    m: p2(d.getUTCMonth() + 1),
+    day: p2(d.getUTCDate()),
+    h: p2(d.getUTCHours()),
+    min: p2(d.getUTCMinutes()),
+  };
 }
 
 function tickLabel(t: number | string | object) {
@@ -70,6 +67,7 @@ export function Chart({
   magnet = true,
   yMode = 'price',
   daySep,
+  hoverTipOn = false,
   refLines,
   onDrawings,
   patternFilters,
@@ -99,6 +97,7 @@ export function Chart({
   magnet?: boolean;
   yMode?: 'price' | 'percent';
   daySep?: boolean;
+  hoverTipOn?: boolean;
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
   onDrawings?: (next: ChartDrawing[]) => void;
   patternFilters?: FilterEnabled;
@@ -169,9 +168,19 @@ export function Chart({
   paneByIdRef.current = paneById;
   const [frame, setFrame] = useState(0);
   const [hoverTip, setHoverTip] = useState<{idx: number; x: number; y: number} | null>(null);
+  useEffect(() => {
+    if (hoverTipOn) return;
+    window.clearTimeout(hoverTimer.current);
+    hoverShown.current = false;
+    setHoverTip(null);
+  }, [hoverTipOn]);
   const hoverTimer = useRef(0);
   const hoverShown = useRef(false);
   const pendingHover = useRef<{time: number; x: number; y: number} | null>(null);
+  const hoverOnRef = useRef(hoverTipOn);
+  hoverOnRef.current = hoverTipOn;
+  const rangeRaf = useRef(0);
+  const viewSaveT = useRef(0);
   const [legends, setLegends] = useState<{slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[]>([]);
   hintRef.current = visibleHint;
   countCb.current = onVisibleCount;
@@ -654,7 +663,7 @@ export function Chart({
       autoSize: true,
       height,
       layout: {background: {type: ColorType.Solid, color: '#111923'}, textColor: '#718395'},
-      localization: {timeFormatter: (t: number | string | object) => new Date(Number(t) * 1000).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul'})},
+      localization: {timeFormatter: tickLabel},
       grid: {vertLines: {color: '#1a2733', visible: gridRef.current}, horzLines: {color: '#1a2733', visible: gridRef.current}},
       timeScale: {
         borderVisible: false,
@@ -678,6 +687,13 @@ export function Chart({
     });
     chart.priceScale('right').applyOptions({mode: PriceScaleMode.Normal});
     chart.subscribeCrosshairMove((param) => {
+      if (!hoverOnRef.current) {
+        if (hoverShown.current) {
+          hoverShown.current = false;
+          setHoverTip(null);
+        }
+        return;
+      }
       window.clearTimeout(hoverTimer.current);
       const t = param.time !== undefined ? Number(param.time) : NaN;
       const pt = param.point;
@@ -695,6 +711,7 @@ export function Chart({
         setHoverTip(null);
       }
       hoverTimer.current = window.setTimeout(() => {
+        if (!hoverOnRef.current) return;
         const hold = pendingHover.current;
         if (!hold) return;
         const list = dataRef.current;
@@ -714,15 +731,24 @@ export function Chart({
       if (!range) return;
       rangeRef.current = range;
       countCb.current?.(Math.max(1, Math.round((range.to as number) - (range.from as number))));
-      setFrame((n) => n + 1);
-      try {
-        const panes = (chart as IChartApi & {panes: () => {getHeight?: () => number}[]}).panes?.() || [];
-        const hs = panes.map((p) => p.getHeight?.() || 1);
-        const sum = hs.reduce((a, b) => a + b, 0) || 1;
-        viewCb.current?.({from: Number(range.from), to: Number(range.to), paneStretch: hs.map((h) => h / sum)});
-      } catch {
-        viewCb.current?.({from: Number(range.from), to: Number(range.to)});
-      }
+      if (rangeRaf.current) return;
+      rangeRaf.current = requestAnimationFrame(() => {
+        rangeRaf.current = 0;
+        setFrame((n) => n + 1);
+        const r = rangeRef.current;
+        if (!r) return;
+        window.clearTimeout(viewSaveT.current);
+        viewSaveT.current = window.setTimeout(() => {
+          try {
+            const panes = (chart as IChartApi & {panes: () => {getHeight?: () => number}[]}).panes?.() || [];
+            const hs = panes.map((p) => p.getHeight?.() || 1);
+            const sum = hs.reduce((a, b) => a + b, 0) || 1;
+            viewCb.current?.({from: Number(r.from), to: Number(r.to), paneStretch: hs.map((h) => h / sum)});
+          } catch {
+            viewCb.current?.({from: Number(r.from), to: Number(r.to)});
+          }
+        }, 180);
+      });
     });
     chart.subscribeClick((param) => {
       const tool = drawToolRef.current;
@@ -1019,7 +1045,7 @@ export function Chart({
           );
         })}
       </svg>
-      {hoverTip && data[hoverTip.idx] ? (
+      {hoverTipOn && hoverTip && data[hoverTip.idx] ? (
         <div
           className="chart-hover-tip"
           style={{

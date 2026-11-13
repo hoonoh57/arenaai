@@ -53,6 +53,8 @@ export type ChildWindow = {
   drawings?: ChartDrawing[];
   yMode?: 'price' | 'percent';
   daySep?: boolean;
+  /** 십자선 말풍선. 꺼 두면 이동 중 계산하지 않는다. */
+  hoverTip?: boolean;
   refLines?: {prev?: boolean; open?: boolean; vi?: boolean};
 };
 
@@ -366,6 +368,7 @@ function validateWindow(win: ChildWindow): ChildWindow {
     syncCharts: win.syncCharts === undefined ? undefined : Boolean(win.syncCharts),
     yMode: win.yMode === 'percent' ? 'percent' : win.yMode === 'price' ? 'price' : undefined,
     daySep: win.daySep === undefined ? undefined : Boolean(win.daySep),
+    hoverTip: win.hoverTip === undefined ? undefined : Boolean(win.hoverTip),
     refLines: win.refLines && typeof win.refLines === 'object' ? {prev: Boolean(win.refLines.prev), open: Boolean(win.refLines.open), vi: Boolean(win.refLines.vi)} : undefined,
     drawings: Array.isArray(win.drawings)
       ? win.drawings

@@ -519,6 +519,9 @@ export function ChartPane({
           <button className={'hts-tool' + (win.daySep ? ' on' : '')} onClick={() => patchWin({daySep: !win.daySep})} title="일 구분선">
             일선
           </button>
+          <button className={'hts-tool' + (win.hoverTip ? ' on' : '')} onClick={() => patchWin({hoverTip: !win.hoverTip})} title="십자선 말풍선. 끄면 이동 중 계산하지 않음">
+            말풍선
+          </button>
           <button className={'hts-tool' + (win.refLines?.prev ? ' on' : '')} onClick={() => patchWin({refLines: {...win.refLines, prev: !win.refLines?.prev}})} title="전일종가">
             전일
           </button>
@@ -573,6 +576,7 @@ export function ChartPane({
             onMoveIndicator={(id, slot) => patchWin({indicatorPanes: {...paneById, [id]: slot}})}
             yMode={win.yMode === 'percent' ? 'percent' : 'price'}
             daySep={win.daySep}
+            hoverTipOn={Boolean(win.hoverTip)}
             refLines={win.refLines}
             onDrawings={(next) => patchWin({drawings: next})}
             onContextMenu={(e) => {
@@ -594,6 +598,7 @@ export function ChartPane({
             <div className="g"><b>표시</b>
               <button className={win.yMode === 'percent' ? 'on' : ''} onClick={() => { patchWin({yMode: win.yMode === 'percent' ? 'price' : 'percent'}); setMenu(null); }}>{win.yMode === 'percent' ? '가격축' : '등락률축'}</button>
               <button className={win.daySep ? 'on' : ''} onClick={() => { patchWin({daySep: !win.daySep}); setMenu(null); }}>일 구분선</button>
+              <button className={win.hoverTip ? 'on' : ''} onClick={() => { patchWin({hoverTip: !win.hoverTip}); setMenu(null); }}>말풍선</button>
               <button className={win.refLines?.prev ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, prev: !win.refLines?.prev}}); setMenu(null); }}>전일종가</button>
               <button className={win.refLines?.open ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, open: !win.refLines?.open}}); setMenu(null); }}>시가</button>
               <button className={win.refLines?.vi ? 'on' : ''} onClick={() => { patchWin({refLines: {...win.refLines, vi: !win.refLines?.vi}}); setMenu(null); }}>VI 예상</button>
