@@ -584,26 +584,30 @@ app.post('/api/chart', async (req, res) => {
     let candles: Candle[] = [];
     let page = {candles: [] as Candle[], hasMore: false, nextKey: ''};
     if (!strengthOnly) {
-      page = await hub.ensureChartPage({code, timeframe, baseDate, nextKey: nextKey || undefined});
-      candles = page.candles;
+      const got = await hub.ask({owner: 'desk:chart', op: 'chart', code, timeframe, baseDate, nextKey: nextKey || undefined});
+      page = {candles: got.candles, hasMore: got.hasMore, nextKey: got.nextKey};
+      candles = got.candles;
     } else {
-      candles = cache.chartPage(code, timeframe, baseDate);
+      candles = hub.liveBars(code, timeframe, baseDate);
     }
     let strengthHasMore = false;
     let strengthKey = '';
     let strengthReady = false;
     let strengthNxt = false;
     if (withStrength) {
-      try {
-        const attached = await hub.ensureStrengthPage({code, timeframe, baseDate, nextKey: strengthNextKey || undefined});
-        candles = attached.candles;
-        strengthHasMore = attached.hasMore;
-        strengthKey = attached.nextKey;
-        strengthReady = attached.ready;
-        strengthNxt = attached.nxt;
-      } catch {
-        /* 가격은 그대로. 강도는 미완료 */
-      }
+      const attached = await hub.ask({
+        owner: 'desk:chart',
+        op: 'strength',
+        code,
+        timeframe,
+        baseDate,
+        nextKey: strengthNextKey || undefined,
+      });
+      if (attached.candles.length) candles = attached.candles;
+      strengthHasMore = attached.hasMore;
+      strengthKey = attached.nextKey;
+      strengthReady = Boolean(attached.ready);
+      strengthNxt = Boolean(attached.nxt);
     }
     const listed = ranking.find((s) => s.code === code);
     const fetched = await hub.stockName(code).catch(() => '');
@@ -727,51 +731,8 @@ app.get('/api/live-bars', (req, res) => {
   const baseDate = typeof req.query.baseDate === 'string' ? req.query.baseDate : '';
   if (!/^\d{6}$/.test(code)) return res.status(400).json({error: '종목코드'});
   const st = bridge.status().hub;
-  const quote = cache.getQuote(code) || null;
-  let candles = cache.chartPage(code, timeframe, baseDate);
-  if (timeframe === '1') {
-    const ring = cache.candles(code);
-    if (ring.length && (!candles.length || (ring[ring.length - 1].time > (candles.at(-1)?.time || 0)))) {
-      const byTime = new Map(candles.map((c) => [c.time, c]));
-      for (const c of ring) {
-        const had = byTime.get(c.time);
-        byTime.set(
-          c.time,
-          had
-            ? {
-                ...had,
-                close: c.close,
-                high: Math.max(had.high, c.high),
-                low: had.low > 0 ? Math.min(had.low, c.low) : c.low,
-                ...(typeof c.volume === 'number' ? {volume: c.volume} : {}),
-                ...(typeof c.strength === 'number' ? {strength: c.strength} : {}),
-              }
-            : c,
-        );
-      }
-      candles = [...byTime.values()].sort((a, b) => a.time - b.time);
-      let lastStr: number | undefined;
-      candles = candles.map((c) => {
-        if (typeof c.strength === 'number' && c.strength > 0) lastStr = c.strength;
-        else if (lastStr) return {...c, strength: lastStr};
-        return c;
-      });
-    }
-  }
-  if (quote && quote.price > 0 && candles.length) {
-    const last = candles[candles.length - 1];
-    const str = typeof quote.strength === 'number' && quote.strength > 0 ? quote.strength : last.strength;
-    if (last.close !== quote.price || str !== last.strength) {
-      candles = candles.slice();
-      candles[candles.length - 1] = {
-        ...last,
-        close: quote.price,
-        high: Math.max(last.high, quote.price),
-        low: last.low > 0 ? Math.min(last.low, quote.price) : quote.price,
-        ...(typeof str === 'number' ? {strength: str} : {}),
-      };
-    }
-  }
+  const candles = hub.liveBars(code, timeframe, baseDate);
+  const quote = hub.quoteOf(code);
   res.json({
     candles,
     quote,
@@ -789,12 +750,14 @@ app.post('/api/tr', async (req, res) => {
     }
     if (id === 'ka10080') {
       if (!/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
-      res.json({id, code, data: await api.candles(code)});
+      const got = await hub.ask({owner: 'desk:tr', op: 'chart', code, timeframe: '1'});
+      res.json({id, code, data: got.candles, held: got.held, reason: got.reason});
       return;
     }
     if (id === 'ka10046') {
       if (!/^\d{6}$/.test(code)) throw new Error('종목코드는 6자리 숫자여야 합니다.');
-      res.json({id, code, data: await api.strengthSnapshot(code)});
+      const got = await hub.ask({owner: 'desk:tr', op: 'strength', code, timeframe: '1'});
+      res.json({id, code, data: got.quote, candles: got.candles, held: got.held, reason: got.reason});
       return;
     }
     res.status(400).json({error: '허용된 TR만 조회할 수 있습니다: ka10171, ka10080, ka10046'});
@@ -906,7 +869,9 @@ app.post('/api/verify', async (req, res) => {
     if (!codes.length) throw new Error('검증 종목이 없습니다. 로컬 0150을 고르거나 조건검색 포착 종목을 넣으세요.');
     const rows: VerifyRow[] = [];
     for (const code of codes) {
-      const candles = localExpr ? loadLocalBars(code, tf) : (await api.chartPage({code, timeframe: tf})).candles;
+      const candles = localExpr
+        ? loadLocalBars(code, tf)
+        : (await hub.ask({owner: 'desk:verify', op: 'chart', code, timeframe: tf})).candles;
       const listed = ranking.find((s) => s.code === code);
       const name = listed?.name && listed.name !== code ? listed.name : code;
       const empty: VerifyRow = {code, name, matched: false, searchPrice: null, endPrice: null, returnPct: null, maxReturnPct: null, returns: {}};

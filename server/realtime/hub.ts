@@ -464,6 +464,151 @@ export class RealtimeHub {
     return {ok: true, waitMs, left: b.left};
   }
 
+  /**
+   * 수요 표준 요청. 차트·강도·시세·구독은 여기만. 총량 밖이면 held=true 와 캐시.
+   */
+  async ask(input: {
+    owner: string;
+    op: 'chart' | 'strength' | 'live' | 'quote' | 'name' | 'watch';
+    code?: string;
+    timeframe?: string;
+    baseDate?: string;
+    nextKey?: string;
+    items?: readonly string[];
+    types?: readonly string[];
+    fresh?: boolean;
+  }): Promise<{
+    ok: boolean;
+    held: boolean;
+    reason?: string;
+    candles: Candle[];
+    hasMore: boolean;
+    nextKey: string;
+    quote: Quote | null;
+    name?: string;
+    ready?: boolean;
+    nxt?: boolean;
+  }> {
+    const tf = input.timeframe || '1';
+    const base = input.baseDate || '';
+    const code = input.code || '';
+    const empty = {ok: false, held: false, candles: [] as Candle[], hasMore: false, nextKey: '', quote: null as Quote | null};
+    try {
+      if (input.op === 'name') {
+        const name = code ? await this.stockName(code) : '';
+        return {...empty, ok: true, name};
+      }
+      if (input.op === 'quote') {
+        return {...empty, ok: true, quote: code ? this.quoteOf(code) : null};
+      }
+      if (input.op === 'watch') {
+        const items = [...(input.items || [])].filter((c) => /^\d{6}$/.test(c));
+        const types = input.types?.length ? [...input.types] : ['0B'];
+        if (!items.length) return {...empty, ok: true, held: true, reason: '종목 없음'};
+        const room = this.wssAllowed(0);
+        if (!room.ok) return {...empty, ok: true, held: true, reason: room.reason};
+        await this.subscribe(input.owner || 'demand', items, types);
+        return {...empty, ok: true};
+      }
+      if (!/^\d{6}$/.test(code)) return {...empty, reason: '종목코드'};
+      if (input.op === 'live') {
+        return {
+          ...empty,
+          ok: true,
+          candles: this.liveBars(code, tf, base),
+          quote: this.quoteOf(code),
+        };
+      }
+      if (input.op === 'chart') {
+        const allow = this.restAllowed(1);
+        if (!allow.ok && !input.fresh) {
+          const candles = this.pageOf(code, tf, base);
+          return {...empty, ok: candles.length > 0, held: true, reason: allow.reason, candles, quote: this.quoteOf(code)};
+        }
+        const page = await this.ensureChartPage({code, timeframe: tf, baseDate: base, nextKey: input.nextKey, fresh: input.fresh});
+        return {...empty, ok: true, candles: page.candles, hasMore: page.hasMore, nextKey: page.nextKey, quote: this.quoteOf(code)};
+      }
+      if (input.op === 'strength') {
+        const allow = this.restAllowed(1);
+        if (!allow.ok) {
+          const candles = this.pageOf(code, tf, base);
+          return {...empty, ok: candles.length > 0, held: true, reason: allow.reason, candles, quote: this.quoteOf(code)};
+        }
+        const page = await this.ensureStrengthPage({code, timeframe: tf, baseDate: base, nextKey: input.nextKey});
+        return {
+          ...empty,
+          ok: true,
+          candles: page.candles,
+          hasMore: page.hasMore,
+          nextKey: page.nextKey,
+          ready: page.ready,
+          nxt: page.nxt,
+          quote: this.quoteOf(code),
+        };
+      }
+      return {...empty, reason: `미등록 수요: ${input.op}`};
+    } catch (e) {
+      const cached = code ? this.pageOf(code, tf, base) : [];
+      return {
+        ...empty,
+        ok: cached.length > 0,
+        held: true,
+        reason: e instanceof Error ? e.message : '수요 거절',
+        candles: cached,
+        quote: code ? this.quoteOf(code) : null,
+      };
+    }
+  }
+
+  liveBars(code: string, timeframe = '1', baseDate = ''): Candle[] {
+    const quote = this.cache.getQuote(code);
+    let candles = this.cache.chartPage(code, timeframe, baseDate);
+    if (timeframe === '1') {
+      const ring = this.cache.candles(code);
+      if (ring.length && (!candles.length || (ring[ring.length - 1].time > (candles.at(-1)?.time || 0)))) {
+        const byTime = new Map(candles.map((c) => [c.time, c]));
+        for (const c of ring) {
+          const had = byTime.get(c.time);
+          byTime.set(
+            c.time,
+            had
+              ? {
+                  ...had,
+                  close: c.close,
+                  high: Math.max(had.high, c.high),
+                  low: had.low > 0 ? Math.min(had.low, c.low) : c.low,
+                  ...(typeof c.volume === 'number' ? {volume: c.volume} : {}),
+                  ...(typeof c.strength === 'number' ? {strength: c.strength} : {}),
+                }
+              : c,
+          );
+        }
+        candles = [...byTime.values()].sort((a, b) => a.time - b.time);
+        let lastStr: number | undefined;
+        candles = candles.map((c) => {
+          if (typeof c.strength === 'number' && c.strength > 0) lastStr = c.strength;
+          else if (lastStr) return {...c, strength: lastStr};
+          return c;
+        });
+      }
+    }
+    if (quote && quote.price > 0 && candles.length) {
+      const last = candles[candles.length - 1];
+      const str = typeof quote.strength === 'number' && quote.strength > 0 ? quote.strength : last.strength;
+      if (last.close !== quote.price || str !== last.strength) {
+        candles = candles.slice();
+        candles[candles.length - 1] = {
+          ...last,
+          close: quote.price,
+          high: Math.max(last.high, quote.price),
+          low: last.low > 0 ? Math.min(last.low, quote.price) : quote.price,
+          ...(typeof str === 'number' ? {strength: str} : {}),
+        };
+      }
+    }
+    return candles;
+  }
+
   wssAllowed(add = 0): {ok: boolean; left: number; reason?: string} {
     const w = this.wssBudget();
     if (w.used + add > w.cap) {
