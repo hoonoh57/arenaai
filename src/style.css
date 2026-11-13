@@ -201,12 +201,17 @@
 .work-overlay.err b{background:#2a1818;border-color:#8e555b;color:#ffd6d6}
 .hub-lab{position:relative;padding:10px 12px;font-size:11px;color:#c5d4cc;height:100%;overflow:auto}
 .hub-lab-overlay{position:absolute;inset:0;z-index:20;background:#071016d8;display:grid;place-items:center;pointer-events:all}
-.hub-lab-overlay>div{background:#1a2a18;border:1px solid #6a8a4a;color:#d4f0a8;padding:22px 28px;border-radius:8px;min-width:240px;text-align:center}
+.hub-lab-overlay>div{background:#1a2a18;border:1px solid #6a8a4a;color:#d4f0a8;padding:22px 28px;border-radius:8px;min-width:min(520px,86%);max-width:640px;max-height:80%;overflow:auto;text-align:left}
 .hub-lab-overlay b{display:block;font-size:16px;margin-bottom:8px}
 .hub-lab-overlay p{margin:6px 0;color:#c2ef92;line-height:1.45}
 .hub-lab-overlay.err>div{background:#2a1818;border-color:#8e555b;color:#ffd6d6}
 .hub-lab-overlay.err p{color:#ffd6d6}
 .hub-lab-overlay.ok>div{border-color:#3d6a40}
+.hub-lab-work{font-weight:600}
+.hub-lab-wait{color:#8fa79a!important;font-size:11px}
+.hub-lab-live{margin:10px 0 0;padding-left:18px;max-height:220px;overflow:auto;font-size:11px}
+.hub-lab-live li{margin:4px 0;color:#c2ef92}
+.hub-lab-live li.bad{color:#ffd6d6}
 .hub-lab-lead{color:#8fa79a;margin:0 0 10px;line-height:1.45}
 .hub-lab-presets{display:flex;gap:6px;margin-bottom:8px}
 .hub-lab-params{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px 10px;margin-bottom:10px}

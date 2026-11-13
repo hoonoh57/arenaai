@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS, clampLabParams, type LabParams} from '../shared/hubLabParams';
 
 type LabCase = {id: string; title: string; group: string};
@@ -9,6 +9,50 @@ type LabReport = {
   results: {id: string; title: string; group: string; ms: number; targetMs: number; ok: boolean; pass: boolean; detail: string; constraints: number}[];
   bottlenecks: string[];
   missingOfficial?: string[];
+};
+
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}초`;
+  return `${Math.floor(ms / 60000)}분 ${Math.round((ms % 60000) / 1000)}초`;
+}
+
+function estimateCaseMs(id: string, p: LabParams): number {
+  const rest = Math.max(p.restDelayMs, 8) + p.restIntervalMs;
+  const batches = Math.ceil(p.codes / Math.max(1, p.chartConcurrency));
+  if (id === 'ensureChartPage') return batches * rest;
+  if (id === 'ensureStrengthPage') return batches * rest * 2;
+  if (id === 'liveMany' || id === 'applyLiveTick' || id === 'applyLiveQuote') return Math.max(30, p.codes * p.ticks * 0.2);
+  if (id === 'conditionMany' || id === 'conditionOne' || id === 'planWatch') return Math.max(20, p.conditions * p.captured * 0.05);
+  if (id === 'evaluateSignals') return Math.max(20, p.codes * 2);
+  if (id === 'orderDuplicate' || id === 'orderOverLimit') return Math.max(15, p.orders * 2);
+  return 80;
+}
+
+function workText(id: string, title: string, p: LabParams): string {
+  if (id === 'ensureChartPage') return `${title}: ${p.codes}종목 분봉을 허브가 받는 중 (병렬 ${p.chartConcurrency}, 간격 ${p.restIntervalMs}ms)`;
+  if (id === 'ensureStrengthPage') return `${title}: ${p.codes}종목 체결강도 1장씩 허브 큐`;
+  if (id === 'liveMany') return `${title}: ${p.codes}종목 × ${p.ticks}틱 × 피드 ${p.feedsPerCode}`;
+  if (id === 'applyLiveTick' || id === 'applyLiveQuote') return `${title}: 최근 봉에 체결 ${p.ticks}회`;
+  if (id === 'conditionMany') return `${title}: 조건 ${p.conditions} × 포착 ${p.captured}`;
+  if (id === 'conditionOne' || id === 'planWatch') return `${title}: 포착 ${p.captured}를 감시 ${p.watchBudget} 슬롯에 편성`;
+  if (id === 'orderDuplicate' || id === 'orderOverLimit') return `${title}: 주문 ${p.orders}회 / 보유한도 ${p.maxPositions}`;
+  if (id === 'chartRefreshBudget') return `${title}: 종목 ${p.codes} · 주기 ${p.refreshMs}ms vs REST 예산`;
+  if (id === 'demandWindowCap') return `${title}: 창 ${p.windows}개가 한 허브를 쓰는지`;
+  if (id === 'evaluateSignals') return `${title}: ${p.codes}종목 신호`;
+  return `${title} 실행 중`;
+}
+
+type Overlay = {
+  kind: 'run' | 'load' | 'done' | 'error';
+  title: string;
+  work?: string;
+  i?: number;
+  n?: number;
+  elapsed?: number;
+  eta?: number;
+  expected?: number;
+  log?: {title: string; ms: number; pass: boolean; detail: string}[];
 };
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
@@ -26,7 +70,16 @@ export function HubLabPane() {
   const [params, setParams] = useState<LabParams>(LAB_PARAM_DEFAULT);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [overlay, setOverlay] = useState<{kind: 'run' | 'load' | 'done' | 'error'; title: string; i?: number; n?: number} | null>(null);
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [nowTick, setNowTick] = useState(0);
+  const runStarted = useRef(0);
+  const caseStarted = useRef(0);
+
+  useEffect(() => {
+    if (!overlay || (overlay.kind !== 'run' && overlay.kind !== 'load')) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 200);
+    return () => window.clearInterval(id);
+  }, [overlay?.kind]);
 
   const load = async (silent = false) => {
     if (!silent) {
@@ -63,6 +116,9 @@ export function HubLabPane() {
     }
     setBusy(true);
     setErr('');
+    const log: Overlay['log'] = [];
+    const expectedAll = queue.reduce((s, c) => s + estimateCaseMs(c.id, bodyParams), 0);
+    runStarted.current = Date.now();
     const merged: LabReport = {
       at: Date.now(),
       scope: id,
@@ -73,12 +129,46 @@ export function HubLabPane() {
     try {
       for (let i = 0; i < queue.length; i++) {
         const c = queue[i];
-        setOverlay({kind: 'run', title: c.title, i: i + 1, n: queue.length});
+        const expected = estimateCaseMs(c.id, bodyParams);
+        const remainExpect = queue.slice(i).reduce((s, x) => s + estimateCaseMs(x.id, bodyParams), 0);
+        caseStarted.current = Date.now();
+        setOverlay({
+          kind: 'run',
+          title: c.title,
+          work: workText(c.id, c.title, bodyParams),
+          i: i + 1,
+          n: queue.length,
+          elapsed: 0,
+          eta: remainExpect,
+          expected,
+          log,
+        });
         const report = await j<LabReport>('/api/hub/lab', {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})});
+        const row = report.results[0];
+        log.push({
+          title: c.title,
+          ms: row?.ms ?? Date.now() - caseStarted.current,
+          pass: row ? row.ok && row.pass : false,
+          detail: row?.detail || '',
+        });
         merged.results.push(...report.results);
         merged.params = report.params || bodyParams;
         merged.at = report.at;
+        const elapsed = Date.now() - runStarted.current;
+        const avg = log.length ? elapsed / log.length : expected;
+        const eta = avg * (queue.length - i - 1);
         setCurrent({...merged, bottlenecks: merged.results.filter((r) => !r.pass).map((r) => r.id)});
+        setOverlay({
+          kind: 'run',
+          title: c.title,
+          work: workText(c.id, c.title, bodyParams),
+          i: i + 1,
+          n: queue.length,
+          elapsed,
+          eta,
+          expected,
+          log: [...log],
+        });
       }
       merged.bottlenecks = merged.results.filter((r) => !r.pass).map((r) => r.id);
       setCurrent(merged);
@@ -87,13 +177,16 @@ export function HubLabPane() {
         title: merged.bottlenecks.length ? `끝 · 병목 ${merged.bottlenecks.length}` : `끝 · ${merged.results.length}건 통과`,
         i: queue.length,
         n: queue.length,
+        elapsed: Date.now() - runStarted.current,
+        eta: 0,
+        expected: expectedAll,
+        log,
       });
       await load(true);
-      window.setTimeout(() => setOverlay((o) => (o?.kind === 'done' ? null : o)), 1400);
     } catch (e) {
       const msg = (e as Error).message;
       setErr(msg);
-      setOverlay({kind: 'error', title: msg});
+      setOverlay({kind: 'error', title: msg, log, elapsed: Date.now() - runStarted.current});
     } finally {
       setBusy(false);
     }
@@ -110,16 +203,38 @@ export function HubLabPane() {
         <div className={'hub-lab-overlay' + (overlay.kind === 'error' ? ' err' : overlay.kind === 'done' ? ' ok' : '')}>
           <div>
             <b>{overlay.kind === 'run' ? '측정 중' : overlay.kind === 'load' ? '불러오는 중' : overlay.kind === 'done' ? '완료' : '오류'}</b>
-            <p>{overlay.title}</p>
-            {overlay.n ? (
+            <p className="hub-lab-work">{overlay.work || overlay.title}</p>
+            {overlay.kind === 'run' || overlay.kind === 'load' ? (
               <p>
-                {overlay.i}/{overlay.n}
-                {overlay.kind === 'run' ? ' · 닫기·클릭 불가' : ''}
+                이 단계 경과 {fmtMs((overlay.kind === 'run' ? nowTick || Date.now() : Date.now()) - (caseStarted.current || runStarted.current || Date.now()))}
+                {overlay.expected ? ` · 이 단계 예상 ${fmtMs(overlay.expected)}` : ''}
               </p>
-            ) : overlay.kind === 'run' || overlay.kind === 'load' ? (
-              <p>닫기·클릭 불가</p>
             ) : null}
-            {overlay.kind === 'error' ? (
+            <p>
+              전체 경과 {fmtMs((overlay.elapsed || 0) + (overlay.kind === 'run' && caseStarted.current ? Math.max(0, (nowTick || Date.now()) - caseStarted.current) : 0))}
+              {overlay.kind === 'run' && overlay.eta != null ? ` · 남은 예상 ${fmtMs(overlay.eta)}` : ''}
+              {overlay.n ? ` · ${overlay.i}/${overlay.n}` : ''}
+            </p>
+            <p className="hub-lab-wait">
+              {overlay.kind === 'run'
+                ? overlay.eta && overlay.eta > 5000
+                  ? '오래 걸리는 부하입니다. 창이 멈춘 것이 아닙니다.'
+                  : '닫기·클릭 불가. 허브가 이 건을 끝낼 때까지 기다립니다.'
+                : overlay.kind === 'load'
+                  ? '저장을 읽는 중'
+                  : ''}
+            </p>
+            {overlay.log?.length ? (
+              <ol className="hub-lab-live">
+                {overlay.log.map((line, i) => (
+                  <li key={i} className={line.pass ? 'ok' : 'bad'}>
+                    {line.pass ? '성공' : '실패'} · {line.title} · {fmtMs(line.ms)}
+                    {line.detail ? ` · ${line.detail}` : ''}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {overlay.kind === 'error' || overlay.kind === 'done' ? (
               <button className="hts-tool" onClick={() => setOverlay(null)}>
                 확인
               </button>
