@@ -473,6 +473,61 @@ app.get('/api/hub/ops', (_req, res) => {
 app.get('/api/hub/lab/live', (_req, res) => {
   res.json({...(getLabUnitLive() || {idle: true}), quota: hub.quota()});
 });
+app.get('/api/hub/lab/inspect', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  if (!/^\d{6}$/.test(code)) {
+    res.status(400).json({error: '종목코드'});
+    return;
+  }
+  const kst = (sec: number) =>
+    Number.isFinite(sec) && sec > 0
+      ? new Date(sec * 1000).toLocaleString('sv-SE', {timeZone: 'Asia/Seoul'}).replace('T', ' ')
+      : '';
+  const candles = hub.pageOf(code, '1', '') || [];
+  const quote = hub.quoteOf(code) || null;
+  const name = await hub.stockName(code).catch(() => code);
+  const issues: string[] = [];
+  let timeBack = 0;
+  let ohlcBad = 0;
+  let strengthN = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (i && c.time < candles[i - 1].time) timeBack += 1;
+    const hi = Math.max(c.open, c.close, c.low);
+    const lo = Math.min(c.open, c.close, c.high);
+    if (c.high < hi - 1e-9 || c.low > lo + 1e-9) ohlcBad += 1;
+    if (typeof c.strength === 'number' && c.strength > 0) strengthN += 1;
+  }
+  if (!candles.length) issues.push('허브 캐시에 봉이 없습니다');
+  if (timeBack) issues.push(`시간 역전 ${timeBack}건`);
+  if (ohlcBad) issues.push(`OHLC 불일치 ${ohlcBad}건`);
+  const first = candles[0];
+  const last = candles[candles.length - 1];
+  res.json({
+    code,
+    name,
+    bars: candles.length,
+    strengthBars: strengthN,
+    firstAt: first ? kst(first.time) : '',
+    first: first || null,
+    lastAt: last ? kst(last.time) : '',
+    last: last || null,
+    quote: quote
+      ? {price: quote.price, time: quote.time, strength: quote.strength, at: kst(quote.time || 0)}
+      : null,
+    issues,
+    candles: candles.map((c) => ({
+      at: kst(c.time),
+      time: c.time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+      strength: c.strength ?? null,
+    })),
+  });
+});
 app.get('/api/hub/lab', (_req, res) => {
   res.json({
     cases: LAB_CASES,

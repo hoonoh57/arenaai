@@ -235,3 +235,12 @@
 .hub-lab-report tr.bad td{color:#ffd6d6}
 .hub-lab-detail{color:#7e918b;font-size:10px;margin-top:2px}
 .hub-lab-hist{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.hub-lab-unit{cursor:pointer}
+.hub-lab-unit:hover td{background:#1a2e24}
+.hub-lab-dialog{position:absolute;inset:0;z-index:30;background:#071016d8;display:grid;place-items:center}
+.hub-lab-dialog>div{background:#122018;border:1px solid #6a8a4a;color:#d4f0a8;padding:16px 18px;border-radius:8px;width:min(920px,94%);max-height:86%;overflow:auto}
+.hub-lab-dialog b{display:block;margin-bottom:8px;font-size:14px}
+.hub-lab-bars{max-height:58vh;overflow:auto;margin:8px 0 12px}
+.hub-lab-bars table{width:100%;border-collapse:collapse;font-size:10px}
+.hub-lab-bars th,.hub-lab-bars td{border-bottom:1px solid #1e2b35;padding:3px 4px;text-align:right}
+.hub-lab-bars th:first-child,.hub-lab-bars td:first-child{text-align:left}

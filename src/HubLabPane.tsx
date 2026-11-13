@@ -118,6 +118,19 @@ export function HubLabPane() {
   const [nowTick, setNowTick] = useState(0);
   const [unit, setUnit] = useState<UnitLive | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
+  const [inspect, setInspect] = useState<null | {
+    loading?: boolean;
+    err?: string;
+    code?: string;
+    name?: string;
+    bars?: number;
+    strengthBars?: number;
+    firstAt?: string;
+    lastAt?: string;
+    issues?: string[];
+    quote?: {price: number; strength?: number; at?: string} | null;
+    candles?: {at: string; open: number; high: number; low: number; close: number; volume: number; strength: number | null}[];
+  }>(null);
   const runStarted = useRef(0);
   const caseStarted = useRef(0);
 
@@ -485,7 +498,26 @@ export function HubLabPane() {
                     </tr>
                   );
                   const kids = (r.units || []).map((u) => (
-                    <tr key={`${r.id}-${u.code}`} className={u.ok && !u.simulated ? '' : 'bad'}>
+                    <tr
+                      key={`${r.id}-${u.code}`}
+                      className={'hub-lab-unit' + (u.ok && !u.simulated ? '' : ' bad')}
+                      onClick={() => {
+                        setInspect({loading: true, code: u.code, name: u.name});
+                        void j<{
+                          code: string;
+                          name: string;
+                          bars: number;
+                          strengthBars: number;
+                          firstAt: string;
+                          lastAt: string;
+                          issues: string[];
+                          quote: {price: number; strength?: number; at?: string} | null;
+                          candles: {at: string; open: number; high: number; low: number; close: number; volume: number; strength: number | null}[];
+                        }>(`/api/hub/lab/inspect?code=${u.code}`)
+                          .then((d) => setInspect(d))
+                          .catch((e) => setInspect({code: u.code, name: u.name, err: (e as Error).message}));
+                      }}
+                    >
                       <td>
                         └ {u.name || ''} {u.code}
                         <div className="hub-lab-detail">
@@ -517,6 +549,59 @@ export function HubLabPane() {
           </p>
         ) : null}
       </div>
+      {inspect ? (
+        <div className="hub-lab-dialog" onClick={() => setInspect(null)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <b>
+              {inspect.name || ''} {inspect.code} 수신 데이터
+            </b>
+            {inspect.loading ? (
+              <p>허브 캐시를 읽는 중</p>
+            ) : inspect.err ? (
+              <p className="hub-lab-err">{inspect.err}</p>
+            ) : (
+              <>
+                <p>
+                  봉 {inspect.bars ?? 0} · 강도있는 봉 {inspect.strengthBars ?? 0} · 첫 {inspect.firstAt || '-'} · 끝 {inspect.lastAt || '-'}
+                  {inspect.quote ? ` · 시세 ${inspect.quote.price} ${inspect.quote.at || ''}` : ' · 시세 없음'}
+                </p>
+                <p>{inspect.issues?.length ? `정합 ${inspect.issues.join(' · ')}` : '정합: 시간순·OHLC 이상 없음'}</p>
+                <div className="hub-lab-bars">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>시각</th>
+                        <th>시</th>
+                        <th>고</th>
+                        <th>저</th>
+                        <th>종</th>
+                        <th>거래량</th>
+                        <th>강도</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(inspect.candles || []).map((c, i) => (
+                        <tr key={`${c.at}-${i}`}>
+                          <td>{c.at}</td>
+                          <td>{c.open}</td>
+                          <td>{c.high}</td>
+                          <td>{c.low}</td>
+                          <td>{c.close}</td>
+                          <td>{c.volume}</td>
+                          <td>{c.strength ?? '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            <button className="hts-tool" onClick={() => setInspect(null)}>
+              닫기
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
