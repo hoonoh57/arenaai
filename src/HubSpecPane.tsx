@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {HUB_ASK_CATALOG, HUB_ASK_OPS} from '../shared/hubAsk';
 import {HUB_CAPS} from '../shared/hubCaps';
+import {HUB_TR_CATALOG, HUB_TR_SCREENS} from '../shared/hubTrCatalog';
 
 type Dash = {
   rest?: {used: number; left: number; cap: number; waitForOneMs: number; refillPerSecond: number};
@@ -126,6 +127,49 @@ export function HubSpecPane() {
         <p className="hub-spec-note">
           공통 회신: ok:boolean, held:boolean, reason?:string, candles:Candle[], hasMore, nextKey, quote. 실패해도 book이 있으면 잔고를 그린다. held면 재폭주 금지.
         </p>
+      </section>
+      <section className="hub-spec-api">
+        <h3>자동매매 참조 TR · 화면 (openapi.kiwoom.com)</h3>
+        <p>창은 ask(op:'tr', tr:'ka10075')만. 미배선은 허브가 held로 거절하고 키움으로 나가지 않는다. 배선된 것만 총량 안에서 호출.</p>
+        <p>
+          화면:{' '}
+          {HUB_TR_SCREENS.map((s) => `${s.screen} ${s.name}(${s.tr.join(',')})`).join(' · ')}
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>TR</th>
+              <th>이름</th>
+              <th>그룹·화면</th>
+              <th>경로</th>
+              <th>레인</th>
+              <th>배선</th>
+              <th>자동매매</th>
+              <th>한도</th>
+            </tr>
+          </thead>
+          <tbody>
+            {HUB_TR_CATALOG.map((t) => (
+              <tr key={t.id}>
+                <td>
+                  <code>{t.id}</code>
+                </td>
+                <td>{t.name}</td>
+                <td>
+                  {t.group} · {t.screen || '-'}
+                </td>
+                <td>{t.path}</td>
+                <td>{t.lane}</td>
+                <td>{t.wired ? '배선' : '준비'}</td>
+                <td>{t.auto ? '필수' : '선택'}</td>
+                <td>
+                  {t.rate}
+                  {t.note ? ` · ${t.note}` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
     </div>
   );

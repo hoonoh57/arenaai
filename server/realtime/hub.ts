@@ -23,6 +23,7 @@ import {classifyMessage, LimitGovernor, RealtimeCaps, type RealtimeLimits} from 
 import {KeyedDedup, SignalDedup} from './ring';
 import {ChartGate} from './chartGate';
 import {HubOps} from './hubOps';
+import {HUB_TR_CATALOG} from '../../shared/hubTrCatalog';
 import {planSubscriptions} from './plan';
 import {signalDataStatus} from '../data-quality';
 import {SimulationBook, type BookHooks, type MockOrderBroker} from './book';
@@ -481,7 +482,9 @@ export class RealtimeHub {
       | 'sell'
       | 'flatten'
       | 'cancel'
-      | 'system';
+      | 'system'
+      | 'tr';
+    tr?: string;
     code?: string;
     timeframe?: string;
     baseDate?: string;
@@ -516,6 +519,23 @@ export class RealtimeHub {
     const code = input.code || '';
     const empty = {ok: false, held: false, candles: [] as Candle[], hasMore: false, nextKey: '', quote: null as Quote | null};
     try {
+      if (input.op === 'tr') {
+        const row = HUB_TR_CATALOG.find((t) => t.id === input.tr);
+        if (!row) return {...empty, reason: `미등록 TR ${input.tr || ''}`};
+        if (!row.wired) {
+          return {...empty, ok: true, held: true, reason: `${row.id} ${row.name} 미배선. 스펙 창 목록만. 키움 직행 금지`};
+        }
+        if (row.id === 'ka10080' || row.id === 'ka10081' || row.id === 'ka10079') {
+          return this.ask({...input, op: 'chart', timeframe: row.id === 'ka10081' ? 'D' : input.timeframe});
+        }
+        if (row.id === 'ka10046' || row.id === 'ka10047') return this.ask({...input, op: 'strength'});
+        if (row.id === 'ka10001') return this.ask({...input, op: 'name'});
+        if (row.id === 'kt10000') return this.ask({...input, op: 'buy'});
+        if (row.id === 'kt10001') return this.ask({...input, op: 'sell'});
+        if (row.id === 'kt10003') return this.ask({...input, op: 'cancel'});
+        if (row.id === '0B') return this.ask({...input, op: 'watch', items: input.items || (code ? [code] : [])});
+        return {...empty, ok: true, held: true, reason: `${row.id}는 기존 op로만. 창은 키움 경로를 열지 않음`};
+      }
       if (input.op === 'name') {
         const name = code ? await this.stockName(code) : '';
         return {...empty, ok: true, name};
