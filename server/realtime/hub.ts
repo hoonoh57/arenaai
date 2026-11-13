@@ -291,7 +291,7 @@ export class RealtimeHub {
     });
   }
 
-  /** 체결강도 한 페이지. 연속 조회는 허브 큐만. */
+  /** 체결강도. 08:30(NXT)/09:00(KRX)까지 빈 봉을 채우되, REST 총량이 허용하는 페이지만. */
   async ensureStrengthPage(input: {
     code: string;
     timeframe: string;
@@ -301,18 +301,34 @@ export class RealtimeHub {
     return this.ops.run('ensureStrengthPage', async () => {
       const broker = this.deps.broker;
       if (!broker?.attachStrength) throw new Error('체결강도 REST가 허브에 없습니다.');
-      const candles =
+      let candles =
         this.ops.runSync('chartPage', () => this.cache.chartPage(input.code, input.timeframe, input.baseDate || '')) || [];
-      const key = this.chartGate.key({kind: 'strength', code: input.code, timeframe: input.timeframe, next: input.nextKey || ''});
-      const attached = await this.chartGate.load(key, () =>
-        broker.attachStrength!(input.code, input.timeframe, candles, input.nextKey || undefined),
-      );
-      if (attached.candles.length) {
-        this.ops.runSync('putChartPage', () => {
-          this.cache.putChartPage(input.code, input.timeframe, input.baseDate || '', attached.candles);
+      let next = input.nextKey || '';
+      let last = {candles, hasMore: false, nextKey: '', ready: false, nxt: false};
+      for (let i = 0; i < 40; i++) {
+        if (!this.restAllowed(1).ok) break;
+        const key = this.chartGate.key({
+          kind: 'strength',
+          code: input.code,
+          timeframe: input.timeframe,
+          next,
         });
+        const attached = await this.chartGate.load(key, () =>
+          broker.attachStrength!(input.code, input.timeframe, candles, next || undefined),
+        );
+        last = attached;
+        candles = attached.candles.length ? attached.candles : candles;
+        if (attached.candles.length) {
+          this.ops.runSync('putChartPage', () => {
+            this.cache.putChartPage(input.code, input.timeframe, input.baseDate || '', attached.candles);
+          });
+        }
+        const empty = candles.filter((c) => !(typeof c.strength === 'number' && c.strength > 0)).length;
+        if (attached.ready || empty === 0) break;
+        if (!attached.hasMore || !attached.nextKey || attached.nextKey === next) break;
+        next = attached.nextKey;
       }
-      return attached;
+      return last;
     });
   }
 
