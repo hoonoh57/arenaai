@@ -284,10 +284,11 @@ async function runOne(
     return {detail: `시세 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'applyLiveTick' || id === 'applyLiveQuote') {
-    beginUnits(id, '종목', list.length, 1, '체결 반영');
+    beginUnits(id, '종목', list.length, 1, `체결 반영 ×${p.ticks}`);
     for (const c of list) {
       const t = Date.now();
-      const q = live.touchQuote(c);
+      let q = null as ReturnType<RealtimeHub['touchQuote']>;
+      for (let i = 0; i < p.ticks; i++) q = live.touchQuote(c);
       const page = live.pageOf(c, '1', '');
       const span = barSpan(page);
       const name = (await live.stockName(c).catch(() => c)) || c;
@@ -295,7 +296,7 @@ async function runOne(
     }
     const units = endUnits();
     const fail = units.filter((u) => !u.ok).length;
-    return {detail: `체결반영 ${units.length - fail}/${units.length}`, constraints: fail, units};
+    return {detail: `체결반영 ${units.length - fail}/${units.length} · 틱 ${p.ticks}`, constraints: fail, units};
   }
   if (id === 'subscribe') {
     const w = live.wssAllowed(0);
@@ -329,9 +330,10 @@ async function runOne(
     return {detail: `신호 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'bookSnapshot') {
-    const snap = live.bookSnapshot();
+    let snap = live.bookSnapshot();
+    for (let i = 1; i < p.windows; i++) snap = live.bookSnapshot();
     return {
-      detail: `보유 ${snap.holdings.length} 미체결 ${snap.working.length}`,
+      detail: `창요청 ${p.windows}회 · 보유 ${snap.holdings.length} 미체결 ${snap.working.length}`,
       constraints: 0,
       units: snap.holdings.map((h) => ({
         code: h.code,
@@ -362,10 +364,11 @@ async function runOne(
     return {detail: `조건 ${p.conditions}회 실포착 ${cap.length} 감시 ${watch} 건너뜀 ${skipped}`, constraints: cap.length ? 0 : 1};
   }
   if (id === 'liveMany') {
-    beginUnits(id, '종목', list.length, 1, '다종목 시세');
+    beginUnits(id, '종목', list.length, 1, `다종목 ×틱 ${p.ticks}`);
     for (const c of list) {
       const t = Date.now();
-      const q = live.touchQuote(c);
+      let q = null as ReturnType<RealtimeHub['touchQuote']>;
+      for (let i = 0; i < p.ticks; i++) q = live.touchQuote(c);
       const page = live.pageOf(c, '1', '');
       const span = barSpan(page);
       const name = (await live.stockName(c).catch(() => c)) || c;
@@ -373,7 +376,7 @@ async function runOne(
     }
     const units = endUnits();
     const fail = units.filter((u) => !u.ok).length;
-    return {detail: `다종목 ${units.length - fail}/${units.length}`, constraints: fail, units};
+    return {detail: `다종목 ${units.length - fail}/${units.length} · 틱 ${p.ticks} · 피드 ${p.feedsPerCode}`, constraints: fail, units};
   }
   if (id === 'orderDuplicate') {
     const snap = live.bookSnapshot();
@@ -392,19 +395,22 @@ async function runOne(
     return {detail: `실보유 ${n} / 한도 ${p.maxPositions}`, constraints: over ? 1 : 0};
   }
   if (id === 'chartRefreshBudget') {
-    const charts = list.length;
+    const charts = Math.max(list.length, p.codes);
     const perMin = charts * (60_000 / p.refreshMs);
     const restPerMin = (1000 / Math.max(50, p.restIntervalMs || 300)) * 60;
     const tight = perMin > restPerMin;
     return {
-      detail: `실차트 ${charts} × ${(60000 / p.refreshMs).toFixed(1)}회/분 = ${perMin.toFixed(0)} , REST≈${restPerMin.toFixed(0)}/분`,
+      detail: `요청종목 ${p.codes} · 실종목 ${list.length} × ${(60000 / p.refreshMs).toFixed(1)}회/분 = ${perMin.toFixed(0)} , REST≈${restPerMin.toFixed(0)}/분`,
       constraints: tight ? 1 : 0,
     };
   }
   if (id === 'demandWindowCap') {
     const cap = DESK_MAX * 16;
-    const over = windowCount > cap;
-    return {detail: `실제 창 ${windowCount} / 상한 ${cap}`, constraints: over ? 1 : 0};
+    const over = p.windows >= cap;
+    return {
+      detail: `요청 창 ${p.windows} · 실제 연 ${windowCount} / 상한 ${cap}${over ? ' · 요청이 상한 초과' : ''}`,
+      constraints: over ? 1 : 0,
+    };
   }
   if (id === 'status') {
     const st = live.status();

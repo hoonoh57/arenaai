@@ -52,7 +52,7 @@ function workText(id: string, title: string, p: LabParams): string {
   if (id === 'conditionOne' || id === 'planWatch') return `${title}: 포착 ${p.captured}를 감시 ${p.watchBudget} 슬롯에 편성`;
   if (id === 'orderDuplicate' || id === 'orderOverLimit') return `${title}: 주문 ${p.orders}회 / 보유한도 ${p.maxPositions}`;
   if (id === 'chartRefreshBudget') return `${title}: 종목 ${p.codes} · 주기 ${p.refreshMs}ms vs REST 예산`;
-  if (id === 'demandWindowCap') return `${title}: 창 ${p.windows}개가 한 허브를 쓰는지`;
+  if (id === 'demandWindowCap') return `${title}: 요청 창 ${p.windows} · 실제 연 창은 허브가 셈`;
   if (id === 'evaluateSignals') return `${title}: ${p.codes}종목 신호`;
   return `${title} 실행 중`;
 }
@@ -147,7 +147,7 @@ export function HubLabPane() {
         const d = await fetch('/api/hub/lab/live').then((r) => r.json());
         if (stop) return;
         if (d.quota) setQuota(d.quota);
-        if (overlay?.kind === 'run' && !d.idle) setUnit(d);
+        if (overlay?.kind === 'run') setUnit(d.idle ? null : d);
       } catch {
         /* */
       }
@@ -211,6 +211,7 @@ export function HubLabPane() {
         const expected = estimateCaseMs(c.id, bodyParams);
         const remainExpect = queue.slice(i).reduce((s, x) => s + estimateCaseMs(x.id, bodyParams), 0);
         caseStarted.current = Date.now();
+        setUnit(null);
         setOverlay({
           kind: 'run',
           title: c.title,
@@ -392,11 +393,20 @@ export function HubLabPane() {
         목표는 {params.deadlineMs}ms입니다. 합격은 허브 총량이 허용한 범위의 실데이터 수신입니다. 목표 초과는 비교·병목이지 실측 실패가 아닙니다.
       </p>
       <div className="hub-lab-presets">
-        {LAB_PARAM_PRESETS.map((pr) => (
-          <button key={pr.id} className="hts-tool" disabled={busy} onClick={() => setParams(pr.params)}>
-            {pr.label}
-          </button>
-        ))}
+        {LAB_PARAM_PRESETS.map((pr) => {
+          const on = LAB_PARAM_FIELDS.every((f) => params[f.key] === pr.params[f.key]);
+          return (
+            <button
+              key={pr.id}
+              className={'hts-tool' + (on ? ' on' : '')}
+              disabled={busy}
+              onClick={() => setParams({...pr.params})}
+            >
+              {pr.label}
+              {on ? ' · 적용됨' : ''}
+            </button>
+          );
+        })}
       </div>
       <div className="hub-lab-params">
         {LAB_PARAM_FIELDS.map((f) => (
