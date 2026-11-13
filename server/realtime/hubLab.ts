@@ -1,13 +1,9 @@
 import {writeFileSync, readFileSync, mkdirSync, existsSync} from 'node:fs';
 import {dirname} from 'node:path';
 import type {Candle} from '../core';
-import {AuditLog} from './audit';
-import {SharedCache} from './cache';
-import {LimitGovernor, RealtimeCaps} from './limits';
-import {RealtimeHub, type BrokerLike} from './hub';
-import {RiskManager} from './risk';
+import {RealtimeHub} from './hub';
 import {HUB_OP_TARGETS, type HubOpName} from './hubOps';
-import {DESK_MAX, MULTI_CHART_MAX} from '../../shared/desk';
+import {DESK_MAX} from '../../shared/desk';
 import {clampLabParams, type LabParams} from '../../shared/hubLabParams';
 
 export type LabCase = {
@@ -158,17 +154,6 @@ export type LabReport = {
 
 const REPORT_PATH = process.env.HUB_LAB_PATH || 'data/hub-lab-reports.json';
 
-function bar(time: number, px: number): Candle {
-  return {time, open: px, high: px, low: px, close: px, volume: 100, strength: 110};
-}
-function bars(n: number, t0 = 1_700_000_000): Candle[] {
-  return Array.from({length: n}, (_, i) => bar(t0 + i * 60, 10000 + i));
-}
-
-function sleep(ms: number): Promise<void> {
-  return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
-}
-
 async function pool<T>(items: T[], n: number, fn: (item: T, i: number) => Promise<void>): Promise<void> {
   let i = 0;
   const workers = Array.from({length: Math.max(1, Math.min(n, items.length))}, async () => {
@@ -181,109 +166,26 @@ async function pool<T>(items: T[], n: number, fn: (item: T, i: number) => Promis
   await Promise.all(workers);
 }
 
-function fakeBroker(pages = bars(80), delayMs = 0): BrokerLike {
-  const wait = () => sleep(delayMs);
-  return {
-    candles: async () => {
-      await wait();
-      return pages;
-    },
-    daily: async () => {
-      await wait();
-      return [];
-    },
-    chartPage: async () => {
-      await wait();
-      return {candles: pages, hasMore: false, nextKey: ''};
-    },
-    attachStrength: async (_c, _tf, candles) => {
-      await wait();
-      return {
-        candles: candles.map((c) => ({...c, strength: c.strength ?? 110})),
-        hasMore: false,
-        nextKey: '',
-        ready: true,
-        nxt: true,
-      };
-    },
-    stockName: async (code) => code,
-  };
-}
-
-function labHub(params: LabParams) {
-  const cache = new SharedCache({maxCodes: Math.max(200, params.codes + 20)});
-  const audit = new AuditLog();
-  const governor = new LimitGovernor({
-    total: {capacity: 10, refillPerSecond: 1000 / Math.max(50, params.restIntervalMs || 300)},
-    perApi: {capacity: 5, refillPerSecond: 1000 / Math.max(50, params.restIntervalMs || 300)},
-    order: {capacity: 1, refillPerSecond: 0.2},
-  });
-  const hub = new RealtimeHub({
-    url: 'ws://127.0.0.1:9',
-    getToken: async () => 'lab',
-    governor,
-    cache,
-    audit,
-    caps: new RealtimeCaps({maxSubscriptions: 100, maxItemsPerPacket: 10}),
-    broker: fakeBroker(bars(80), params.restDelayMs),
-    createSocket: () => {
-      throw new Error('테스트랩은 키움 소켓을 열지 않습니다');
-    },
-  });
-  return {hub, cache, governor};
-}
-
-function codes(n: number): string[] {
-  return Array.from({length: n}, (_, i) => String(100000 + i).slice(-6));
-}
-
 async function runOne(
   id: HubOpName,
-  hub: RealtimeHub,
-  cache: SharedCache,
+  live: RealtimeHub,
   p: LabParams,
-  live: RealtimeHub | null,
   realCodes: string[],
+  captured: string[],
+  windowCount: number,
 ): Promise<{detail: string; constraints: number; units?: LabUnitRow[]}> {
-  const t0 = 1_700_000_000;
-  const rest = id === 'ensureChartPage' || id === 'ensureStrengthPage';
-  const list = rest ? realCodes.slice(0, p.codes) : codes(p.codes);
-  const code = list[0] || '005930';
-  const work = rest && live ? live : hub;
-  if (rest && !live) {
-    return {detail: '실허브 없음. 가짜 0ms·가짜 종목은 합격이 아닙니다.', constraints: 1, units: []};
+  const list = realCodes.slice(0, p.codes);
+  const none = {detail: '실종목이 없습니다. 가짜 코드는 쓰지 않습니다.', constraints: 1, units: [] as LabUnitRow[]};
+  if (!list.length && id !== 'status' && id !== 'bookSnapshot' && id !== 'demandWindowCap' && id !== 'chartRefreshBudget' && id !== 'unsubscribe') {
+    return none;
   }
-  if (rest && !list.length) {
-    return {detail: '실종목이 없습니다. 차트/순위에 있는 코드만 받습니다.', constraints: 1, units: []};
-  }
-  const extraFeeds = (c: string, px: number) => {
-    if (p.feedsPerCode < 4) return;
-    cache.setQuote({
-      code: c,
-      time: t0,
-      price: px,
-      changePct: 0,
-      strength: 110,
-      cumVolume: 1,
-      cumValue: 1,
-      dayOpen: px,
-      dayHigh: px,
-      dayLow: px,
-      tradeVolume: 1,
-      netBuyVolume: p.feedsPerCode >= 5 ? 10 : 0,
-      buyVolume: 1,
-      sellVolume: 0,
-      source: '0B',
-      receivedAt: Date.now(),
-    });
-  };
   if (id === 'ensureChartPage') {
     beginUnits(id, '종목', list.length, p.chartConcurrency, '분봉 페이지');
     await pool(list, p.chartConcurrency, async (c) => {
       const t = Date.now();
       try {
-        const page = await work.ensureChartPage({code: c, timeframe: '1'});
-        const name = await work.stockName(c).catch(() => c);
+        const page = await live.ensureChartPage({code: c, timeframe: '1'});
+        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         markUnit(c, span.bars! > 0 && Boolean(span.firstAt && span.lastAt), Date.now() - t, {name, ...span, simulated: false});
       } catch (e) {
@@ -305,9 +207,9 @@ async function runOne(
     await pool(list, p.chartConcurrency, async (c) => {
       const t = Date.now();
       try {
-        await work.ensureChartPage({code: c, timeframe: '1'});
-        const s = await work.ensureStrengthPage({code: c, timeframe: '1'});
-        const name = await work.stockName(c).catch(() => c);
+        await live.ensureChartPage({code: c, timeframe: '1'});
+        const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
+        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(s.candles);
         markUnit(c, s.ready && (span.bars || 0) > 0, Date.now() - t, {name, ...span, simulated: false});
       } catch {
@@ -318,149 +220,161 @@ async function runOne(
     const fail = units.filter((u) => !u.ok).length;
     return {detail: `강도 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
-  if (id === 'putChartPage') {
-    hub.ops.runSync('putChartPage', () => {
-      for (const c of list) cache.putChartPage(c, '1', '', bars(40));
-    });
-    return {detail: `기록 ${list.length}`, constraints: 0};
-  }
-  if (id === 'chartPage') {
-    for (const c of list) cache.putChartPage(c, '1', '', bars(40));
-    let n = 0;
-    hub.ops.runSync('chartPage', () => {
-      for (const c of list) n += cache.chartPage(c, '1', '').length;
-    });
-    return {detail: `읽기 봉 ${n}`, constraints: 0};
+  if (id === 'putChartPage' || id === 'chartPage') {
+    beginUnits(id, '종목', list.length, 1, '허브 캐시');
+    for (const c of list) {
+      const t = Date.now();
+      const page = live.pageOf(c, '1', '');
+      const span = barSpan(page);
+      const name = (await live.stockName(c).catch(() => c)) || c;
+      markUnit(c, (span.bars || 0) > 0, Date.now() - t, {name, ...span});
+    }
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `캐시 ${units.length - fail}/${units.length} 실봉`, constraints: fail, units};
   }
   if (id === 'getQuote') {
-    for (const c of list) extraFeeds(c, 10000);
-    for (const c of list) hub.quoteOf(c);
-    return {detail: `시세 ${list.length}`, constraints: 0};
+    beginUnits(id, '종목', list.length, 1, '실시간 시세');
+    for (const c of list) {
+      const t = Date.now();
+      const q = live.quoteOf(c);
+      const name = (await live.stockName(c).catch(() => c)) || c;
+      const ok = Boolean(q && q.price > 0);
+      markUnit(c, ok, Date.now() - t, {
+        name,
+        bars: ok ? 1 : 0,
+        firstAt: q?.time ? kstBar(q.time) : '',
+        firstClose: q?.price,
+        lastAt: q?.time ? kstBar(q.time) : '',
+        lastClose: q?.price,
+      });
+    }
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `시세 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'applyLiveTick' || id === 'applyLiveQuote') {
-    cache.putChartPage(code, '1', '', bars(20));
-    for (let i = 0; i < p.ticks; i++) {
-      hub.ops.runSync('applyLiveTick', () => cache.applyLiveTick(code, t0 + 19 * 60, 10100, 1, 120));
-      hub.ops.runSync('applyLiveQuote', () => cache.applyLiveQuote(code, t0 + 19 * 60, 10100, 1));
+    beginUnits(id, '종목', list.length, 1, '체결 반영');
+    for (const c of list) {
+      const t = Date.now();
+      const q = live.touchQuote(c);
+      const page = live.pageOf(c, '1', '');
+      const span = barSpan(page);
+      const name = (await live.stockName(c).catch(() => c)) || c;
+      markUnit(c, Boolean(q && q.price > 0 && (span.bars || 0) > 0), Date.now() - t, {name, ...span});
     }
-    return {detail: `틱 ${p.ticks}`, constraints: 0};
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `체결반영 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'subscribe') {
     try {
-      await hub.subscribe('lab', list.slice(0, Math.min(list.length, 10)), ['0B']);
-      return {detail: `REG ${Math.min(list.length, 10)}`, constraints: 0};
+      await live.subscribe('hub-lab', list, ['0B']);
+      return {detail: `실구독 ${list.length} (이미 있으면 REG 없음)`, constraints: 0};
     } catch (e) {
-      hub.ops.noteConstraint('subscribe');
+      live.ops.noteConstraint('subscribe');
       return {detail: e instanceof Error ? e.message : '거절', constraints: 1};
     }
   }
   if (id === 'unsubscribe') {
-    await hub.unsubscribe('lab', list.slice(0, 10), ['0B']);
-    return {detail: '해제', constraints: 0};
+    await live.unsubscribe('hub-lab', list.length ? list : realCodes, ['0B']);
+    return {detail: '랩 소유만 해제. 데스크 구독은 유지', constraints: 0};
   }
   if (id === 'evaluateSignals') {
-    hub.setActiveCodes(list);
-    hub.setSignalEvaluator(() => ({buy: false, sell: false}));
-    for (const c of list) cache.mergeCandles(c, bars(30));
-    for (const c of list) hub.evaluateSignals(c);
-    return {detail: `평가 ${list.length}`, constraints: 0};
+    beginUnits(id, '종목', list.length, 1, '신호');
+    for (const c of list) {
+      const t = Date.now();
+      const page = live.pageOf(c, '1', '');
+      live.evaluateSignals(c);
+      const span = barSpan(page);
+      const name = (await live.stockName(c).catch(() => c)) || c;
+      markUnit(c, (span.bars || 0) > 0, Date.now() - t, {name, ...span});
+    }
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `신호 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'bookSnapshot') {
-    for (let i = 0; i < p.windows; i++) hub.bookSnapshot();
-    return {detail: `창 ${p.windows}회`, constraints: 0};
+    const snap = live.bookSnapshot();
+    return {
+      detail: `보유 ${snap.holdings.length} 미체결 ${snap.working.length}`,
+      constraints: 0,
+      units: snap.holdings.map((h) => ({
+        code: h.code,
+        name: h.code,
+        ms: 0,
+        ok: true,
+        bars: h.qty,
+        lastClose: h.avgPrice,
+      })),
+    };
   }
   if (id === 'planWatch' || id === 'conditionOne') {
-    const plan = hub.ops.runSync('conditionOne', () =>
-      hub.planWatch({chartCodes: list.slice(0, Math.min(16, list.length)), captured: codes(p.captured), selected: [code], budget: p.watchBudget}),
-    );
-    return {detail: `감시 ${plan.watch.length} 건너뜀 ${plan.skipped} 포착 ${p.captured}`, constraints: 0};
+    const cap = captured.slice(0, p.captured);
+    const plan = live.planWatch({chartCodes: list, captured: cap, selected: list.slice(0, 1), budget: p.watchBudget});
+    return {detail: `실차트 ${list.length} 실포착 ${cap.length} 감시 ${plan.watch.length} 건너뜀 ${plan.skipped}`, constraints: cap.length ? 0 : 1};
   }
   if (id === 'conditionMany') {
+    const cap = captured.slice(0, p.captured);
     let watch = 0;
     let skipped = 0;
-    hub.ops.runSync('conditionMany', () => {
+    live.ops.runSync('conditionMany', () => {
       for (let s = 0; s < p.conditions; s++) {
-        const plan = hub.planWatch({chartCodes: list.slice(0, 4), captured: codes(p.captured), budget: p.watchBudget});
+        const plan = live.planWatch({chartCodes: list, captured: cap, budget: p.watchBudget});
         watch = plan.watch.length;
         skipped = plan.skipped;
       }
     });
-    return {detail: `조건 ${p.conditions}×포착 ${p.captured} 감시 ${watch} 건너뜀 ${skipped}`, constraints: skipped > 0 ? 1 : 0};
+    return {detail: `조건 ${p.conditions}회 실포착 ${cap.length} 감시 ${watch} 건너뜀 ${skipped}`, constraints: cap.length ? 0 : 1};
   }
   if (id === 'liveMany') {
-    hub.ops.runSync('liveMany', () => {
-      for (const c of list) {
-        cache.putChartPage(c, '1', '', bars(10));
-        for (let i = 0; i < p.ticks; i++) {
-          cache.applyLiveTick(c, t0 + 9 * 60, 10000 + i, 1, 100);
-          extraFeeds(c, 10000 + i);
-        }
-      }
-    });
-    return {detail: `${list.length}종목×${p.ticks}틱×피드 ${p.feedsPerCode}`, constraints: 0};
+    beginUnits(id, '종목', list.length, 1, '다종목 시세');
+    for (const c of list) {
+      const t = Date.now();
+      const q = live.touchQuote(c);
+      const page = live.pageOf(c, '1', '');
+      const span = barSpan(page);
+      const name = (await live.stockName(c).catch(() => c)) || c;
+      markUnit(c, Boolean(q && (span.bars || 0) > 0), Date.now() - t, {name, ...span});
+    }
+    const units = endUnits();
+    const fail = units.filter((u) => !u.ok).length;
+    return {detail: `다종목 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'orderDuplicate') {
-    extraFeeds(code, 10000);
-    let rejected = 0;
-    let placed = 0;
-    hub.ops.runSync('orderDuplicate', () => {
-      for (let i = 0; i < p.orders; i++) {
-        const c = list[i % list.length];
-        extraFeeds(c, 10000);
-        try {
-          hub.book.place({code: c, side: 'buy', type: 'market', qty: 1, source: 'signal', priceHint: 10000});
-          placed += 1;
-        } catch {
-          rejected += 1;
-          hub.ops.noteConstraint('orderDuplicate');
-        }
-      }
-    });
-    return {detail: `시도 ${p.orders} 체결 ${placed} 중복거절 ${rejected}`, constraints: rejected};
+    const snap = live.bookSnapshot();
+    const held = snap.holdings;
+    if (!held.length) return {detail: '실보유 없음. 가짜 주문은 넣지 않습니다.', constraints: 1, units: []};
+    return {
+      detail: `실보유 ${held.length}종목은 추가 신호매수 거절 대상`,
+      constraints: held.length,
+      units: held.map((h) => ({code: h.code, ms: 0, ok: true, bars: h.qty, lastClose: h.avgPrice})),
+    };
   }
   if (id === 'orderOverLimit') {
-    const risk = new RiskManager({
-      maxPositions: p.maxPositions,
-      maxEntriesPerDay: p.maxPositions,
-      maxEntriesPerCode: 1,
-      maxEntriesPerMinute: Math.max(p.maxPositions, 1),
-    });
-    let blocked = 0;
-    hub.ops.runSync('orderOverLimit', () => {
-      for (let i = 0; i < p.orders; i++) {
-        const c = String(100000 + i).slice(-6);
-        const d = risk.canEnter({code: c, price: 100, at: Date.now()});
-        if (d.ok) risk.onEntry(c, 100, Date.now());
-        else {
-          blocked += 1;
-          hub.ops.noteConstraint('orderOverLimit');
-        }
-      }
-    });
-    return {detail: `시도 ${p.orders} 한도 ${p.maxPositions} 거절 ${blocked}`, constraints: blocked};
+    const snap = live.bookSnapshot();
+    const n = snap.holdings.length;
+    const over = n >= p.maxPositions;
+    return {detail: `실보유 ${n} / 한도 ${p.maxPositions}`, constraints: over ? 1 : 0};
   }
   if (id === 'chartRefreshBudget') {
-    const charts = Math.min(p.codes, MULTI_CHART_MAX);
+    const charts = list.length;
     const perMin = charts * (60_000 / p.refreshMs);
     const restPerMin = (1000 / Math.max(50, p.restIntervalMs || 300)) * 60;
     const tight = perMin > restPerMin;
-    hub.ops.runSync('chartRefreshBudget', () => undefined);
-    if (tight) hub.ops.noteConstraint('chartRefreshBudget');
     return {
-      detail: `차트 ${charts} × ${(60000 / p.refreshMs).toFixed(1)}회/분 = ${perMin.toFixed(0)} , REST≈${restPerMin.toFixed(0)}/분`,
+      detail: `실차트 ${charts} × ${(60000 / p.refreshMs).toFixed(1)}회/분 = ${perMin.toFixed(0)} , REST≈${restPerMin.toFixed(0)}/분`,
       constraints: tight ? 1 : 0,
     };
   }
   if (id === 'demandWindowCap') {
     const cap = DESK_MAX * 16;
-    const over = p.windows > cap;
-    hub.ops.runSync('demandWindowCap', () => undefined);
-    if (over) hub.ops.noteConstraint('demandWindowCap');
-    return {detail: `요청 창 ${p.windows} / 상한 ${cap} (화면 ${DESK_MAX}×16). 소켓 1`, constraints: over ? 1 : 0};
+    const over = windowCount > cap;
+    return {detail: `실제 창 ${windowCount} / 상한 ${cap}`, constraints: over ? 1 : 0};
   }
   if (id === 'status') {
-    hub.status();
-    return {detail: hub.currentState, constraints: 0};
+    const st = live.status();
+    return {detail: `state ${st.state} 구독 ${st.subscriptions} silent ${st.silentMs}`, constraints: st.emergency ? 1 : 0};
   }
   throw new Error(`미등록 기능: ${id}`);
 }
@@ -470,12 +384,34 @@ export async function runHubLab(
   scope: 'all' | HubOpName = 'all',
   raw?: Partial<LabParams>,
   realCodes: string[] = [],
+  captured: string[] = [],
+  windowCount = 0,
 ): Promise<LabReport> {
   const params = clampLabParams(raw);
   const missingOfficial = (Object.keys(HUB_OP_TARGETS) as HubOpName[]).filter((n) => !OFFICIAL.has(n));
   if (scope !== 'all' && !isOfficialHubOp(scope)) throw new Error(`정식 등록되지 않은 기능은 측정·사용할 수 없습니다: ${scope}`);
-  const {hub, cache} = labHub(params);
   const uniqReal = [...new Set(realCodes.filter((c) => /^\d{6}$/.test(c)))];
+  const uniqCap = [...new Set(captured.filter((c) => /^\d{6}$/.test(c)))];
+  if (!live) {
+    return {
+      at: Date.now(),
+      scope,
+      params,
+      results: (scope === 'all' ? LAB_CASES : LAB_CASES.filter((c) => c.id === scope)).map((c) => ({
+        id: c.id,
+        title: c.title,
+        group: c.group,
+        ms: 0,
+        targetMs: params.deadlineMs,
+        ok: false,
+        pass: false,
+        detail: '실허브 없음. 가짜 측정은 하지 않습니다.',
+        constraints: 1,
+      })),
+      bottlenecks: ['live'],
+      missingOfficial,
+    };
+  }
   const pick = scope === 'all' ? LAB_CASES : LAB_CASES.filter((c) => c.id === scope);
   const results: LabCaseResult[] = [];
   for (const c of pick) {
@@ -485,7 +421,7 @@ export async function runHubLab(
     let ok = true;
     let units: LabUnitRow[] | undefined;
     try {
-      const out = await runOne(c.id, hub, cache, params, live, uniqReal);
+      const out = await runOne(c.id, live, params, uniqReal, uniqCap, windowCount);
       detail = out.detail;
       constraints = out.constraints;
       units = out.units;

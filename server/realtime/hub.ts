@@ -330,6 +330,21 @@ export class RealtimeHub {
     return this.ops.runSync('getQuote', () => this.cache.getQuote(code));
   }
 
+  pageOf(code: string, timeframe = '1', baseDate = '') {
+    return this.ops.runSync('chartPage', () => this.cache.chartPage(code, timeframe, baseDate));
+  }
+
+  touchQuote(code: string) {
+    return this.ops.runSync('applyLiveTick', () => {
+      const q = this.cache.getQuote(code);
+      if (!q || !(q.price > 0)) return null;
+      const t = q.time ?? Math.floor(this.now() / 1000);
+      this.cache.applyLiveTick(code, t, q.price, q.tradeVolume ?? undefined, q.strength ?? undefined);
+      this.ops.runSync('applyLiveQuote', () => this.cache.applyLiveQuote(code, t, q.price, q.tradeVolume ?? undefined));
+      return q;
+    });
+  }
+
   positionsSnapshot(): Record<string, number> {
     return Object.fromEntries(this.book.snapshot().holdings.map((row) => [row.code, row.qty]));
   }
