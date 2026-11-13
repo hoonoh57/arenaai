@@ -37,6 +37,17 @@ export type BridgeOptions = {
 
 export type RankingResult = {ranking: Stock[]; selected: Stock[]; warnings: Record<string, string>};
 
+function uniqueCodesForPlan(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    if (typeof v !== 'string' || !/^\d{6}$/.test(v) || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
 /**
  * The only surface demand logic (dashboard routes, charts, strategy) may use.
  *
@@ -156,17 +167,18 @@ export class DemandBridge {
    * Re-align realtime subscriptions with the current selection and re-prime missing
    * candles. Safe to call repeatedly (after every tick, reconnect or config change).
    */
-  async syncSubscriptions(config: BridgeConfig = this.requireConfig()): Promise<RankingResult> {
+  async syncSubscriptions(config: BridgeConfig = this.requireConfig(), opts?: {rotate?: boolean}): Promise<RankingResult> {
     const ranking = await this.computeRanking(config);
     const selectedCodes = ranking.selected.map((stock) => stock.code);
+    const pinned = uniqueCodesForPlan([...(config.chartCodes || []), ...selectedCodes]);
     const plan = planSubscriptions({
-      selected: selectedCodes,
+      selected: pinned,
       captured: this.cache.capturedCodes(config.seq),
       maxSubscriptions: this.maxSubscriptions ?? this.hub.status().caps?.maxSubscriptions ?? 100,
       budget: this.quoteBudget,
-      cursor: this.rotationCursor,
+      cursor: opts?.rotate === false ? 0 : this.rotationCursor,
     });
-    this.rotationCursor = plan.cursor;
+    if (opts?.rotate !== false) this.rotationCursor = plan.cursor;
     this.lastPlan = {watched: plan.watch.length, skipped: plan.skipped};
     const desired = plan.watch;
 

@@ -333,6 +333,7 @@ function strategyCodes(): string[] {
 function syncSignals(): void {
   const codes = strategyCodes();
   hub.setActiveCodes(codes);
+  if (codes.length) void hub.subscribe('desk:charts', codes, ['0B']).catch(() => undefined);
   const anyRun =
     config.running &&
     codes.some((code) => (config.tradeByCode[code] ?? (config.tradeMode === 'auto' ? 'run' : 'wait')) === 'run');
@@ -624,8 +625,12 @@ app.get('/api/desks', (_req, res) => {
 });
 app.put('/api/desks', (req, res) => {
   try {
+    const prevCharts = deskChartCodes().join(',');
     const workspace = saveDesks(req.body);
-    if (config.condition) void bridge.syncSubscriptions(bridgeCfg()).catch(() => undefined);
+    const nextCharts = deskChartCodes().join(',');
+    if (config.condition && prevCharts !== nextCharts) {
+      void bridge.syncSubscriptions(bridgeCfg(), {rotate: false}).catch(() => undefined);
+    }
     res.json(workspace);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '가상화면 저장 실패'});
@@ -636,7 +641,6 @@ app.get('/api/live-bars', (req, res) => {
   const timeframe = typeof req.query.timeframe === 'string' ? req.query.timeframe : '1';
   const baseDate = typeof req.query.baseDate === 'string' ? req.query.baseDate : '';
   if (!/^\d{6}$/.test(code)) return res.status(400).json({error: '종목코드'});
-  void hub.subscribe(`chart:${code}`, [code], ['0B']).catch(() => undefined);
   const st = bridge.status().hub;
   const quote = cache.getQuote(code) || null;
   let candles = cache.chartPage(code, timeframe, baseDate);
@@ -661,7 +665,12 @@ app.get('/api/live-bars', (req, res) => {
         );
       }
       candles = [...byTime.values()].sort((a, b) => a.time - b.time);
-      if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
+      let lastStr: number | undefined;
+      candles = candles.map((c) => {
+        if (typeof c.strength === 'number' && c.strength > 0) lastStr = c.strength;
+        else if (lastStr) return {...c, strength: lastStr};
+        return c;
+      });
     }
   }
   if (quote && quote.price > 0 && candles.length) {

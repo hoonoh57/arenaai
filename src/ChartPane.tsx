@@ -230,11 +230,17 @@ export function ChartPane({
         const px = Number(d.quote?.price);
         if (px > 0) setLivePx(px);
         setBars((prev) => {
+          const str = Number(d.quote?.strength);
           if (Array.isArray(d.candles) && d.candles.length) {
-            const next = d.candles as Candle[];
+            const kept = new Map(prev.map((c) => [c.time, c]));
+            const next = (d.candles as Candle[]).map((c) => {
+              const had = kept.get(c.time);
+              if (typeof c.strength === 'number' && c.strength > 0) return c;
+              if (had && typeof had.strength === 'number' && had.strength > 0) return {...c, strength: had.strength};
+              return c;
+            });
             if (px > 0) {
               const last = next[next.length - 1];
-              const str = Number(d.quote?.strength);
               next[next.length - 1] = {
                 ...last,
                 close: px,
@@ -258,11 +264,15 @@ export function ChartPane({
               return prev;
             return next;
           }
-          if (!(px > 0) || !prev.length) return prev;
+          if (!prev.length) return prev;
           const last = prev[prev.length - 1];
-          if (last.close === px) return prev;
+          if ((!(px > 0) || last.close === px) && (!(str > 0) || last.strength === str)) return prev;
           const next = prev.slice();
-          next[next.length - 1] = {...last, close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px};
+          next[next.length - 1] = {
+            ...last,
+            ...(px > 0 ? {close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px} : {}),
+            ...(str > 0 ? {strength: str} : {}),
+          };
           return next;
         });
       } catch {
@@ -270,8 +280,16 @@ export function ChartPane({
       }
     };
     const ms = 300;
-    const id = window.setInterval(pull, ms);
-    void pull();
+    let inflight = false;
+    const tick = () => {
+      if (inflight || stop) return;
+      inflight = true;
+      void pull().finally(() => {
+        inflight = false;
+      });
+    };
+    const id = window.setInterval(tick, ms);
+    tick();
     return () => {
       stop = true;
       window.clearInterval(id);

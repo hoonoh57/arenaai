@@ -642,26 +642,27 @@ export class RealtimeHub {
   async subscribe(owner: string, items: readonly string[], types: readonly string[]): Promise<void> {
     if (typeof owner !== 'string' || !owner.trim()) throw new Error('구독 소유자 식별자가 필요합니다.');
     if (!items.length || !types.length) throw new Error('구독할 종목과 타입이 필요합니다.');
-    const keys: {key: string; item: string; type: string}[] = [];
-    let additions = 0;
-    for (const type of types) {
-      for (const item of items) {
-        const key = `${type}|${item}`;
-        const existing = this.subscriptions.get(key);
-        if (existing) existing.owners.add(owner);
-        else additions += 1;
-        keys.push({key, item, type});
+    await this.withSubscriptionLock(async () => {
+      const toRegister: {key: string; item: string; type: string}[] = [];
+      let additions = 0;
+      for (const type of types) {
+        for (const item of items) {
+          const key = `${type}|${item}`;
+          const existing = this.subscriptions.get(key);
+          if (existing) existing.owners.add(owner);
+          else {
+            additions += 1;
+            toRegister.push({key, item, type});
+          }
+        }
       }
-    }
-    this.caps.assertAddition(
-      [...this.subscriptions.values()].filter((sub) => sub.owners.size > 0).length,
-      additions,
-    );
-    const toRegister = keys.filter(({key}) => !this.subscriptions.has(key));
-    for (const {key, item, type} of toRegister) this.subscriptions.set(key, {item, type, owners: new Set([owner])});
-    if (!toRegister.length) return;
-    try {
-      await this.withSubscriptionLock(async () => {
+      if (!toRegister.length) return;
+      this.caps.assertAddition(
+        [...this.subscriptions.values()].filter((sub) => sub.owners.size > 0).length,
+        additions,
+      );
+      for (const {key, item, type} of toRegister) this.subscriptions.set(key, {item, type, owners: new Set([owner])});
+      try {
         for (const type of types) {
           const pendingItems = toRegister.filter((entry) => entry.type === type).map((entry) => entry.item);
           for (const chunk of chunked(pendingItems, this.caps.limits.maxItemsPerPacket)) {
@@ -670,19 +671,19 @@ export class RealtimeHub {
             await this.sendAndAwait('REG', registerPacket(chunk, [type]));
           }
         }
-      });
-      this.audit.record('subscription', '실시간 구독을 등록했습니다.', {type: types.join(','), items: toRegister.length, owner});
-    } catch (error) {
-      for (const {key, item, type} of toRegister) {
-        const sub = this.subscriptions.get(`${type}|${item}`);
-        if (sub) {
-          sub.owners.delete(owner);
-          if (!sub.owners.size) this.subscriptions.delete(key);
+        this.audit.record('subscription', '실시간 구독을 등록했습니다.', {type: types.join(','), items: toRegister.length, owner});
+      } catch (error) {
+        for (const {key} of toRegister) {
+          const sub = this.subscriptions.get(key);
+          if (sub) {
+            sub.owners.delete(owner);
+            if (!sub.owners.size) this.subscriptions.delete(key);
+          }
         }
+        this.audit.record('error', '실시간 구독 등록에 실패했습니다.', {error: error instanceof Error ? error.message : '오류'});
+        throw error;
       }
-      this.audit.record('error', '실시간 구독 등록에 실패했습니다.', {error: error instanceof Error ? error.message : '오류'});
-      throw error;
-    }
+    });
   }
 
   /** Drop one owner's interest; the packet is sent only when nobody else needs it. */

@@ -218,10 +218,27 @@ export class SharedCache {
         if (bucket > last.time) {
           let cursor = last.time + step;
           while (cursor < bucket) {
-            bars.push({time: cursor, open: last.close, high: last.close, low: last.close, close: last.close});
+            bars.push({
+            time: cursor,
+            open: last.close,
+            high: last.close,
+            low: last.close,
+            close: last.close,
+            ...(typeof last.strength === 'number' ? {strength: last.strength} : {}),
+          });
             cursor += step;
           }
-          bars.push({time: bucket, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {}), ...(typeof strength === 'number' && strength > 0 ? {strength} : {})});
+          bars.push({
+            time: bucket,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            ...(typeof volume === 'number' ? {volume} : {}),
+            ...(typeof (strength ?? last.strength) === 'number' && (strength ?? last.strength)! > 0
+              ? {strength: (strength && strength > 0 ? strength : last.strength) as number}
+              : {}),
+          });
           if (bars.length > 4000) bars.splice(0, bars.length - 3500);
         } else {
           bars[bars.length - 1] = bump(last);

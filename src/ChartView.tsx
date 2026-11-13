@@ -488,7 +488,7 @@ export function Chart({
           const colors = seriesColors(colorSrc, lineSpec.color, lineSpec);
           const overlayPx = !separate && lineSpec.type !== 'histogram';
           line.setData(vals.map((value, i) => {
-            const gap = value === null || (f.id === 'cntrstr' && (value === 0 || value === 50));
+            const gap = value === null || (f.id === 'cntrstr' && value === 0);
             if (gap) return {time: bars[i].time as UTCTimestamp};
             const v = overlayPx ? ax(value) : value;
             return {time: bars[i].time as UTCTimestamp, value: v, color: colors[i]};
@@ -800,7 +800,7 @@ export function Chart({
           const f = formulas.find((x) => x.id === extra.formulaId);
           const vals = chartHub.evaluate(extra.expression, bars, f?.variables, formulas);
           const value = vals[i];
-          const gap = value === null || (extra.cntrstr && (value === 0 || value === 50));
+          const gap = value === null || (extra.cntrstr && value === 0);
           extra.series.update(
             gap || value === null
               ? {time: last.time as UTCTimestamp}
