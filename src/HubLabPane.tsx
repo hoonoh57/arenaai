@@ -69,11 +69,22 @@ type UnitLive = {
   note?: string;
 };
 
-async function j<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, {headers: {'Content-Type': 'application/json'}, ...init});
-  const d = await r.json();
-  if (!r.ok) throw new Error(d.error || r.statusText);
-  return d as T;
+async function j<T>(url: string, init?: RequestInit, timeoutMs = 0): Promise<T> {
+  const ac = new AbortController();
+  const timer = timeoutMs > 0 ? window.setTimeout(() => ac.abort(), timeoutMs) : 0;
+  try {
+    const r = await fetch(url, {headers: {'Content-Type': 'application/json'}, ...init, signal: ac.signal});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    return d as T;
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') {
+      throw new Error(`한도 ${timeoutMs}ms를 넘겨 끊었습니다. 16종목 분봉이 수 분이 걸리면 실패입니다. 추가 테스트가 아니라 이 병목부터 고치세요.`);
+    }
+    throw e;
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
 }
 
 export function HubLabPane() {
@@ -180,7 +191,11 @@ export function HubLabPane() {
           expected,
           log,
         });
-        const report = await j<LabReport>('/api/hub/lab', {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})});
+        const report = await j<LabReport>(
+          '/api/hub/lab',
+          {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})},
+          bodyParams.deadlineMs + 3000,
+        );
         const row = report.results[0];
         log.push({
           title: c.title,

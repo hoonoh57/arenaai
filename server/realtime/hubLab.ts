@@ -226,8 +226,7 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
     let n = 0;
     beginUnits(id, '종목', list.length, p.chartConcurrency, '분봉 페이지');
     try {
-      await pool(list, p.chartConcurrency, async (c, i) => {
-        if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
+      await pool(list, p.chartConcurrency, async (c) => {
         const t = Date.now();
         try {
           const page = await hub.ensureChartPage({code: c, timeframe: '1'});
@@ -246,8 +245,7 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
     let ready = 0;
     beginUnits(id, '종목', list.length, p.chartConcurrency, '체결강도 페이지');
     try {
-      await pool(list, p.chartConcurrency, async (c, i) => {
-        if (p.restIntervalMs && i) await sleep(p.restIntervalMs);
+      await pool(list, p.chartConcurrency, async (c) => {
         const t = Date.now();
         try {
           await hub.ensureChartPage({code: c, timeframe: '1'});
@@ -423,7 +421,14 @@ export async function runHubLab(live: RealtimeHub | null, scope: 'all' | HubOpNa
     let constraints = 0;
     let ok = true;
     try {
-      const out = await runOne(c.id, hub, cache, params);
+      const out = await Promise.race([
+        runOne(c.id, hub, cache, params),
+        sleep(params.deadlineMs + 50).then(() => {
+          throw new Error(
+            `${c.title}: 합격 한도 ${params.deadlineMs}ms 안에 안 끝났습니다. ${params.codes}종목 분봉·강도가 이 안에 못 오면 실패입니다. 더 돌리지 말고 이 경로를 고치세요.`,
+          );
+        }),
+      ]);
       detail = out.detail;
       constraints = out.constraints;
     } catch (e) {
