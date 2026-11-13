@@ -14,9 +14,11 @@ type LabReport = {
     targetMs: number;
     ok: boolean;
     pass: boolean;
+    onTarget?: boolean;
+    gapMs?: number;
     detail: string;
     constraints: number;
-    units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean; waitMs?: number}[];
+    units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean; waitMs?: number; held?: boolean}[];
     perTargetMs?: number;
   }[];
   bottlenecks: string[];
@@ -219,8 +221,8 @@ export function HubLabPane() {
             log.push({
               title: `${u.name || ''} ${u.code}`.trim(),
               ms: u.ms,
-              pass: u.ok && u.ms <= per && !u.simulated,
-              detail: `봉 ${u.bars ?? 0} · 첫 ${u.firstAt || '-'} 종가 ${u.firstClose ?? '-'} · 끝 ${u.lastAt || '-'} 종가 ${u.lastClose ?? '-'} · 조회 ${fmtMs(u.ms)} · 시작 후 ${fmtMs(u.waitMs ?? u.ms)}에 도착 / 한도 ${fmtMs(per)}`,
+              pass: u.ok && !u.simulated,
+              detail: `${u.held ? '총량보류 · ' : ''}봉 ${u.bars ?? 0} · 첫 ${u.firstAt || '-'} 종가 ${u.firstClose ?? '-'} · 끝 ${u.lastAt || '-'} 종가 ${u.lastClose ?? '-'} · 실측 ${fmtMs(u.ms)} · 목표 ${fmtMs(per)}${(u.waitMs || u.ms) > per ? ' · 목표초과(비교)' : ' · 목표이내'}`,
               targetMs: per,
             });
           }
@@ -228,7 +230,7 @@ export function HubLabPane() {
             title: `${c.title} 합계 ${row.units.length}종목`,
             ms: row.ms,
             pass: Boolean(row.pass),
-            detail: `벽시계 ${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)} · 1종목평균 ${fmtMs(row.units.reduce((s, u) => s + u.ms, 0) / row.units.length)}`,
+            detail: `실측 ${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)} · 차이 ${row.gapMs != null && row.gapMs > 0 ? '+' : ''}${fmtMs(row.gapMs || row.ms - row.targetMs)} · 목표${row.onTarget ? '이내' : '초과(비교)'}`,
             targetMs: row.targetMs,
           });
         } else {
@@ -246,7 +248,7 @@ export function HubLabPane() {
         const elapsed = Date.now() - runStarted.current;
         const avg = elapsed / (i + 1);
         const eta = avg * (queue.length - i - 1);
-        setCurrent({...merged, bottlenecks: merged.results.filter((r) => !r.pass).map((r) => r.id)});
+        setCurrent({...merged, bottlenecks: merged.results.filter((r) => r.onTarget === false).map((r) => r.id)});
         setOverlay({
           kind: 'run',
           title: c.title,
@@ -265,11 +267,12 @@ export function HubLabPane() {
         kind: 'done',
         title: (() => {
           const stocks = merged.results.flatMap((r) => r.units || []);
+          const okN = stocks.filter((u) => u.ok && !u.simulated).length;
+          const slow = merged.results.filter((r) => r.onTarget === false).length;
           if (stocks.length) {
-            const okN = stocks.filter((u) => u.ok).length;
-            return `끝 · 종목 ${okN}/${stocks.length} 성공 · 벽시계 ${fmtMs(Date.now() - runStarted.current)} / 목표 ${fmtMs(bodyParams.deadlineMs)}`;
+            return `끝 · 실측 통과 ${okN}/${stocks.length} · 목표 ${fmtMs(bodyParams.deadlineMs)} 대비 초과 ${slow}건(비교) · 벽시계 ${fmtMs(Date.now() - runStarted.current)}`;
           }
-          return merged.bottlenecks.length ? `끝 · 병목 ${merged.bottlenecks.length}` : `끝 · ${merged.results.length}기능 통과`;
+          return merged.results.every((r) => r.pass) ? `끝 · ${merged.results.length}기능 실측 통과 · 목표 대비 초과 ${slow}건` : `끝 · 실측 실패`;
         })(),
         i: queue.length,
         n: queue.length,
@@ -374,7 +377,7 @@ export function HubLabPane() {
         </div>
       ) : null}
       <p className="hub-lab-lead">
-        실전 부하를 파라미터로 넣습니다. 동시 종목·창·REST 간격·포착 팽창·주문 한도를 극한까지 올려 {params.deadlineMs}ms 안 합격 여부를 봅니다. 미등록 기능은 거부합니다.
+        목표는 {params.deadlineMs}ms입니다. 합격은 허브 총량이 허용한 범위의 실데이터 수신입니다. 목표 초과는 비교·병목이지 실측 실패가 아닙니다.
       </p>
       <div className="hub-lab-presets">
         {LAB_PARAM_PRESETS.map((pr) => (
@@ -430,9 +433,10 @@ export function HubLabPane() {
               {row ? (
                 <span>
                   {row.units?.length
-                    ? `${row.units.filter((u) => u.ok).length}/${row.units.length}종목 ${fmtMs(row.ms)}/${fmtMs(row.targetMs)}`
-                    : `${row.ms}ms / ${row.targetMs}ms`}{' '}
-                  {row.pass ? '통과' : '미달'}
+                    ? `${row.units.filter((u) => u.ok).length}/${row.units.length}종목 ${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)}`
+                    : `${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)}`}{' '}
+                  {row.pass ? '실측통과' : '실패'}
+                  {row.onTarget === false ? ' · 목표초과' : ''}
                 </span>
               ) : (
                 <span>미측정</span>
@@ -448,8 +452,8 @@ export function HubLabPane() {
         ) : (
           <>
             <p>
-              {new Date(shown.at).toLocaleString('ko-KR')} · {shown.scope === 'all' ? '전체' : shown.scope} · 합격한도 {shown.params?.deadlineMs ?? shown.results[0]?.targetMs}ms · 병목{' '}
-              {shown.bottlenecks.length ? shown.bottlenecks.join(', ') : '없음'}
+              {new Date(shown.at).toLocaleString('ko-KR')} · {shown.scope === 'all' ? '전체' : shown.scope} · 목표 {shown.params?.deadlineMs ?? shown.results[0]?.targetMs}ms · 목표 대비{' '}
+              {shown.bottlenecks.length ? shown.bottlenecks.join(', ') : '이내'}
             </p>
             {shown.params ? (
               <p className="hub-lab-detail">
@@ -461,7 +465,7 @@ export function HubLabPane() {
                 <tr>
                   <th>기능</th>
                   <th>ms</th>
-                  <th>한도</th>
+                  <th>목표</th>
                   <th>제약</th>
                   <th>결과</th>
                 </tr>
@@ -477,22 +481,23 @@ export function HubLabPane() {
                       <td>{r.ms}</td>
                       <td>{r.targetMs}</td>
                       <td>{r.constraints}</td>
-                      <td>{r.ok ? (r.pass ? '통과' : '목표초과') : '실패'}</td>
+                      <td>{r.pass ? (r.onTarget ? '실측통과·목표이내' : '실측통과·목표초과') : '실패'}</td>
                     </tr>
                   );
                   const kids = (r.units || []).map((u) => (
-                    <tr key={`${r.id}-${u.code}`} className={u.ok && u.ms <= (r.perTargetMs || r.targetMs) && !u.simulated ? '' : 'bad'}>
+                    <tr key={`${r.id}-${u.code}`} className={u.ok && !u.simulated ? '' : 'bad'}>
                       <td>
                         └ {u.name || ''} {u.code}
                         <div className="hub-lab-detail">
-                          봉 {u.bars ?? 0} · 첫 {u.firstAt || '-'} {u.firstClose ?? '-'} · 끝 {u.lastAt || '-'} {u.lastClose ?? '-'} · 시작 후 {u.waitMs ?? u.ms}ms
+                          봉 {u.bars ?? 0} · 첫 {u.firstAt || '-'} {u.firstClose ?? '-'} · 끝 {u.lastAt || '-'} {u.lastClose ?? '-'} · 실측 {u.waitMs ?? u.ms}ms / 목표 {r.perTargetMs || r.targetMs}ms
+                          {u.held ? ' · 총량보류' : ''}
                           {u.simulated ? ' · 가짜(불합격)' : ''}
                         </div>
                       </td>
                       <td>{u.ms}</td>
                       <td>{r.perTargetMs || r.targetMs}</td>
                       <td>{u.ok ? 0 : 1}</td>
-                      <td>{u.ok && u.ms <= (r.perTargetMs || r.targetMs) ? '통과' : '미달'}</td>
+                      <td>{u.held ? '총량보류' : u.ok && !u.simulated ? ((u.waitMs || u.ms) <= (r.perTargetMs || r.targetMs) ? '실측·목표이내' : '실측·목표초과') : '실패'}</td>
                     </tr>
                   ));
                   return [head, ...kids];

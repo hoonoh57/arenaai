@@ -51,7 +51,7 @@ export const LAB_PARAM_FIELDS: {
   {key: 'watchBudget', label: '감시 슬롯', min: 1, max: 100, step: 1, hint: '0B 구독 상한과 맞춤'},
   {key: 'orders', label: '주문 시도', min: 1, max: 80, step: 1, hint: '중복·한도 포함'},
   {key: 'maxPositions', label: '최대 보유', min: 1, max: 16, step: 1, hint: '위험 한도'},
-  {key: 'deadlineMs', label: '합격 ms', min: 50, max: 5000, step: 50, hint: '시나리오 전체'},
+  {key: 'deadlineMs', label: '목표 ms', min: 50, max: 5000, step: 50, hint: '비교용 목표. 총량 허용 실측과 나란히 봄'},
   {key: 'refreshMs', label: '차트 주기 ms', min: 5000, max: 300000, step: 1000, hint: '리프레시 예산'},
 ];
 

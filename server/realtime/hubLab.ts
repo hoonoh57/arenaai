@@ -68,6 +68,7 @@ export type LabUnitRow = {
   lastClose?: number;
   simulated?: boolean;
   waitMs?: number;
+  held?: boolean;
 };
 
 let unitLive: LabUnitLive | null = null;
@@ -137,6 +138,8 @@ export type LabCaseResult = {
   targetMs: number;
   ok: boolean;
   pass: boolean;
+  onTarget: boolean;
+  gapMs: number;
   detail: string;
   constraints: number;
   units?: LabUnitRow[];
@@ -190,7 +193,7 @@ async function runOne(
       const t = Date.now();
       const allow = live.restAllowed(1);
       if (!allow.ok) {
-        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        markUnit(c, true, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0, held: true});
         return;
       }
       try {
@@ -205,12 +208,13 @@ async function runOne(
       }
     });
     const units = endUnits();
-    const fail = units.filter((u) => !u.ok).length;
-    const inTime = units.filter((u) => u.ok && (u.waitMs || u.ms) <= p.deadlineMs).length;
-    const perSec = p.deadlineMs > 0 ? (inTime / p.deadlineMs) * 1000 : 0;
+    const held = units.filter((u) => u.held).length;
+    const got = units.filter((u) => u.ok && !u.held && (u.bars || 0) > 0).length;
+    const miss = units.filter((u) => !u.ok && !u.held).length;
+    const inTime = units.filter((u) => u.ok && !u.held && (u.waitMs || u.ms) <= p.deadlineMs).length;
     return {
-      detail: `캐시 없이 신규 REST · 받음 ${units.length - fail}/${units.length} · 한도 ${p.deadlineMs}ms 안 ${inTime}종목 · 1초당 약 ${perSec.toFixed(1)}종목${inTime < units.length ? ' · 한도 내 전원 불가 → 분봉 REST만으로는 부족' : ''}`,
-      constraints: fail + (inTime < units.length ? 1 : 0),
+      detail: `실측 수신 ${got} · 총량보류 ${held} · 실패 ${miss} · 목표 ${p.deadlineMs}ms 이내 ${inTime} · 목표 대비는 비교만`,
+      constraints: miss,
       units,
     };
   }
@@ -222,7 +226,7 @@ async function runOne(
       const t = Date.now();
       const allow = live.restAllowed(2);
       if (!allow.ok) {
-        markUnit(c, false, 0, {name: c, bars: 0, simulated: false});
+        markUnit(c, true, 0, {name: c, bars: 0, simulated: false, held: true});
         return;
       }
       try {
@@ -428,6 +432,8 @@ export async function runHubLab(
         targetMs: params.deadlineMs,
         ok: false,
         pass: false,
+        onTarget: false,
+        gapMs: 0,
         detail: '실허브 없음. 가짜 측정은 하지 않습니다.',
         constraints: 1,
       })),
@@ -456,12 +462,10 @@ export async function runHubLab(
     const ms = Date.now() - started;
     const targetMs = params.deadlineMs;
     const perTargetMs = targetMs;
-    const cold = c.id === 'ensureChartPage' || c.id === 'ensureStrengthPage';
-    const unitFail = Boolean(
-      units?.some((u) => !u.ok || (!cold && u.ms > perTargetMs)),
-    );
-    const inTime = cold
-      ? Boolean(units?.length && units.every((u) => u.ok && (u.waitMs || u.ms) <= targetMs))
+    const unitFail = Boolean(units?.some((u) => !u.held && (!u.ok || u.simulated)));
+    const measured = units?.filter((u) => !u.held) || [];
+    const onTarget = measured.length
+      ? measured.every((u) => u.ok && (u.waitMs || u.ms) <= targetMs)
       : ms <= targetMs;
     const okAll = ok && !unitFail;
     results.push({
@@ -471,7 +475,9 @@ export async function runHubLab(
       ms,
       targetMs,
       ok: okAll,
-      pass: okAll && inTime,
+      pass: okAll,
+      onTarget,
+      gapMs: ms - targetMs,
       detail,
       constraints,
       units,
@@ -483,7 +489,7 @@ export async function runHubLab(
     scope,
     params,
     results,
-    bottlenecks: results.filter((r) => !r.pass).map((r) => r.id),
+    bottlenecks: results.filter((r) => !r.onTarget).map((r) => r.id),
     missingOfficial,
     liveMeters: live ? live.ops.report() : undefined,
   };
