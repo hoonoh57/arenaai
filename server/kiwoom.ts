@@ -2,6 +2,7 @@ import {LimitGovernor, classifyMessage} from './realtime/limits';
 import type {Candle, PreviousDay, Stock} from './core';
 import {alignStrengthToCandles, correctSmallLotStrength, parseStrengthTicks, strengthSyncStatus, type StrengthTick} from '../shared/strength';
 import {aggregateTickBars, parseTickTimeframe} from '../shared/ticks';
+import {kstDate} from './realtime/protocol';
 
 type ObjectRow = Record<string, unknown>;
 
@@ -398,14 +399,23 @@ export class Kiwoom {
           : input.timeframe === 'W'
             ? ['stk_wk_pole_chart_qry', 'stk_stk_pole_chart_qry', 'stk_week_pole_chart_qry']
             : ['stk_mth_pole_chart_qry', 'stk_mon_pole_chart_qry'];
-      const base = (input.baseDate || '').replace(/-/g, '');
-      const body: Record<string, string> = {stk_cd: input.code, upd_stkpc_tp: '1'};
-      if (/^\d{8}$/.test(base)) body.base_dt = base;
-      const d = await this.rest('/api/dostk/chart', apiId, body, extra);
-      const rows =
-        tables.map((t) => d[t]).find((x) => Array.isArray(x) && x.length) ||
-        Object.values(d).find((x) => Array.isArray(x) && x.length && typeof x[0] === 'object');
-      const candles = dailyToCandles(parseDailyRows(rows || []));
+      const baseRaw = (input.baseDate || '').replace(/-/g, '');
+      const base_dt = /^\d{8}$/.test(baseRaw) ? baseRaw : kstDate(Date.now());
+      const body: Record<string, string> = {stk_cd: input.code, base_dt, upd_stkpc_tp: '1'};
+      const load = async (stk: string) => {
+        const d = await this.rest('/api/dostk/chart', apiId, {...body, stk_cd: stk}, extra);
+        const rows =
+          tables.map((t) => d[t]).find((x) => Array.isArray(x) && x.length) ||
+          Object.values(d).find((x) => Array.isArray(x) && x.length && typeof (x as unknown[])[0] === 'object');
+        return dailyToCandles(parseDailyRows(Array.isArray(rows) ? rows : []));
+      };
+      let candles: Candle[] = [];
+      try {
+        candles = await load(`${input.code}_AL`);
+      } catch {
+        candles = [];
+      }
+      if (!candles.length) candles = await load(input.code);
       return {candles, hasMore: this.lastContinuation.contYn === 'Y', nextKey: this.lastContinuation.nextKey};
     }
     const pullMore = async (candles: Candle[], hasMore: boolean, nextKey: string, load: (ex: {contYn?: string; nextKey?: string}) => Promise<Candle[]>): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> => {
