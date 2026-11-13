@@ -67,6 +67,7 @@ export type LabUnitRow = {
   lastAt?: string;
   lastClose?: number;
   simulated?: boolean;
+  waitMs?: number;
 };
 
 let unitLive: LabUnitLive | null = null;
@@ -180,25 +181,28 @@ async function runOne(
     return none;
   }
   if (id === 'ensureChartPage') {
-    beginUnits(id, '종목', list.length, p.chartConcurrency, '분봉 페이지');
+    const wall0 = Date.now();
+    beginUnits(id, '종목', list.length, p.chartConcurrency, '캐시 없이 신규 분봉');
     await pool(list, p.chartConcurrency, async (c) => {
       const t = Date.now();
       try {
-        const page = await live.ensureChartPage({code: c, timeframe: '1'});
+        const page = await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
         const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
-        markUnit(c, span.bars! > 0 && Boolean(span.firstAt && span.lastAt), Date.now() - t, {name, ...span, simulated: false});
-      } catch (e) {
-        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
+        const waitMs = Date.now() - wall0;
+        const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false, waitMs});
+      } catch {
+        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
       }
     });
     const units = endUnits();
     const fail = units.filter((u) => !u.ok).length;
-    const sum = units.reduce((s, u) => s + u.ms, 0);
-    const asked = p.codes;
+    const inTime = units.filter((u) => u.ok && (u.waitMs || u.ms) <= p.deadlineMs).length;
+    const perSec = p.deadlineMs > 0 ? (inTime / p.deadlineMs) * 1000 : 0;
     return {
-      detail: `요청 ${asked} · 실종목 ${units.length} · 성공 ${units.length - fail} · 병렬 ${p.chartConcurrency} · 개별합 ${sum}ms`,
-      constraints: fail + (units.length < asked ? 1 : 0),
+      detail: `캐시 없이 신규 REST · 받음 ${units.length - fail}/${units.length} · 한도 ${p.deadlineMs}ms 안 ${inTime}종목 · 1초당 약 ${perSec.toFixed(1)}종목${inTime < units.length ? ' · 한도 내 전원 불가 → 분봉 REST만으로는 부족' : ''}`,
+      constraints: fail + (inTime < units.length ? 1 : 0),
       units,
     };
   }
@@ -433,7 +437,13 @@ export async function runHubLab(
     const ms = Date.now() - started;
     const targetMs = params.deadlineMs;
     const perTargetMs = targetMs;
-    const unitFail = Boolean(units?.some((u) => !u.ok || u.ms > perTargetMs));
+    const cold = c.id === 'ensureChartPage' || c.id === 'ensureStrengthPage';
+    const unitFail = Boolean(
+      units?.some((u) => !u.ok || (!cold && u.ms > perTargetMs)),
+    );
+    const inTime = cold
+      ? Boolean(units?.length && units.every((u) => u.ok && (u.waitMs || u.ms) <= targetMs))
+      : ms <= targetMs;
     const okAll = ok && !unitFail;
     results.push({
       id: c.id,
@@ -442,7 +452,7 @@ export async function runHubLab(
       ms,
       targetMs,
       ok: okAll,
-      pass: okAll && ms <= targetMs,
+      pass: okAll && inTime,
       detail,
       constraints,
       units,

@@ -16,7 +16,7 @@ type LabReport = {
     pass: boolean;
     detail: string;
     constraints: number;
-    units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean}[];
+    units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean; waitMs?: number}[];
     perTargetMs?: number;
   }[];
   bottlenecks: string[];
@@ -216,7 +216,7 @@ export function HubLabPane() {
               title: `${u.name || ''} ${u.code}`.trim(),
               ms: u.ms,
               pass: u.ok && u.ms <= per && !u.simulated,
-              detail: `봉 ${u.bars ?? 0} · 첫 ${u.firstAt || '-'} 종가 ${u.firstClose ?? '-'} · 끝 ${u.lastAt || '-'} 종가 ${u.lastClose ?? '-'} · 목표 ${fmtMs(per)}`,
+              detail: `봉 ${u.bars ?? 0} · 첫 ${u.firstAt || '-'} 종가 ${u.firstClose ?? '-'} · 끝 ${u.lastAt || '-'} 종가 ${u.lastClose ?? '-'} · 조회 ${fmtMs(u.ms)} · 시작 후 ${fmtMs(u.waitMs ?? u.ms)}에 도착 / 한도 ${fmtMs(per)}`,
               targetMs: per,
             });
           }
@@ -460,7 +460,7 @@ export function HubLabPane() {
                       <td>
                         └ {u.name || ''} {u.code}
                         <div className="hub-lab-detail">
-                          봉 {u.bars ?? 0} · 첫 {u.firstAt || '-'} {u.firstClose ?? '-'} · 끝 {u.lastAt || '-'} {u.lastClose ?? '-'}
+                          봉 {u.bars ?? 0} · 첫 {u.firstAt || '-'} {u.firstClose ?? '-'} · 끝 {u.lastAt || '-'} {u.lastClose ?? '-'} · 시작 후 {u.waitMs ?? u.ms}ms
                           {u.simulated ? ' · 가짜(불합격)' : ''}
                         </div>
                       </td>

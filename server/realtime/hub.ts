@@ -249,6 +249,7 @@ export class RealtimeHub {
     timeframe: string;
     baseDate?: string;
     nextKey?: string;
+    fresh?: boolean;
   }): Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}> {
     return this.ops.run('ensureChartPage', async () => {
       const broker = this.deps.broker;
@@ -260,6 +261,7 @@ export class RealtimeHub {
         baseDate: input.baseDate || '',
         nextKey: input.nextKey || '',
       });
+      if (input.fresh) this.chartGate.drop(key);
       const page = await this.chartGate.load(key, () =>
         broker.chartPage!({
           code: input.code,

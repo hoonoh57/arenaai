@@ -17,6 +17,11 @@ export class ChartGate {
     this.inflight.clear();
   }
 
+  drop(key: string): void {
+    this.cache.delete(key);
+    this.inflight.delete(key);
+  }
+
   async load<T>(key: string, run: () => Promise<T>): Promise<T> {
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < this.ttlMs) return hit.value as T;
