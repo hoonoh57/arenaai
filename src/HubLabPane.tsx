@@ -26,27 +26,74 @@ export function HubLabPane() {
   const [params, setParams] = useState<LabParams>(LAB_PARAM_DEFAULT);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [overlay, setOverlay] = useState<{kind: 'run' | 'load' | 'done' | 'error'; title: string; i?: number; n?: number} | null>(null);
 
-  const load = async () => {
-    const d = await j<{cases: LabCase[]; reports: LabReport[]}>('/api/hub/lab');
-    setCases(d.cases);
-    setReports(d.reports);
-    if (d.reports[0]) setCurrent(d.reports[0]);
+  const load = async (silent = false) => {
+    if (!silent) {
+      setBusy(true);
+      setOverlay({kind: 'load', title: '저장 보고서를 읽는 중'});
+    }
+    try {
+      const d = await j<{cases: LabCase[]; reports: LabReport[]}>('/api/hub/lab');
+      setCases(d.cases);
+      setReports(d.reports);
+      if (d.reports[0]) setCurrent(d.reports[0]);
+    } finally {
+      if (!silent) {
+        setBusy(false);
+        setOverlay(null);
+      }
+    }
   };
 
   useEffect(() => {
-    void load().catch((e) => setErr((e as Error).message));
+    void load().catch((e) => {
+      setErr((e as Error).message);
+      setOverlay({kind: 'error', title: (e as Error).message});
+      setBusy(false);
+    });
   }, []);
 
   const run = async (id: 'all' | string) => {
+    const bodyParams = clampLabParams(params);
+    const queue = id === 'all' ? cases : cases.filter((c) => c.id === id);
+    if (!queue.length) {
+      setOverlay({kind: 'error', title: '실행할 기능이 없습니다'});
+      return;
+    }
     setBusy(true);
     setErr('');
+    const merged: LabReport = {
+      at: Date.now(),
+      scope: id,
+      params: bodyParams,
+      results: [],
+      bottlenecks: [],
+    };
     try {
-      const report = await j<LabReport>('/api/hub/lab', {method: 'POST', body: JSON.stringify({id, params: clampLabParams(params)})});
-      setCurrent(report);
-      await load();
+      for (let i = 0; i < queue.length; i++) {
+        const c = queue[i];
+        setOverlay({kind: 'run', title: c.title, i: i + 1, n: queue.length});
+        const report = await j<LabReport>('/api/hub/lab', {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})});
+        merged.results.push(...report.results);
+        merged.params = report.params || bodyParams;
+        merged.at = report.at;
+        setCurrent({...merged, bottlenecks: merged.results.filter((r) => !r.pass).map((r) => r.id)});
+      }
+      merged.bottlenecks = merged.results.filter((r) => !r.pass).map((r) => r.id);
+      setCurrent(merged);
+      setOverlay({
+        kind: 'done',
+        title: merged.bottlenecks.length ? `끝 · 병목 ${merged.bottlenecks.length}` : `끝 · ${merged.results.length}건 통과`,
+        i: queue.length,
+        n: queue.length,
+      });
+      await load(true);
+      window.setTimeout(() => setOverlay((o) => (o?.kind === 'done' ? null : o)), 1400);
     } catch (e) {
-      setErr((e as Error).message);
+      const msg = (e as Error).message;
+      setErr(msg);
+      setOverlay({kind: 'error', title: msg});
     } finally {
       setBusy(false);
     }
@@ -59,6 +106,27 @@ export function HubLabPane() {
   const shown = current;
   return (
     <div className="hub-lab">
+      {overlay ? (
+        <div className={'hub-lab-overlay' + (overlay.kind === 'error' ? ' err' : overlay.kind === 'done' ? ' ok' : '')}>
+          <div>
+            <b>{overlay.kind === 'run' ? '측정 중' : overlay.kind === 'load' ? '불러오는 중' : overlay.kind === 'done' ? '완료' : '오류'}</b>
+            <p>{overlay.title}</p>
+            {overlay.n ? (
+              <p>
+                {overlay.i}/{overlay.n}
+                {overlay.kind === 'run' ? ' · 닫기·클릭 불가' : ''}
+              </p>
+            ) : overlay.kind === 'run' || overlay.kind === 'load' ? (
+              <p>닫기·클릭 불가</p>
+            ) : null}
+            {overlay.kind === 'error' ? (
+              <button className="hts-tool" onClick={() => setOverlay(null)}>
+                확인
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <p className="hub-lab-lead">
         실전 부하를 파라미터로 넣습니다. 동시 종목·창·REST 간격·포착 팽창·주문 한도를 극한까지 올려 {params.deadlineMs}ms 안 합격 여부를 봅니다. 미등록 기능은 거부합니다.
       </p>
@@ -101,7 +169,7 @@ export function HubLabPane() {
         <button className="hts-tool" disabled={busy} onClick={() => void run(pick)}>
           {busy ? '측정 중' : '이 파라미터로 실행'}
         </button>
-        <button className="hts-tool" disabled={busy} onClick={() => void load()}>
+        <button className="hts-tool" disabled={busy} onClick={() => void load().catch((e) => setOverlay({kind: 'error', title: (e as Error).message}))}>
           저장 불러오기
         </button>
       </div>
