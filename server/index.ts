@@ -462,7 +462,8 @@ app.get('/api/state', (_req, res) =>
     risk: risk.snapshot(),
     audit: audit.list(20),
     orderMode: hub.book.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed-fill',
-    book: hub.book.snapshot(),
+    book: hub.bookSnapshot(),
+    quota: hub.quota(),
     patternKpi: patternKpi.snapshot(),
     market: {indexRet: delayContextNow().indexRet, ma120Slope: delayContextNow().ma120Slope},
   }),
@@ -653,55 +654,67 @@ app.get('/api/audit', (req, res) => {
 app.post('/api/book/mode', (req, res) => {
   try {
     const next = hub.book.setFillMode(req.body?.mode === 'kiwoom-mock' ? 'kiwoom-mock' : 'assumed');
-    res.json({ok: true, fillMode: next, book: hub.book.snapshot()});
+    res.json({ok: true, fillMode: next, book: hub.bookSnapshot()});
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '체결 모드 변경 실패'});
   }
 });
 app.post('/api/book/buy', async (req, res) => {
-  try {
-    const {code, type, limitPrice, qty} = req.body ?? {};
-    if (typeof code !== 'string') throw new Error('종목코드를 확인하세요.');
-    const order = await hub.book.buy(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? config.orderQty : Number(qty));
-    hub.noteBookOrder(order);
-    res.json({ok: true, order, book: hub.book.snapshot()});
-  } catch (e) {
-    res.status(400).json({error: e instanceof Error ? e.message : '모의 매수 실패'});
+  const {code, type, limitPrice, qty} = req.body ?? {};
+  const got = await hub.ask({
+    owner: 'desk:book',
+    op: 'buy',
+    code: typeof code === 'string' ? code : '',
+    orderType: type === 'limit' ? 'limit' : 'market',
+    limitPrice: Number(limitPrice) || undefined,
+    qty: qty === undefined ? config.orderQty : Number(qty),
+  });
+  if (!got.ok) {
+    res.status(400).json({error: got.reason || '모의 매수 실패', book: got.book, held: got.held});
+    return;
   }
+  res.json({ok: true, order: got.order, book: got.book, held: got.held});
 });
 app.post('/api/book/sell', async (req, res) => {
-  try {
-    const {code, type, limitPrice, qty} = req.body ?? {};
-    if (typeof code !== 'string') throw new Error('종목코드를 확인하세요.');
-    const order = await hub.book.sell(code, type === 'limit' ? 'limit' : 'market', Number(limitPrice) || undefined, qty === undefined ? undefined : Number(qty));
-    hub.noteBookOrder(order);
-    res.json({ok: true, order, book: hub.book.snapshot()});
-  } catch (e) {
-    res.status(400).json({error: e instanceof Error ? e.message : '모의 매도 실패'});
+  const {code, type, limitPrice, qty} = req.body ?? {};
+  const got = await hub.ask({
+    owner: 'desk:book',
+    op: 'sell',
+    code: typeof code === 'string' ? code : '',
+    orderType: type === 'limit' ? 'limit' : 'market',
+    limitPrice: Number(limitPrice) || undefined,
+    qty: qty === undefined ? undefined : Number(qty),
+  });
+  if (!got.ok) {
+    res.status(400).json({error: got.reason || '모의 매도 실패', book: got.book, held: got.held});
+    return;
   }
+  res.json({ok: true, order: got.order, book: got.book, held: got.held});
 });
 app.post('/api/book/flatten', async (req, res) => {
-  try {
-    const orders = await hub.book.flatten(req.body?.type === 'limit' ? 'limit' : 'market');
-    for (const order of orders) hub.noteBookOrder(order);
-    res.json({ok: true, orders, book: hub.book.snapshot()});
-  } catch (e) {
-    res.status(400).json({error: e instanceof Error ? e.message : '일괄 청산 실패'});
+  const got = await hub.ask({
+    owner: 'desk:book',
+    op: 'flatten',
+    orderType: req.body?.type === 'limit' ? 'limit' : 'market',
+  });
+  if (!got.ok) {
+    res.status(400).json({error: got.reason || '일괄 청산 실패', book: got.book, held: got.held});
+    return;
   }
+  res.json({ok: true, orders: got.orders, book: got.book, held: got.held});
 });
 app.post('/api/book/cancel', async (req, res) => {
-  try {
-    const id = req.body?.id;
-    const code = req.body?.code;
-    if (typeof id === 'string' && id) {
-      res.json({ok: true, order: await hub.book.cancel(id), book: hub.book.snapshot()});
-      return;
-    }
-    const n = await hub.book.cancelAll(typeof code === 'string' ? code : undefined);
-    res.json({ok: true, cancelled: n, book: hub.book.snapshot()});
-  } catch (e) {
-    res.status(400).json({error: e instanceof Error ? e.message : '미체결 취소 실패'});
+  const got = await hub.ask({
+    owner: 'desk:book',
+    op: 'cancel',
+    orderId: typeof req.body?.id === 'string' ? req.body.id : undefined,
+    code: typeof req.body?.code === 'string' ? req.body.code : undefined,
+  });
+  if (!got.ok) {
+    res.status(400).json({error: got.reason || '미체결 취소 실패', book: got.book, held: got.held});
+    return;
   }
+  res.json({ok: true, order: got.order, cancelled: got.cancelled, book: got.book, held: got.held});
 });
 app.post('/api/risk/reset', (_req, res) => {
   risk.resetDay();

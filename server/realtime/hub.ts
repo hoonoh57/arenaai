@@ -469,7 +469,19 @@ export class RealtimeHub {
    */
   async ask(input: {
     owner: string;
-    op: 'chart' | 'strength' | 'live' | 'quote' | 'name' | 'watch';
+    op:
+      | 'chart'
+      | 'strength'
+      | 'live'
+      | 'quote'
+      | 'name'
+      | 'watch'
+      | 'book'
+      | 'buy'
+      | 'sell'
+      | 'flatten'
+      | 'cancel'
+      | 'system';
     code?: string;
     timeframe?: string;
     baseDate?: string;
@@ -477,6 +489,10 @@ export class RealtimeHub {
     items?: readonly string[];
     types?: readonly string[];
     fresh?: boolean;
+    qty?: number;
+    orderType?: 'market' | 'limit';
+    limitPrice?: number;
+    orderId?: string;
   }): Promise<{
     ok: boolean;
     held: boolean;
@@ -488,6 +504,12 @@ export class RealtimeHub {
     name?: string;
     ready?: boolean;
     nxt?: boolean;
+    book?: ReturnType<RealtimeHub['bookSnapshot']>;
+    order?: unknown;
+    orders?: unknown[];
+    cancelled?: number;
+    status?: HubStatus;
+    quota?: ReturnType<RealtimeHub['quota']>;
   }> {
     const tf = input.timeframe || '1';
     const base = input.baseDate || '';
@@ -509,6 +531,39 @@ export class RealtimeHub {
         if (!room.ok) return {...empty, ok: true, held: true, reason: room.reason};
         await this.subscribe(input.owner || 'demand', items, types);
         return {...empty, ok: true};
+      }
+      if (input.op === 'book' || input.op === 'system') {
+        const book = this.bookSnapshot();
+        return {
+          ...empty,
+          ok: true,
+          book,
+          status: input.op === 'system' ? this.status() : undefined,
+          quota: input.op === 'system' ? this.quota() : undefined,
+        };
+      }
+      if (input.op === 'buy' || input.op === 'sell') {
+        if (!/^\d{6}$/.test(code)) return {...empty, reason: '종목코드', book: this.bookSnapshot()};
+        const type = input.orderType === 'limit' ? 'limit' : 'market';
+        const order =
+          input.op === 'buy'
+            ? await this.book.buy(code, type, input.limitPrice, input.qty)
+            : await this.book.sell(code, type, input.limitPrice, input.qty);
+        this.noteBookOrder(order);
+        return {...empty, ok: true, order, book: this.bookSnapshot(), quote: this.quoteOf(code)};
+      }
+      if (input.op === 'flatten') {
+        const orders = await this.book.flatten(input.orderType === 'limit' ? 'limit' : 'market');
+        for (const order of orders) this.noteBookOrder(order);
+        return {...empty, ok: true, orders, book: this.bookSnapshot()};
+      }
+      if (input.op === 'cancel') {
+        if (input.orderId) {
+          const order = await this.book.cancel(input.orderId);
+          return {...empty, ok: true, order, book: this.bookSnapshot()};
+        }
+        const cancelled = await this.book.cancelAll(code && /^\d{6}$/.test(code) ? code : undefined);
+        return {...empty, ok: true, cancelled, book: this.bookSnapshot()};
       }
       if (!/^\d{6}$/.test(code)) return {...empty, reason: '종목코드'};
       if (input.op === 'live') {
