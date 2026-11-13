@@ -112,6 +112,17 @@ export type HubStatus = {
   warnAfterMs: number;
   emergency: boolean;
   link: 'ok' | 'warn' | 'dead';
+  rest: {
+    used: number;
+    left: number;
+    cap: number;
+    refillPerSecond: number;
+    waitForOneMs: number;
+    cooldownMs: number;
+    acquired: number;
+    maxWaitMs: number;
+  };
+  wss: {used: number; left: number; cap: number; packet: number};
 };
 
 export type SimulatedEvent = {time: number; code: string; side: string; price: number};
@@ -389,7 +400,51 @@ export class RealtimeHub {
       warnAfterMs,
       emergency,
       link,
+      rest: this.restBudget(),
+      wss: this.wssBudget(),
     };
+  }
+
+  restBudget() {
+    const b = this.governor.budget();
+    return {
+      used: b.used,
+      left: b.left,
+      cap: b.cap,
+      refillPerSecond: b.refillPerSecond,
+      waitForOneMs: b.waitForOneMs,
+      cooldownMs: b.cooldownMs,
+      acquired: b.acquired,
+      maxWaitMs: b.maxWaitMs,
+    };
+  }
+
+  wssBudget() {
+    const cap = this.caps.limits.maxSubscriptions;
+    const used = this.subscriptions.size;
+    return {used, left: Math.max(0, cap - used), cap, packet: this.caps.limits.maxItemsPerPacket};
+  }
+
+  quota() {
+    return {rest: this.restBudget(), wss: this.wssBudget()};
+  }
+
+  /** 총량을 넘기면 호출하지 말 것. 대기 한도를 넘으면 거절. */
+  restAllowed(n = 1): {ok: boolean; waitMs: number; left: number; reason?: string} {
+    const b = this.governor.budget();
+    const waitMs = this.governor.waitFor(n);
+    if (waitMs > b.maxWaitMs) {
+      return {ok: false, waitMs, left: b.left, reason: `REST 잔여 ${b.left.toFixed(1)}/${b.cap} · 대기 ${waitMs}ms > 한도 ${b.maxWaitMs}ms. 초과 요청 정지`};
+    }
+    return {ok: true, waitMs, left: b.left};
+  }
+
+  wssAllowed(add = 0): {ok: boolean; left: number; reason?: string} {
+    const w = this.wssBudget();
+    if (w.used + add > w.cap) {
+      return {ok: false, left: w.left, reason: `WSS 구독 ${w.used}/${w.cap}. REG 정지`};
+    }
+    return {ok: true, left: w.left};
   }
 
   /** Start the manager: connect, login, and keep the session alive. */

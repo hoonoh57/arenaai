@@ -67,9 +67,13 @@ export class TokenBucket {
 
   /** Milliseconds until one token is available (0 when available now). */
   waitMs(now: number): number {
+    return this.waitMsFor(1, now);
+  }
+
+  waitMsFor(n: number, now: number): number {
     this.refill(now);
-    if (this.tokens >= 1) return 0;
-    return Math.ceil(((1 - this.tokens) / this.config.refillPerSecond) * 1000);
+    if (n <= 0 || this.tokens >= n) return 0;
+    return Math.ceil(((n - this.tokens) / this.config.refillPerSecond) * 1000);
   }
 
   take(now: number): void {
@@ -104,6 +108,15 @@ export type GovernorStats = {
   penalties: number;
   cooldownMs: number;
   orderRequests: number;
+};
+
+export type RestBudget = GovernorStats & {
+  used: number;
+  left: number;
+  cap: number;
+  refillPerSecond: number;
+  waitForOneMs: number;
+  maxWaitMs: number;
 };
 
 /**
@@ -183,6 +196,35 @@ export class LimitGovernor {
 
   snapshot(): GovernorStats & {cooldownMs: number} {
     return {...this.stats, cooldownMs: Math.max(0, this.cooldownUntil - this.now())};
+  }
+
+  budget(): RestBudget {
+    const now = this.now();
+    const left = this.total.available(now);
+    const cap = this.total.capacity;
+    const cool = Math.max(0, this.cooldownUntil - now);
+    return {
+      ...this.stats,
+      cooldownMs: cool,
+      used: Math.max(0, cap - left),
+      left,
+      cap,
+      refillPerSecond: this.options.total.refillPerSecond,
+      waitForOneMs: Math.max(this.total.waitMs(now), cool),
+      maxWaitMs: this.maxWaitMs,
+    };
+  }
+
+  /** n개 REST를 지금 내면 대기 ms. 한도를 넘으면 Infinity. */
+  waitFor(n: number): number {
+    const now = this.now();
+    const cool = Math.max(0, this.cooldownUntil - now);
+    const wait = this.total.waitMsFor(Math.max(0, n), now);
+    return cool + wait;
+  }
+
+  canSendNow(n = 1): boolean {
+    return this.waitFor(n) === 0;
   }
 }
 

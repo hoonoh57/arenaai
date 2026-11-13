@@ -212,6 +212,8 @@
 .hub-lab-live{margin:10px 0 0;padding-left:18px;max-height:220px;overflow:auto;font-size:11px}
 .hub-lab-live li{margin:4px 0;color:#c2ef92}
 .hub-lab-live li.bad{color:#ffd6d6}
+.hub-lab-quota{display:flex;flex-wrap:wrap;gap:8px 16px;margin:0 0 8px;padding:6px 8px;border:1px solid #3d5a48;background:#102018;color:#c2ef92;font-size:11px}
+.hub-lab-quota.tight{border-color:#8e555b;background:#2a1818;color:#ffd6d6}
 .hub-lab-lead{color:#8fa79a;margin:0 0 10px;line-height:1.45}
 .hub-lab-presets{display:flex;gap:6px;margin-bottom:8px}
 .hub-lab-params{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px 10px;margin-bottom:10px}

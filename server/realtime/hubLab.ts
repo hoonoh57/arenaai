@@ -182,9 +182,17 @@ async function runOne(
   }
   if (id === 'ensureChartPage') {
     const wall0 = Date.now();
-    beginUnits(id, '종목', list.length, p.chartConcurrency, '캐시 없이 신규 분봉');
-    await pool(list, p.chartConcurrency, async (c) => {
+    const need = list.length;
+    const gate = live.restAllowed(Math.min(need, p.chartConcurrency));
+    const workers = gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
+    beginUnits(id, '종목', list.length, workers, '캐시 없이 신규 분봉 · REST 총량 보호');
+    await pool(list, workers, async (c) => {
       const t = Date.now();
+      const allow = live.restAllowed(1);
+      if (!allow.ok) {
+        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        return;
+      }
       try {
         const page = await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
         const name = await live.stockName(c).catch(() => c);
@@ -207,9 +215,16 @@ async function runOne(
     };
   }
   if (id === 'ensureStrengthPage') {
-    beginUnits(id, '종목', list.length, p.chartConcurrency, '체결강도 페이지');
-    await pool(list, p.chartConcurrency, async (c) => {
+    const gate = live.restAllowed(2);
+    const workers = gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
+    beginUnits(id, '종목', list.length, workers, '체결강도 · REST 총량 보호');
+    await pool(list, workers, async (c) => {
       const t = Date.now();
+      const allow = live.restAllowed(2);
+      if (!allow.ok) {
+        markUnit(c, false, 0, {name: c, bars: 0, simulated: false});
+        return;
+      }
       try {
         await live.ensureChartPage({code: c, timeframe: '1'});
         const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
@@ -272,9 +287,13 @@ async function runOne(
     return {detail: `체결반영 ${units.length - fail}/${units.length}`, constraints: fail, units};
   }
   if (id === 'subscribe') {
+    const w = live.wssAllowed(0);
+    if (!w.ok) return {detail: w.reason || 'WSS 한도', constraints: 1};
+    const add = Math.min(list.length, w.left);
+    if (!add) return {detail: `WSS 잔여 0/${live.quota().wss.cap}. REG 정지`, constraints: 1};
     try {
-      await live.subscribe('hub-lab', list, ['0B']);
-      return {detail: `실구독 ${list.length} (이미 있으면 REG 없음)`, constraints: 0};
+      await live.subscribe('hub-lab', list.slice(0, add), ['0B']);
+      return {detail: `실구독 시도 ${add} · 잔여 ${live.quota().wss.left}/${live.quota().wss.cap}`, constraints: 0};
     } catch (e) {
       live.ops.noteConstraint('subscribe');
       return {detail: e instanceof Error ? e.message : '거절', constraints: 1};

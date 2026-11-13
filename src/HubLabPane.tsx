@@ -67,6 +67,11 @@ type Overlay = {
   log?: {title: string; ms: number; pass: boolean; detail: string; targetMs?: number}[];
 };
 
+type Quota = {
+  rest: {used: number; left: number; cap: number; refillPerSecond: number; waitForOneMs: number; cooldownMs: number; acquired: number; maxWaitMs: number};
+  wss: {used: number; left: number; cap: number; packet: number};
+};
+
 type UnitLive = {
   idle?: boolean;
   unit?: string;
@@ -110,6 +115,7 @@ export function HubLabPane() {
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const [unit, setUnit] = useState<UnitLive | null>(null);
+  const [quota, setQuota] = useState<Quota | null>(null);
   const runStarted = useRef(0);
   const caseStarted = useRef(0);
 
@@ -120,20 +126,18 @@ export function HubLabPane() {
   }, [overlay?.kind]);
 
   useEffect(() => {
-    if (!overlay || overlay.kind !== 'run') {
-      setUnit(null);
-      return;
-    }
     let stop = false;
     const pull = async () => {
       try {
         const d = await fetch('/api/hub/lab/live').then((r) => r.json());
-        if (!stop && !d.idle) setUnit(d);
+        if (stop) return;
+        if (d.quota) setQuota(d.quota);
+        if (overlay?.kind === 'run' && !d.idle) setUnit(d);
       } catch {
-        /* */ 
+        /* */
       }
     };
-    const id = window.setInterval(() => void pull(), 150);
+    const id = window.setInterval(() => void pull(), 200);
     void pull();
     return () => {
       stop = true;
@@ -295,6 +299,13 @@ export function HubLabPane() {
         <div className={'hub-lab-overlay' + (overlay.kind === 'error' ? ' err' : overlay.kind === 'done' ? ' ok' : '')}>
           <div>
             <b>{overlay.kind === 'run' ? '측정 중' : overlay.kind === 'load' ? '불러오는 중' : overlay.kind === 'done' ? '완료' : '오류'}</b>
+            {quota ? (
+              <p>
+                REST {quota.rest.used.toFixed(1)}/{quota.rest.cap} 소모 잔여 {quota.rest.left.toFixed(1)}
+                {quota.rest.waitForOneMs > 0 ? ` · 대기 ${quota.rest.waitForOneMs}ms` : ''}
+                {' · '}WSS {quota.wss.used}/{quota.wss.cap} 잔여 {quota.wss.left}
+              </p>
+            ) : null}
             <p className="hub-lab-work">{overlay.work || overlay.title}</p>
             {unit && unit.total ? (
               <p>
@@ -346,6 +357,20 @@ export function HubLabPane() {
               </button>
             ) : null}
           </div>
+        </div>
+      ) : null}
+      {quota ? (
+        <div className={'hub-lab-quota' + (quota.rest.left < 1 || quota.wss.left < 1 ? ' tight' : '')}>
+          <span>
+            REST 총량 {quota.rest.used.toFixed(1)}/{quota.rest.cap} 소모 · 잔여 {quota.rest.left.toFixed(1)}
+            {quota.rest.waitForOneMs > 0 ? ` · 다음 ${quota.rest.waitForOneMs}ms 대기` : ''}
+            {quota.rest.cooldownMs > 0 ? ` · 쿨다운 ${quota.rest.cooldownMs}ms` : ''}
+            · 초당 +{quota.rest.refillPerSecond.toFixed(2)}
+          </span>
+          <span>
+            WSS 구독 {quota.wss.used}/{quota.wss.cap} · 잔여 {quota.wss.left} · 패킷당 {quota.wss.packet}
+          </span>
+          <span>잔여 0이면 랩은 추가 REST/REG를 보내지 않습니다. 시스템 리셋 방지.</span>
         </div>
       ) : null}
       <p className="hub-lab-lead">

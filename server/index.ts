@@ -471,7 +471,7 @@ app.get('/api/hub/ops', (_req, res) => {
   res.json({...hub.ops.report(), official: LAB_CASES.map((c) => c.id)});
 });
 app.get('/api/hub/lab/live', (_req, res) => {
-  res.json(getLabUnitLive() || {idle: true});
+  res.json({...(getLabUnitLive() || {idle: true}), quota: hub.quota()});
 });
 app.get('/api/hub/lab', (_req, res) => {
   res.json({
