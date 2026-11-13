@@ -86,6 +86,7 @@ export function Chart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const extras = useRef<ISeriesApi<'Line' | 'Histogram'>[]>([]);
+  const extrasMeta = useRef<{series: ISeriesApi<'Line' | 'Histogram'>; expression: string; overlayPx: boolean; cntrstr: boolean; formulaId: string}[]>([]);
   const markersRef = useRef<{setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void} | null>(null);
   const rangeRef = useRef<LogicalRange | null>(
     viewState && Number.isFinite(viewState.from) && Number.isFinite(viewState.to)
@@ -111,7 +112,7 @@ export function Chart({
   const seriesKeyRef = useRef(seriesKey);
   const fitScale = useRef(false);
   const skipSync = useRef(false);
-  const lastPainted = useRef({len: 0, time: 0, close: 0});
+  const lastPainted = useRef({len: 0, time: 0, close: 0, strength: 0, volume: 0});
   if (seriesKey && seriesKey !== seriesKeyRef.current) {
     seriesKeyRef.current = seriesKey;
     fitScale.current = true;
@@ -310,6 +311,7 @@ export function Chart({
       }
     }
     extras.current = [];
+    extrasMeta.current = [];
     runtimeRef.current.paintAddons({bars, formulas, paneById: paneByIdRef.current});
     const pctOn = yModeRef.current === 'percent';
     const refPx = bars[0].close > 0 ? bars[0].close : 1;
@@ -503,6 +505,13 @@ export function Chart({
             }
           }
           extras.current.push(line);
+          extrasMeta.current.push({
+            series: line,
+            expression: lineSpec.expression,
+            overlayPx,
+            cntrstr: f.id === 'cntrstr' && lineSpec.expression === f.expression,
+            formulaId: f.id,
+          });
           if (!baselineAdded) {
             for (const base of f.baselines || []) line.createPriceLine({price: base.value, color: base.color, lineWidth: base.width || 1, lineStyle: styles[base.style || 'dashed'], axisLabelVisible: true, title: '기준선'});
             baselineAdded = true;
@@ -767,7 +776,13 @@ export function Chart({
     const series = candleRef.current;
     const last = bars[bars.length - 1];
     const prev = lastPainted.current;
-    if (series && last && prev.len === bars.length && prev.time === last.time && prev.close !== last.close) {
+    if (
+      series &&
+      last &&
+      prev.len === bars.length &&
+      prev.time === last.time &&
+      (prev.close !== last.close || prev.strength !== (last.strength || 0) || prev.volume !== (last.volume || 0))
+    ) {
       const pctOn = yModeRef.current === 'percent';
       const refPx = bars[0].close > 0 ? bars[0].close : 1;
       const ax = (px: number) => corePercent(px, refPx, pctOn);
@@ -779,14 +794,40 @@ export function Chart({
           low: ax(last.low),
           close: ax(last.close),
         });
-        lastPainted.current = {len: bars.length, time: last.time, close: last.close};
+        const formulas = formulasRef.current;
+        const i = bars.length - 1;
+        for (const extra of extrasMeta.current) {
+          const f = formulas.find((x) => x.id === extra.formulaId);
+          const vals = chartHub.evaluate(extra.expression, bars, f?.variables, formulas);
+          const value = vals[i];
+          const gap = value === null || (extra.cntrstr && (value === 0 || value === 50));
+          extra.series.update(
+            gap || value === null
+              ? {time: last.time as UTCTimestamp}
+              : {time: last.time as UTCTimestamp, value: extra.overlayPx ? ax(value) : value},
+          );
+        }
+        lastPainted.current = {
+          len: bars.length,
+          time: last.time,
+          close: last.close,
+          strength: last.strength || 0,
+          volume: last.volume || 0,
+        };
         return;
       } catch {
         /* full paint */
       }
     }
     paint();
-    if (last) lastPainted.current = {len: bars.length, time: last.time, close: last.close};
+    if (last)
+      lastPainted.current = {
+        len: bars.length,
+        time: last.time,
+        close: last.close,
+        strength: last.strength || 0,
+        volume: last.volume || 0,
+      };
   }, [dataSig, formulaSig, overlaySig, filterSig, strengthReady, yMode, logScale]);
 
   useEffect(() => {

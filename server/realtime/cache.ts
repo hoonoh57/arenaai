@@ -165,14 +165,21 @@ export class SharedCache {
           if (!key.startsWith(`${code}|`) || !bars.length) continue;
           const i = bars.length - 1;
           if (bars[i].time !== last.time) continue;
-          bars[i] = {...bars[i], close: last.close, high: Math.max(bars[i].high, last.high), low: Math.min(bars[i].low, last.low)};
+          bars[i] = {
+            ...bars[i],
+            close: last.close,
+            high: Math.max(bars[i].high, last.high),
+            low: Math.min(bars[i].low, last.low),
+            ...(typeof last.volume === 'number' ? {volume: last.volume} : {}),
+            ...(typeof last.strength === 'number' ? {strength: last.strength} : {}),
+          };
         }
       }
     }
     return result;
   }
 
-  applyLiveTick(code: string, time: number, price: number, volume?: number): void {
+  applyLiveTick(code: string, time: number, price: number, volume?: number, strength?: number): void {
     if (!(price > 0) || !Number.isFinite(time)) return;
     const t = Math.max(1, Math.floor(time));
     let changed = false;
@@ -181,6 +188,7 @@ export class SharedCache {
       close: price,
       high: Math.max(bar.high, price),
       low: bar.low > 0 ? Math.min(bar.low, price) : price,
+      ...(typeof strength === 'number' && strength > 0 ? {strength} : {}),
     });
     for (const [key, bars] of this.pagesByKey) {
       if (!key.startsWith(`${code}|`) || !bars.length) continue;
@@ -191,7 +199,7 @@ export class SharedCache {
         const group = parseTickTimeframe(tf)?.ticks || 1;
         const n = this.tickN.get(key) || 0;
         if (group === 1 && last.time !== t && last.time < t) {
-          bars.push({time: t, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {})});
+          bars.push({time: t, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {}), ...(typeof strength === 'number' && strength > 0 ? {strength} : {})});
           this.tickN.set(key, 1);
           if (bars.length > 4000) bars.splice(0, bars.length - 3500);
         } else {
@@ -213,7 +221,7 @@ export class SharedCache {
             bars.push({time: cursor, open: last.close, high: last.close, low: last.close, close: last.close});
             cursor += step;
           }
-          bars.push({time: bucket, open: price, high: price, low: price, close: price});
+          bars.push({time: bucket, open: price, high: price, low: price, close: price, ...(typeof volume === 'number' ? {volume} : {}), ...(typeof strength === 'number' && strength > 0 ? {strength} : {})});
           if (bars.length > 4000) bars.splice(0, bars.length - 3500);
         } else {
           bars[bars.length - 1] = bump(last);

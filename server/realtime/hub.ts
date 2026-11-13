@@ -478,10 +478,10 @@ export class RealtimeHub {
         }
         if (quote.time !== null) {
           const bar = this.cache.applyLiveQuote(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined);
-          this.cache.applyLiveTick(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined);
+          this.cache.applyLiveTick(quote.code, quote.time, quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined);
           if (bar === 'new') this.evaluateSignals(quote.code);
         } else if (quote.price > 0) {
-          this.cache.applyLiveTick(quote.code, Math.floor(receivedAt / 1000), quote.price, quote.tradeVolume ?? undefined);
+          this.cache.applyLiveTick(quote.code, Math.floor(receivedAt / 1000), quote.price, quote.tradeVolume ?? undefined, quote.strength ?? undefined);
         }
         continue;
       }

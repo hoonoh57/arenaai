@@ -234,11 +234,28 @@ export function ChartPane({
             const next = d.candles as Candle[];
             if (px > 0) {
               const last = next[next.length - 1];
-              next[next.length - 1] = {...last, close: px, high: Math.max(last.high, px), low: last.low > 0 ? Math.min(last.low, px) : px};
+              const str = Number(d.quote?.strength);
+              next[next.length - 1] = {
+                ...last,
+                close: px,
+                high: Math.max(last.high, px),
+                low: last.low > 0 ? Math.min(last.low, px) : px,
+                ...(str > 0 ? {strength: str} : {}),
+              };
             }
             const a = next[next.length - 1];
             const b = prev[prev.length - 1];
-            if (prev.length && a && b && a.time === b.time && a.close === b.close && next.length === prev.length) return prev;
+            if (
+              prev.length &&
+              a &&
+              b &&
+              a.time === b.time &&
+              a.close === b.close &&
+              a.strength === b.strength &&
+              a.volume === b.volume &&
+              next.length === prev.length
+            )
+              return prev;
             return next;
           }
           if (!(px > 0) || !prev.length) return prev;

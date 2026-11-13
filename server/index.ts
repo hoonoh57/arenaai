@@ -646,7 +646,19 @@ app.get('/api/live-bars', (req, res) => {
       const byTime = new Map(candles.map((c) => [c.time, c]));
       for (const c of ring) {
         const had = byTime.get(c.time);
-        byTime.set(c.time, had ? {...had, close: c.close, high: Math.max(had.high, c.high), low: had.low > 0 ? Math.min(had.low, c.low) : c.low} : c);
+        byTime.set(
+          c.time,
+          had
+            ? {
+                ...had,
+                close: c.close,
+                high: Math.max(had.high, c.high),
+                low: had.low > 0 ? Math.min(had.low, c.low) : c.low,
+                ...(typeof c.volume === 'number' ? {volume: c.volume} : {}),
+                ...(typeof c.strength === 'number' ? {strength: c.strength} : {}),
+              }
+            : c,
+        );
       }
       candles = [...byTime.values()].sort((a, b) => a.time - b.time);
       if (candles.length) cache.putChartPage(code, timeframe, baseDate, candles);
@@ -654,13 +666,15 @@ app.get('/api/live-bars', (req, res) => {
   }
   if (quote && quote.price > 0 && candles.length) {
     const last = candles[candles.length - 1];
-    if (last.close !== quote.price) {
+    const str = typeof quote.strength === 'number' && quote.strength > 0 ? quote.strength : last.strength;
+    if (last.close !== quote.price || str !== last.strength) {
       candles = candles.slice();
       candles[candles.length - 1] = {
         ...last,
         close: quote.price,
         high: Math.max(last.high, quote.price),
         low: last.low > 0 ? Math.min(last.low, quote.price) : quote.price,
+        ...(typeof str === 'number' ? {strength: str} : {}),
       };
     }
   }
