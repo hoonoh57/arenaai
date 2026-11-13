@@ -16,7 +16,14 @@ export type HubOpName =
   | 'status'
   | 'putChartPage'
   | 'chartPage'
-  | 'getQuote';
+  | 'getQuote'
+  | 'conditionOne'
+  | 'conditionMany'
+  | 'liveMany'
+  | 'orderDuplicate'
+  | 'orderOverLimit'
+  | 'chartRefreshBudget'
+  | 'demandWindowCap';
 
 export type HubOpTarget = {targetMs: number; note: string};
 
@@ -34,6 +41,13 @@ export const HUB_OP_TARGETS: Record<HubOpName, HubOpTarget> = {
   putChartPage: {targetMs: 5, note: '공유 캐시 기록'},
   chartPage: {targetMs: 3, note: '공유 캐시 읽기'},
   getQuote: {targetMs: 2, note: '최근 체결'},
+  conditionOne: {targetMs: 20, note: '단일 조건검색 편성·감시 계획'},
+  conditionMany: {targetMs: 40, note: '여러 조건·다종목 편성'},
+  liveMany: {targetMs: 30, note: '다종목 체결 반영'},
+  orderDuplicate: {targetMs: 15, note: '중복 매수 거절'},
+  orderOverLimit: {targetMs: 15, note: '보유·진입 한도 초과 거절'},
+  chartRefreshBudget: {targetMs: 10, note: '최대 차트 수×리프레시 vs REST 예산'},
+  demandWindowCap: {targetMs: 8, note: '실시간 수요창 최대 개수'},
 };
 
 export type HubOpStats = {

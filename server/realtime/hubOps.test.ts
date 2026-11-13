@@ -123,5 +123,6 @@ test('허브 목표표가 목록의 모든 업무를 덮는다', () => {
   const names = Object.keys(HUB_OP_TARGETS);
   assert.ok(names.includes('ensureStrengthPage'));
   assert.ok(names.includes('ensureChartPage'));
-  assert.equal(names.length, 13);
+  assert.equal(names.length, Object.keys(HUB_OP_TARGETS).length);
+  assert.equal(names.length, 20);
 });

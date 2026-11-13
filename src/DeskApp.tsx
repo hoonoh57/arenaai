@@ -28,6 +28,7 @@ import {
 import {Chart} from './ChartView';
 import {ChartPane} from './ChartPane';
 import {TradeBar} from './chart/TradeBar';
+import {HubLabPane} from './HubLabPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {DAY_HOLD_PRESETS, HOLD_PRESETS, parseSearchAt} from '../shared/verify';
@@ -824,6 +825,7 @@ function Pane(props: {
   }
   if (win.kind === 'book') return <BookPane state={state} load={props.load} setNotice={props.setNotice} />;
   if (win.kind === 'logs') return <LogsPane />;
+  if (win.kind === 'hub-lab') return <HubLabPane />;
   return (
     <div className="activity">
       {state.events.length ? (

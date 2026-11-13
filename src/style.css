@@ -199,3 +199,20 @@
 .work-overlay{position:absolute;inset:0;z-index:30;display:grid;place-items:center;background:#071016aa;pointer-events:none}
 .work-overlay b{background:#1a2a18;border:1px solid #6a8a4a;color:#d4f0a8;padding:16px 22px;border-radius:8px;font-size:14px;font-weight:600}
 .work-overlay.err b{background:#2a1818;border-color:#8e555b;color:#ffd6d6}
+.hub-lab{padding:10px 12px;font-size:11px;color:#c5d4cc;height:100%;overflow:auto}
+.hub-lab-lead{color:#8fa79a;margin:0 0 10px;line-height:1.45}
+.hub-lab-tools{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.hub-lab-tools select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:6px 8px;border-radius:4px}
+.hub-lab-err{color:#ed6b72;margin-bottom:8px}
+.hub-lab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.hub-lab-card{text-align:left;background:#122018;border:1px solid #2a3d32;color:#d5e6d8;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px}
+.hub-lab-card b{font-size:11px}
+.hub-lab-card small{color:#7e918b}
+.hub-lab-card.ok{border-color:#3d6a40}
+.hub-lab-card.bad{border-color:#8e555b;background:#2a1818}
+.hub-lab-report{margin-top:14px;border-top:1px solid #2a3d32;padding-top:10px}
+.hub-lab-report table{width:100%;border-collapse:collapse}
+.hub-lab-report th,.hub-lab-report td{border-bottom:1px solid #1e2b35;padding:6px 4px;text-align:left;vertical-align:top}
+.hub-lab-report tr.bad td{color:#ffd6d6}
+.hub-lab-detail{color:#7e918b;font-size:10px;margin-top:2px}
+.hub-lab-hist{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
