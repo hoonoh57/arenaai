@@ -168,9 +168,10 @@ export function Chart({
   const paneByIdRef = useRef(paneById);
   paneByIdRef.current = paneById;
   const [frame, setFrame] = useState(0);
-  const [hoverIdx, setHoverIdx] = useState(-1);
-  const [hoverTip, setHoverTip] = useState(-1);
+  const [hoverTip, setHoverTip] = useState<{idx: number; x: number; y: number} | null>(null);
   const hoverTimer = useRef(0);
+  const hoverShown = useRef(false);
+  const pendingHover = useRef<{time: number; x: number; y: number} | null>(null);
   const [legends, setLegends] = useState<{slot: number; top: number; height: number; items: {id: string; name: string; param: string; color: string}[]}[]>([]);
   hintRef.current = visibleHint;
   countCb.current = onVisibleCount;
@@ -677,24 +678,37 @@ export function Chart({
     });
     chart.priceScale('right').applyOptions({mode: PriceScaleMode.Normal});
     chart.subscribeCrosshairMove((param) => {
+      window.clearTimeout(hoverTimer.current);
       const t = param.time !== undefined ? Number(param.time) : NaN;
-      if (!Number.isFinite(t)) {
-        setHoverIdx(-1);
-        window.clearTimeout(hoverTimer.current);
-        setHoverTip(-1);
+      const pt = param.point;
+      if (!Number.isFinite(t) || !pt) {
+        pendingHover.current = null;
+        if (hoverShown.current) {
+          hoverShown.current = false;
+          setHoverTip(null);
+        }
         return;
       }
-      const list = dataRef.current;
-      let bi = -1;
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].time === t) {
-          bi = i;
-          break;
-        }
+      pendingHover.current = {time: t, x: pt.x, y: pt.y};
+      if (hoverShown.current) {
+        hoverShown.current = false;
+        setHoverTip(null);
       }
-      setHoverIdx(bi);
-      window.clearTimeout(hoverTimer.current);
-      hoverTimer.current = window.setTimeout(() => setHoverTip(bi), 300);
+      hoverTimer.current = window.setTimeout(() => {
+        const hold = pendingHover.current;
+        if (!hold) return;
+        const list = dataRef.current;
+        let bi = -1;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].time === hold.time) {
+            bi = i;
+            break;
+          }
+        }
+        if (bi < 0) return;
+        hoverShown.current = true;
+        setHoverTip({idx: bi, x: hold.x, y: hold.y});
+      }, 300);
     });
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range) return;
@@ -924,8 +938,9 @@ export function Chart({
             {row.slot === 0 ? '가격' : `패널${row.slot}`}
           </button>
           {row.items.map((it) => {
-            const raw = hoverIdx >= 0 ? valuesById.current[it.id]?.[hoverIdx] : undefined;
-            const prevV = hoverIdx > 0 ? valuesById.current[it.id]?.[hoverIdx - 1] : undefined;
+            const hi = hoverTip?.idx ?? -1;
+            const raw = hi >= 0 ? valuesById.current[it.id]?.[hi] : undefined;
+            const prevV = hi > 0 ? valuesById.current[it.id]?.[hi - 1] : undefined;
             const hv = typeof raw === 'number' && Number.isFinite(raw) ? raw.toFixed(2) : '';
             const ch = pctChg(typeof raw === 'number' ? raw : null, typeof prevV === 'number' ? prevV : null);
             return (
@@ -1004,11 +1019,17 @@ export function Chart({
           );
         })}
       </svg>
-      {hoverTip >= 0 && data[hoverTip] ? (
-        <div className="chart-hover-tip">
+      {hoverTip && data[hoverTip.idx] ? (
+        <div
+          className="chart-hover-tip"
+          style={{
+            left: Math.min(hoverTip.x + 14, Math.max(8, w - 170)),
+            top: Math.max(8, hoverTip.y - 12),
+          }}
+        >
           {(() => {
-            const b = data[hoverTip];
-            const p = hoverTip > 0 ? data[hoverTip - 1] : undefined;
+            const b = data[hoverTip.idx];
+            const p = hoverTip.idx > 0 ? data[hoverTip.idx - 1] : undefined;
             const kp = kstParts(b.time);
             const row = (name: string, cur: number, prev?: number) => {
               const ch = pctChg(cur, prev);
@@ -1031,8 +1052,8 @@ export function Chart({
                 {row('거래량', b.volume || 0, p?.volume)}
                 {legends.flatMap((rowL) =>
                   rowL.items.map((it) => {
-                    const raw = valuesById.current[it.id]?.[hoverTip];
-                    const prevV = hoverTip > 0 ? valuesById.current[it.id]?.[hoverTip - 1] : undefined;
+                    const raw = valuesById.current[it.id]?.[hoverTip.idx];
+                    const prevV = hoverTip.idx > 0 ? valuesById.current[it.id]?.[hoverTip.idx - 1] : undefined;
                     if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
                     const ch = pctChg(raw, typeof prevV === 'number' ? prevV : null);
                     return (
