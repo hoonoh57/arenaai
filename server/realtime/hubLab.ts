@@ -60,6 +60,19 @@ export type LabUnitLive = {
   note: string;
 };
 
+export type LabUnitRow = {
+  code: string;
+  name?: string;
+  ms: number;
+  ok: boolean;
+  bars?: number;
+  firstAt?: string;
+  firstClose?: number;
+  lastAt?: string;
+  lastClose?: number;
+  simulated?: boolean;
+};
+
 let unitLive: LabUnitLive | null = null;
 const unitTimes: number[] = [];
 let unitRows: LabUnitRow[] = [];
@@ -74,9 +87,27 @@ function beginUnits(caseId: string, unit: string, total: number, parallel: numbe
   unitLive = {caseId, unit, done: 0, total, lastCode: '', lastOk: true, lastMs: 0, avgMs: 0, etaMs: 0, parallel, note};
 }
 
-function markUnit(code: string, ok: boolean, ms: number, bars?: number): void {
+function kstBar(sec: number): string {
+  if (!Number.isFinite(sec) || sec <= 0) return '';
+  return new Date(sec * 1000).toLocaleString('sv-SE', {timeZone: 'Asia/Seoul'}).replace('T', ' ');
+}
+
+function barSpan(candles: Candle[]): Pick<LabUnitRow, 'bars' | 'firstAt' | 'firstClose' | 'lastAt' | 'lastClose'> {
+  if (!candles.length) return {bars: 0};
+  const a = candles[0];
+  const b = candles[candles.length - 1];
+  return {
+    bars: candles.length,
+    firstAt: kstBar(a.time),
+    firstClose: a.close,
+    lastAt: kstBar(b.time),
+    lastClose: b.close,
+  };
+}
+
+function markUnit(code: string, ok: boolean, ms: number, extra: Partial<LabUnitRow> = {}): void {
   if (!unitLive) return;
-  unitRows.push({code, ok, ms: Math.max(0, ms), bars});
+  unitRows.push({code, ok, ms: Math.max(0, ms), ...extra});
   unitTimes.push(Math.max(0, ms));
   const avg = unitTimes.reduce((a, b) => a + b, 0) / unitTimes.length;
   const done = unitTimes.length;
@@ -100,8 +131,6 @@ function endUnits(): LabUnitRow[] {
   unitTimes.length = 0;
   return rows;
 }
-
-export type LabUnitRow = {code: string; ms: number; ok: boolean; bars?: number};
 
 export type LabCaseResult = {
   id: HubOpName;
@@ -208,10 +237,25 @@ function codes(n: number): string[] {
   return Array.from({length: n}, (_, i) => String(100000 + i).slice(-6));
 }
 
-async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: LabParams): Promise<{detail: string; constraints: number; units?: LabUnitRow[]}> {
+async function runOne(
+  id: HubOpName,
+  hub: RealtimeHub,
+  cache: SharedCache,
+  p: LabParams,
+  live: RealtimeHub | null,
+  realCodes: string[],
+): Promise<{detail: string; constraints: number; units?: LabUnitRow[]}> {
   const t0 = 1_700_000_000;
-  const list = codes(p.codes);
+  const rest = id === 'ensureChartPage' || id === 'ensureStrengthPage';
+  const list = rest ? realCodes.slice(0, p.codes) : codes(p.codes);
   const code = list[0] || '005930';
+  const work = rest && live ? live : hub;
+  if (rest && !live) {
+    return {detail: '실허브 없음. 가짜 0ms·가짜 종목은 합격이 아닙니다.', constraints: 1, units: []};
+  }
+  if (rest && !list.length) {
+    return {detail: '실종목이 없습니다. 차트/순위에 있는 코드만 받습니다.', constraints: 1, units: []};
+  }
   const extraFeeds = (c: string, px: number) => {
     if (p.feedsPerCode < 4) return;
     cache.setQuote({
@@ -238,18 +282,21 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
     await pool(list, p.chartConcurrency, async (c) => {
       const t = Date.now();
       try {
-        const page = await hub.ensureChartPage({code: c, timeframe: '1'});
-        markUnit(c, page.candles.length > 0, Date.now() - t, page.candles.length);
-      } catch {
-        markUnit(c, false, Date.now() - t, 0);
+        const page = await work.ensureChartPage({code: c, timeframe: '1'});
+        const name = await work.stockName(c).catch(() => c);
+        const span = barSpan(page.candles);
+        markUnit(c, span.bars! > 0 && Boolean(span.firstAt && span.lastAt), Date.now() - t, {name, ...span, simulated: false});
+      } catch (e) {
+        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
       }
     });
     const units = endUnits();
     const fail = units.filter((u) => !u.ok).length;
     const sum = units.reduce((s, u) => s + u.ms, 0);
+    const asked = p.codes;
     return {
-      detail: `${units.length}종목 중 ${units.length - fail}성공 병렬${p.chartConcurrency} 개별합 ${sum}ms`,
-      constraints: fail,
+      detail: `요청 ${asked} · 실종목 ${units.length} · 성공 ${units.length - fail} · 병렬 ${p.chartConcurrency} · 개별합 ${sum}ms`,
+      constraints: fail + (units.length < asked ? 1 : 0),
       units,
     };
   }
@@ -258,11 +305,13 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
     await pool(list, p.chartConcurrency, async (c) => {
       const t = Date.now();
       try {
-        await hub.ensureChartPage({code: c, timeframe: '1'});
-        const s = await hub.ensureStrengthPage({code: c, timeframe: '1'});
-        markUnit(c, s.ready, Date.now() - t, s.candles.length);
+        await work.ensureChartPage({code: c, timeframe: '1'});
+        const s = await work.ensureStrengthPage({code: c, timeframe: '1'});
+        const name = await work.stockName(c).catch(() => c);
+        const span = barSpan(s.candles);
+        markUnit(c, s.ready && (span.bars || 0) > 0, Date.now() - t, {name, ...span, simulated: false});
       } catch {
-        markUnit(c, false, Date.now() - t, 0);
+        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
       }
     });
     const units = endUnits();
@@ -416,11 +465,17 @@ async function runOne(id: HubOpName, hub: RealtimeHub, cache: SharedCache, p: La
   throw new Error(`미등록 기능: ${id}`);
 }
 
-export async function runHubLab(live: RealtimeHub | null, scope: 'all' | HubOpName = 'all', raw?: Partial<LabParams>): Promise<LabReport> {
+export async function runHubLab(
+  live: RealtimeHub | null,
+  scope: 'all' | HubOpName = 'all',
+  raw?: Partial<LabParams>,
+  realCodes: string[] = [],
+): Promise<LabReport> {
   const params = clampLabParams(raw);
   const missingOfficial = (Object.keys(HUB_OP_TARGETS) as HubOpName[]).filter((n) => !OFFICIAL.has(n));
   if (scope !== 'all' && !isOfficialHubOp(scope)) throw new Error(`정식 등록되지 않은 기능은 측정·사용할 수 없습니다: ${scope}`);
   const {hub, cache} = labHub(params);
+  const uniqReal = [...new Set(realCodes.filter((c) => /^\d{6}$/.test(c)))];
   const pick = scope === 'all' ? LAB_CASES : LAB_CASES.filter((c) => c.id === scope);
   const results: LabCaseResult[] = [];
   for (const c of pick) {
@@ -430,17 +485,11 @@ export async function runHubLab(live: RealtimeHub | null, scope: 'all' | HubOpNa
     let ok = true;
     let units: LabUnitRow[] | undefined;
     try {
-      const out = await Promise.race([
-        runOne(c.id, hub, cache, params),
-        sleep(params.deadlineMs + 50).then(() => {
-          throw new Error(
-            `${c.title}: 합격 한도 ${params.deadlineMs}ms 안에 안 끝났습니다. ${params.codes}종목 분봉·강도가 이 안에 못 오면 실패입니다. 더 돌리지 말고 이 경로를 고치세요.`,
-          );
-        }),
-      ]);
+      const out = await runOne(c.id, hub, cache, params, live, uniqReal);
       detail = out.detail;
       constraints = out.constraints;
       units = out.units;
+      if ((c.id === 'ensureChartPage' || c.id === 'ensureStrengthPage') && (!units || !units.length)) ok = false;
     } catch (e) {
       ok = false;
       detail = e instanceof Error ? e.message : String(e);

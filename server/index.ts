@@ -490,7 +490,8 @@ app.post('/api/hub/lab', async (req, res) => {
       res.status(400).json({error: `정식 등록되지 않은 기능은 측정·사용할 수 없습니다: ${scope}`});
       return;
     }
-    const report = await runHubLab(hub, scope, req.body?.params);
+    const realCodes = [...new Set([...deskChartCodes(), ...config.chartCodes, ...ranking.map((s) => s.code)])];
+    const report = await runHubLab(hub, scope, req.body?.params, realCodes);
     res.json(report);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '테스트랩 실행 실패'});

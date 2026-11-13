@@ -16,7 +16,7 @@ type LabReport = {
     pass: boolean;
     detail: string;
     constraints: number;
-    units?: {code: string; ms: number; ok: boolean; bars?: number}[];
+    units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean}[];
     perTargetMs?: number;
   }[];
   bottlenecks: string[];
@@ -206,17 +206,17 @@ export function HubLabPane() {
         const report = await j<LabReport>(
           '/api/hub/lab',
           {method: 'POST', body: JSON.stringify({id: c.id, params: bodyParams})},
-          bodyParams.deadlineMs + 3000,
+          bodyParams.deadlineMs + Math.ceil(bodyParams.codes / Math.max(1, bodyParams.chartConcurrency)) * 4000 + 8000,
         );
         const row = report.results[0];
         const per = row?.perTargetMs ?? bodyParams.deadlineMs;
         if (row?.units?.length) {
           for (const u of row.units) {
             log.push({
-              title: `${c.title} ${u.code}`,
+              title: `${u.name || ''} ${u.code}`.trim(),
               ms: u.ms,
-              pass: u.ok && u.ms <= per,
-              detail: `봉 ${u.bars ?? '-'} · 목표 ${fmtMs(per)} · 실적 ${fmtMs(u.ms)}`,
+              pass: u.ok && u.ms <= per && !u.simulated,
+              detail: `봉 ${u.bars ?? 0} · 첫 ${u.firstAt || '-'} 종가 ${u.firstClose ?? '-'} · 끝 ${u.lastAt || '-'} 종가 ${u.lastClose ?? '-'} · 목표 ${fmtMs(per)}`,
               targetMs: per,
             });
           }
@@ -456,10 +456,13 @@ export function HubLabPane() {
                     </tr>
                   );
                   const kids = (r.units || []).map((u) => (
-                    <tr key={`${r.id}-${u.code}`} className={u.ok && u.ms <= (r.perTargetMs || r.targetMs) ? '' : 'bad'}>
+                    <tr key={`${r.id}-${u.code}`} className={u.ok && u.ms <= (r.perTargetMs || r.targetMs) && !u.simulated ? '' : 'bad'}>
                       <td>
-                        └ {u.code}
-                        <div className="hub-lab-detail">봉 {u.bars ?? '-'} · 목표 {r.perTargetMs || r.targetMs}ms</div>
+                        └ {u.name || ''} {u.code}
+                        <div className="hub-lab-detail">
+                          봉 {u.bars ?? 0} · 첫 {u.firstAt || '-'} {u.firstClose ?? '-'} · 끝 {u.lastAt || '-'} {u.lastClose ?? '-'}
+                          {u.simulated ? ' · 가짜(불합격)' : ''}
+                        </div>
                       </td>
                       <td>{u.ms}</td>
                       <td>{r.perTargetMs || r.targetMs}</td>

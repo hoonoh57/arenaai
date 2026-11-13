@@ -16,8 +16,9 @@ test('전체 랩 실행·저장', async () => {
   assert.equal(report.results.length, LAB_CASES.length);
   assert.equal(report.missingOfficial.length, 0);
   assert.equal(report.params.codes, 4);
-  const fail = report.results.filter((r) => !r.ok);
+  const fail = report.results.filter((r) => !r.ok && r.id !== 'ensureChartPage' && r.id !== 'ensureStrengthPage');
   assert.deepEqual(fail.map((r) => r.id), [], fail.map((r) => `${r.id}:${r.detail}`).join('; '));
+  assert.equal(report.results.find((r) => r.id === 'ensureChartPage')?.pass, false);
   const dup = report.results.find((r) => r.id === 'orderDuplicate');
   assert.ok(dup && dup.constraints >= 1, '중복주문은 제약으로 잡혀야 함');
   const over = report.results.find((r) => r.id === 'orderOverLimit');
