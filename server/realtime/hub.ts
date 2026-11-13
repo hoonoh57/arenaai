@@ -265,6 +265,15 @@ export class RealtimeHub {
     return this.ops.run('ensureChartPage', async () => {
       const broker = this.deps.broker;
       if (!broker?.chartPage) throw new Error('차트 REST가 허브에 없습니다.');
+      const cached = this.ops.runSync('chartPage', () =>
+        this.cache.chartPage(input.code, input.timeframe, input.baseDate || ''),
+      );
+      if (!input.fresh && cached.length && !this.restAllowed(1).ok) {
+        return {candles: cached, hasMore: false, nextKey: ''};
+      }
+      if (!this.restAllowed(1).ok && !cached.length) {
+        return {candles: [], hasMore: true, nextKey: ''};
+      }
       const key = this.chartGate.key({
         kind: 'chart',
         code: input.code,
@@ -856,7 +865,7 @@ export class RealtimeHub {
     if (typeof owner !== 'string' || !owner.trim()) throw new Error('구독 소유자 식별자가 필요합니다.');
     if (!items.length || !types.length) throw new Error('구독할 종목과 타입이 필요합니다.');
     await this.withSubscriptionLock(async () => {
-      const toRegister: {key: string; item: string; type: string}[] = [];
+      let toRegister: {key: string; item: string; type: string}[] = [];
       let additions = 0;
       for (const type of types) {
         for (const item of items) {
@@ -870,10 +879,18 @@ export class RealtimeHub {
         }
       }
       if (!toRegister.length) return;
-      this.caps.assertAddition(
-        [...this.subscriptions.values()].filter((sub) => sub.owners.size > 0).length,
-        additions,
-      );
+      const used = [...this.subscriptions.values()].filter((sub) => sub.owners.size > 0).length;
+      const room = Math.max(0, this.caps.limits.maxSubscriptions - used);
+      if (room <= 0) {
+        this.audit.record('limit', '구독 상한. 추가 REG를 보내지 않습니다.', {owner, asked: additions});
+        this.ops.noteConstraint('subscribe');
+        return;
+      }
+      if (toRegister.length > room) {
+        this.audit.record('limit', `구독 ${toRegister.length}→${room}. 초과분은 다음 회차`, {owner});
+        toRegister = toRegister.slice(0, room);
+        additions = toRegister.length;
+      }
       for (const {key, item, type} of toRegister) this.subscriptions.set(key, {item, type, owners: new Set([owner])});
       try {
         for (const type of types) {

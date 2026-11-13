@@ -184,8 +184,20 @@ export class DemandBridge {
 
     const added = desired.filter((code) => !this.watched.includes(code));
     const removed = this.watched.filter((code) => !desired.includes(code));
-    if (added.length) await this.hub.subscribe('bridge:quotes', added, ['0B']);
-    if (removed.length) await this.hub.unsubscribe('bridge:quotes', removed, ['0B']);
+    if (added.length) {
+      try {
+        await this.hub.subscribe('bridge:quotes', added, ['0B']);
+      } catch {
+        this.hub.ops.noteConstraint('subscribe');
+      }
+    }
+    if (removed.length) {
+      try {
+        await this.hub.unsubscribe('bridge:quotes', removed, ['0B']);
+      } catch {
+        /* 수요 해제 실패가 주문을 막지 않음 */
+      }
+    }
     this.watched = desired;
 
     this.hub.setActiveCodes([...new Set([...selectedCodes, ...config.chartCodes])]);

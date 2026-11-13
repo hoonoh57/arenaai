@@ -167,9 +167,10 @@ export class LimitGovernor {
         this.stats.waited += 1;
         continue;
       }
+      const reserve = lane === 'order' || this.total.capacity < 3 ? 0 : 1;
       const need = Math.max(
         bucket.waitMs(now),
-        this.total.waitMs(now),
+        this.total.waitMsFor(1 + reserve, now),
         lane === 'order' ? this.order.waitMs(now) : 0,
       );
       if (need === 0) {
