@@ -23,7 +23,7 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 - 시세 RQ: **15초에 60건**. **RemainCount를 읽거나 sleep 하지 않는다.** 초과 시 Plus가 `BlockRequest` 안에서 대기 후 재개. CYBOS는 주문 레인이 아니므로 극한으로 친다.
 - 주문 RQ는 15초 20건·초과 시 코드 4. **CYBOS로 주문하지 않음.**
 - 실시간 SB 최대 **400**.
-- 분봉: 종목마다 `New StockChart` + **`BlockRequest`**, Continue, **reverse 한 번**. RemainCount/`Request` 겹침/프로세스 4개 금지.
+- 분봉 병렬은 .NET `WhenAll`과 같다: **STA 전용 스레드 최대 4개**(ThreadPool/MTA 금지). 스레드마다 `CoInitialize` 한 번, 종목마다 `DispatchEx("CpSysDib.StockChart")` + `BlockRequest`. 프로세스 4개 금지.
 - `GetDibStatus`: 0 정상, -1 오류(`GetDibMsg1`), 1 수신대기(같은 객체에 겹쳐 Request 금지).
 
 ---

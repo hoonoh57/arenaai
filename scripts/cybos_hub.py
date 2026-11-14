@@ -206,7 +206,10 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     import win32com.client  # type: ignore
 
     acode, chart_kind, period, count, fields = _chart_spec(req, str(req.get("code") or ""))
-    obj = win32com.client.Dispatch("CpSysDib.StockChart")
+    try:
+        obj = win32com.client.DispatchEx("CpSysDib.StockChart")
+    except Exception:
+        obj = win32com.client.Dispatch("CpSysDib.StockChart")
     _chart_bind(obj, acode, chart_kind, period, count, fields)
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
@@ -289,17 +292,61 @@ def _unit(code: str, one: dict[str, Any]) -> dict[str, Any]:
 
 
 def charts(req: dict[str, Any]) -> dict[str, Any]:
-    """VB CybosEngine.DoMinuteChart와 같음: 종목마다 New StockChart + WaitIfNeeded + BlockRequest. reverse만."""
+    """WhenAll 대응: STA 스레드 4개가 각자 DispatchEx+BlockRequest. ThreadPool(MTA) 금지."""
+    import queue
+    import threading
+
+    import pythoncom  # type: ignore
+
     codes = [str(c) for c in (req.get("codes") or [])]
     op = "strength" if req.get("op") == "strengths" else "chart"
     body = {**req, "op": op}
-    units: list[dict[str, Any]] = []
+    workers = max(1, min(4, int(req.get("workers") or 4), len(codes) or 1))
+    in_q: queue.Queue[str | None] = queue.Queue()
+    out_q: queue.Queue[dict[str, Any]] = queue.Queue()
     for code in codes:
+        in_q.put(code)
+    for _ in range(workers):
+        in_q.put(None)
+
+    def sta_worker() -> None:
+        pythoncom.CoInitialize()
         try:
-            one = chart({**body, "code": code})
-        except Exception as e:
-            one = _fail(str(e))
-        units.append(_unit(code, one))
+            while True:
+                code = in_q.get()
+                if code is None:
+                    break
+                try:
+                    one = chart({**body, "code": code})
+                except Exception as e:
+                    one = _fail(str(e))
+                out_q.put(_unit(code, one))
+        finally:
+            pythoncom.CoUninitialize()
+
+    threads = [threading.Thread(target=sta_worker, name=f"cybos-sta-{i}", daemon=True) for i in range(workers)]
+    for t in threads:
+        t.start()
+    units: list[dict[str, Any]] = []
+    try:
+        for _ in codes:
+            units.append(out_q.get(timeout=20))
+    except queue.Empty:
+        if not units:
+            for code in codes:
+                try:
+                    one = chart({**body, "code": code})
+                except Exception as e:
+                    one = _fail(str(e))
+                units.append(_unit(code, one))
+        else:
+            got = {u.get("code") for u in units}
+            for code in codes:
+                c6 = str(code).replace("A", "")[-6:]
+                if c6 not in got:
+                    units.append(_unit(code, _fail("STA 대기초과")))
+    for t in threads:
+        t.join(timeout=1)
     ok = any(u.get("ok") for u in units)
     return {
         "ok": ok,
@@ -309,7 +356,7 @@ def charts(req: dict[str, Any]) -> dict[str, Any]:
         "hasMore": False,
         "nextKey": "",
         "units": units,
-        "workers": 1,
+        "workers": workers,
         "provider": "cybos",
     }
 
