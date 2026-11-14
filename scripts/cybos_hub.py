@@ -124,13 +124,14 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
     if int(cy.IsConnect) != 1:
         return _fail("CYBOS 미연결")
     if op in ("chart", "strength"):
-        return chart(req, win32com.client)
+        return chart(req)
     if op == "eye":
-        return eye(req, win32com.client)
+        return eye(req)
     return _fail(f"미등록 op {op}")
 
 
-def chart(req: dict[str, Any], win32com) -> dict[str, Any]:
+def chart(req: dict[str, Any]) -> dict[str, Any]:
+    import win32com.client  # type: ignore
     code = str(req.get("code") or "")
     if len(code) == 6:
         code = "A" + code
@@ -204,7 +205,8 @@ def chart(req: dict[str, Any], win32com) -> dict[str, Any]:
     }
 
 
-def eye(req: dict[str, Any], win32com) -> dict[str, Any]:
+def eye(req: dict[str, Any]) -> dict[str, Any]:
+    import win32com.client  # type: ignore
     codes = req.get("codes") or []
     out_codes = []
     for c in codes:
