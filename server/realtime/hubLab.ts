@@ -143,6 +143,10 @@ export type BulkChart = {
     candles: Candle[],
     nextKey?: string,
   ) => Promise<{candles: Candle[]; hasMore: boolean; nextKey: string; ready: boolean; nxt: boolean}>;
+  chartPages?: (
+    codes: string[],
+    input?: {timeframe: string; summary?: boolean; strength?: boolean},
+  ) => Promise<{code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[]>;
 };
 
 export type LabCaseResult = {
@@ -219,29 +223,39 @@ async function runOne(
       : gate.ok
         ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1))
         : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · 15초 60건 Plus 대기' : '캐시 없이 신규 분봉 · REST 총량 보호');
-    await pool(list, workers, async (c) => {
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · COM 워커 4 · 15초 60건' : '캐시 없이 신규 분봉 · REST 총량 보호');
+    if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      if (!cybosOn) {
-        const allow = live.restAllowed(1);
-        if (!allow.ok) {
-          markUnit(c, true, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0, held: true});
-          return;
-        }
-      }
-      try {
-        const page = cybosOn
-          ? await bulk!.chartPage({code: c, timeframe: '1', singlePage: true})
-          : await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
-        const name = await live.stockName(c).catch(() => c);
+      const pages = await bulk.chartPages(list, {timeframe: '1', summary: true});
+      for (const page of pages) {
+        const name = await live.stockName(page.code).catch(() => page.code);
         const span = barSpan(page.candles);
-        const waitMs = Date.now() - wall0;
-        const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
-        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false, waitMs});
-      } catch {
-        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        if (page.bars) span.bars = page.bars;
+        const got = page.ok && (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+        markUnit(page.code, got, Date.now() - t, {name, ...span, simulated: false, waitMs: Date.now() - wall0});
       }
-    });
+    } else {
+      await pool(list, workers, async (c) => {
+        const t = Date.now();
+        if (!cybosOn) {
+          const allow = live.restAllowed(1);
+          if (!allow.ok) {
+            markUnit(c, true, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0, held: true});
+            return;
+          }
+        }
+        try {
+          const page = await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
+          const name = await live.stockName(c).catch(() => c);
+          const span = barSpan(page.candles);
+          const waitMs = Date.now() - wall0;
+          const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+          markUnit(c, got, Date.now() - t, {name, ...span, simulated: false, waitMs});
+        } catch {
+          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        }
+      });
+    }
     const units = endUnits();
     const held = units.filter((u) => u.held).length;
     const got = units.filter((u) => u.ok && !u.held && (u.bars || 0) > 0).length;
@@ -258,36 +272,39 @@ async function runOne(
     if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
     const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(2);
     const workers = cybosOn ? Math.min(4, Math.max(1, list.length)) : gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도' : '체결강도 · REST 총량 보호');
-    await pool(list, workers, async (c) => {
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 1회/종 · 워커 4' : '체결강도 · REST 총량 보호');
+    if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      if (!cybosOn) {
-        const allow = live.restAllowed(2);
-        if (!allow.ok) {
-          markUnit(c, true, 0, {name: c, bars: 0, simulated: false, held: true});
-          return;
-        }
+      const pages = await bulk.chartPages(list, {timeframe: '1', summary: true, strength: true});
+      for (const page of pages) {
+        const name = await live.stockName(page.code).catch(() => page.code);
+        const span = barSpan(page.candles);
+        if (page.bars) span.bars = page.bars;
+        const got = page.ok && (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+        markUnit(page.code, got, Date.now() - t, {name, ...span, simulated: false});
       }
-      try {
-        if (cybosOn) {
-          const page = await bulk!.chartPage({code: c, timeframe: '1', singlePage: true});
-          const s = await bulk!.attachStrength(c, '1', page.candles);
+    } else {
+      await pool(list, workers, async (c) => {
+        const t = Date.now();
+        if (!cybosOn) {
+          const allow = live.restAllowed(2);
+          if (!allow.ok) {
+            markUnit(c, true, 0, {name: c, bars: 0, simulated: false, held: true});
+            return;
+          }
+        }
+        try {
+          await live.ensureChartPage({code: c, timeframe: '1'});
+          const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
           const name = await live.stockName(c).catch(() => c);
           const span = barSpan(s.candles);
           const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
           markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
-          return;
+        } catch {
+          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
         }
-        await live.ensureChartPage({code: c, timeframe: '1'});
-        const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
-        const name = await live.stockName(c).catch(() => c);
-        const span = barSpan(s.candles);
-        const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
-        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
-      } catch {
-        markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
-      }
-    });
+      });
+    }
     const units = endUnits();
     const held = units.filter((u) => u.held).length;
     const got = units.filter((u) => u.ok && !u.held && (u.bars || 0) > 0).length;

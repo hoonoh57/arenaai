@@ -12,21 +12,126 @@ type CybosReply = {
   nextKey?: string;
   admin?: boolean;
   connected?: boolean;
+  bars?: number;
+  units?: (CybosReply & {code?: string})[];
 };
+
+const WORKERS = 4;
 
 /**
  * 64비트 파이썬 엔트리(scripts/cybos_hub.py). COM은 그 안에서만.
  * 관리자·연결 실패는 held. 창은 이 모듈을 직접 부르지 않는다.
  */
+type Job = {resolve: (v: CybosReply) => void; reject: (e: Error) => void};
+
+class CybosWorker {
+  child: ChildProcessWithoutNullStreams | null = null;
+  queue: Job[] = [];
+  busy = 0;
+  constructor(
+    private readonly py: string,
+    private readonly script: string,
+  ) {}
+
+  ask(body: Record<string, unknown>): Promise<CybosReply> {
+    const child = this.ensure();
+    this.busy += 1;
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        resolve: (v) => {
+          this.busy = Math.max(0, this.busy - 1);
+          resolve(v);
+        },
+        reject: (e) => {
+          this.busy = Math.max(0, this.busy - 1);
+          reject(e);
+        },
+      });
+      child.stdin.write(`${JSON.stringify(body)}\n`);
+    });
+  }
+
+  private ensure(): ChildProcessWithoutNullStreams {
+    if (this.child && !this.child.killed) return this.child;
+    const child = spawn(this.py, [this.script], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8'},
+    });
+    child.stdout.setEncoding('utf8');
+    this.child = child;
+    let buf = '';
+    child.stdout.on('data', (b: Buffer) => {
+      buf += b.toString('utf8');
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        const job = this.queue.shift();
+        if (!job) continue;
+        try {
+          job.resolve(JSON.parse(line) as CybosReply);
+        } catch (e) {
+          job.reject(e instanceof Error ? e : new Error('CYBOS JSON'));
+        }
+      }
+    });
+    child.on('error', (e) => {
+      this.child = null;
+      while (this.queue.length) this.queue.shift()?.reject(e instanceof Error ? e : new Error('CYBOS spawn'));
+    });
+    child.on('exit', () => {
+      this.child = null;
+      while (this.queue.length) this.queue.shift()?.reject(new Error('CYBOS 프로세스 종료'));
+    });
+    child.stderr.on('data', () => {
+      /* COM 로그 */
+    });
+    return child;
+  }
+}
+
 export class CybosBroker implements BrokerLike {
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private queue: {resolve: (v: CybosReply) => void; reject: (e: Error) => void}[] = [];
+  private readonly workers: CybosWorker[];
   private readonly py: string;
   private readonly script: string;
 
   constructor(opts: {python?: string; cwd?: string} = {}) {
     this.py = opts.python || process.env.CYBOS_PYTHON32 || process.env.CYBOS_PYTHON || 'python';
     this.script = join(opts.cwd || process.cwd(), 'scripts', 'cybos_hub.py');
+    this.workers = Array.from({length: WORKERS}, () => new CybosWorker(this.py, this.script));
+  }
+
+  private pick(): CybosWorker {
+    return this.workers.reduce((a, b) => (a.busy <= b.busy ? a : b));
+  }
+
+  async chartPages(
+    codes: string[],
+    input: {timeframe: string; summary?: boolean; strength?: boolean} = {timeframe: '1'},
+  ): Promise<{code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[]> {
+    const chunks: string[][] = Array.from({length: Math.min(WORKERS, Math.max(1, codes.length))}, () => []);
+    codes.forEach((c, i) => chunks[i % chunks.length]!.push(c));
+    const parts = await Promise.all(
+      chunks.map((part, i) =>
+        part.length
+          ? this.workers[i]!.ask({
+              op: input.strength ? 'strengths' : 'charts',
+              codes: part,
+              timeframe: input.timeframe,
+              summary: Boolean(input.summary),
+            })
+          : Promise.resolve({units: []} as CybosReply),
+      ),
+    );
+    return parts.flatMap((r) =>
+      (r.units || []).map((u) => ({
+        code: u.code || '',
+        candles: u.candles || [],
+        bars: u.bars || (u.candles || []).length,
+        ok: Boolean(u.ok),
+        reason: u.reason,
+      })),
+    );
   }
 
   async candles(code: string): Promise<Candle[]> {
@@ -89,49 +194,7 @@ export class CybosBroker implements BrokerLike {
   }
 
   private ask(body: Record<string, unknown>): Promise<CybosReply> {
-    const child = this.ensure();
-    return new Promise((resolve, reject) => {
-      this.queue.push({resolve, reject});
-      child.stdin.write(`${JSON.stringify(body)}\n`);
-    });
-  }
-
-  private ensure(): ChildProcessWithoutNullStreams {
-    if (this.child && !this.child.killed) return this.child;
-    const child = spawn(this.py, [this.script], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8'},
-    });
-    child.stdout.setEncoding('utf8');
-    this.child = child;
-    let buf = '';
-    child.stdout.on('data', (b: Buffer) => {
-      buf += b.toString('utf8');
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        const job = this.queue.shift();
-        if (!job) continue;
-        try {
-          job.resolve(JSON.parse(line) as CybosReply);
-        } catch (e) {
-          job.reject(e instanceof Error ? e : new Error('CYBOS JSON'));
-        }
-      }
-    });
-    child.on('error', (e) => {
-      this.child = null;
-      while (this.queue.length) this.queue.shift()?.reject(e instanceof Error ? e : new Error('CYBOS spawn'));
-    });
-    child.on('exit', () => {
-      this.child = null;
-      while (this.queue.length) this.queue.shift()?.reject(new Error('CYBOS 프로세스 종료'));
-    });
-    child.stderr.on('data', () => {
-      /* COM 로그 */
-    });
-    return child;
+    return this.pick().ask(body);
   }
 }
 

@@ -125,6 +125,8 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
         return _fail("CYBOS 미연결")
     if op in ("chart", "strength"):
         return chart(req)
+    if op in ("charts", "strengths"):
+        return charts(req)
     if op == "eye":
         return eye(req)
     if op == "list":
@@ -201,8 +203,12 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
     n = int(obj.GetHeaderValue(3))
+    summary = bool(req.get("summary"))
+    idxs = [0, n - 1] if summary and n else list(range(n))
     raw: list[dict[str, Any]] = []
-    for i in range(n):
+    for i in idxs:
+        if i < 0:
+            continue
         date = int(obj.GetDataValue(0, i))
         hhmm = int(obj.GetDataValue(1, i)) if chart_kind in ("m", "T") else 0
         o = abs(float(obj.GetDataValue(2, i)))
@@ -233,15 +239,40 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     ]
     more = bool(getattr(obj, "Continue", 0))
     oldest = candles[0]["time"] if candles else ""
+    if summary:
+        first = candles[0] if candles else None
+        last = candles[-1] if candles else None
+        return {
+            "ok": True,
+            "held": False,
+            "reason": "",
+            "candles": [first, last] if first and last and first is not last else ([first] if first else []),
+            "bars": len(candles),
+            "hasMore": more,
+            "nextKey": str(oldest) if more else "",
+            "provider": "cybos",
+        }
     return {
         "ok": True,
         "held": False,
         "reason": "",
         "candles": candles,
+        "bars": len(candles),
         "hasMore": more,
         "nextKey": str(oldest) if more else "",
         "provider": "cybos",
     }
+
+
+def charts(req: dict[str, Any]) -> dict[str, Any]:
+    codes = req.get("codes") or []
+    units = []
+    op = "strength" if req.get("op") == "strengths" else "chart"
+    for c in codes:
+        one = chart({**req, "op": op, "code": c})
+        units.append({"code": str(c).replace("A", "")[-6:], **one})
+    ok = any(u.get("ok") for u in units)
+    return {"ok": ok, "held": False, "reason": "", "candles": [], "hasMore": False, "nextKey": "", "units": units, "provider": "cybos"}
 
 
 def eye(req: dict[str, Any]) -> dict[str, Any]:
