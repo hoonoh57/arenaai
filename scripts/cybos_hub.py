@@ -63,8 +63,17 @@ def _admin() -> bool:
         return False
 
 
+def _short_com(err: Any) -> str:
+    s = str(err).replace("\n", " ")
+    if "유효하지 않은 종목코드" in s:
+        return "유효하지 않은 종목코드"
+    if len(s) > 80:
+        return s[:80] + "…"
+    return s
+
+
 def _fail(reason: str) -> dict[str, Any]:
-    return {"ok": False, "held": True, "reason": reason, "candles": [], "hasMore": False, "nextKey": ""}
+    return {"ok": False, "held": True, "reason": _short_com(reason), "candles": [], "hasMore": False, "nextKey": ""}
 
 
 def _kst_unix(date: int, hhmm: int, second: int) -> int:
@@ -158,11 +167,18 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
     if len(pool) > n:
         pool = random.sample(pool, n)
     names: dict[str, str] = {}
+    kept: list[str] = []
     for code in pool:
         try:
-            names[code] = str(mgr.CodeToName("A" + code) or code)
+            nm = str(mgr.CodeToName("A" + code) or "")
+            kind = int(mgr.GetStockSectionKind("A" + code))
         except Exception:
-            names[code] = code
+            continue
+        if not nm or kind not in (1, 2, 6, 10):
+            continue
+        names[code] = nm
+        kept.append(code)
+    pool = kept
     return {
         "ok": len(pool) > 0,
         "held": False,
@@ -217,11 +233,14 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
         obj = win32com.client.DispatchEx("CpSysDib.StockChart")
     except Exception:
         obj = win32com.client.Dispatch("CpSysDib.StockChart")
-    _chart_bind(obj, acode, chart_kind, period, count, fields)
-    obj.BlockRequest()
-    if int(obj.GetDibStatus()) != 0:
-        return _fail(str(obj.GetDibMsg1()))
-    return _chart_read(obj, req, chart_kind, fields)
+    try:
+        _chart_bind(obj, acode, chart_kind, period, count, fields)
+        obj.BlockRequest()
+        if int(obj.GetDibStatus()) != 0:
+            return _fail(str(obj.GetDibMsg1()))
+        return _chart_read(obj, req, chart_kind, fields)
+    except Exception as e:
+        return _fail(e)
 
 
 def _chart_read(obj: Any, req: dict[str, Any], chart_kind: str, fields: list[int]) -> dict[str, Any]:

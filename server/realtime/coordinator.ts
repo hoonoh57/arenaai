@@ -93,7 +93,8 @@ export class Coordinator {
       const p = by.get(c);
       const bars = p?.bars || 0;
       const ok = Boolean(p?.ok && bars > 0);
-      this.transit(c, ok ? 'ready' : 'excluded', ok ? `봉 ${bars} · ${p?.ms || 0}ms` : p?.reason || '봉 없음');
+      const why = (p?.reason || '봉 없음').replace(/\s+/g, ' ').slice(0, 80);
+      this.transit(c, ok ? 'ready' : 'excluded', ok ? `봉 ${bars} · ${p?.ms || 0}ms` : why);
       const s = this.stocks.get(c);
       if (s) {
         s.bars = bars;

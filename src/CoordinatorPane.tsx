@@ -13,7 +13,7 @@ export function CoordinatorPane() {
       setSnap(d);
       setErr('');
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '감독 조회 실패');
+      setErr('허브 재연결 대기');
     }
   };
 
@@ -82,14 +82,14 @@ export function CoordinatorPane() {
         </p>
       ) : null}
       <h4>종목</h4>
-      <table>
+      <table style={{width: '100%', tableLayout: 'fixed'}}>
         <thead>
           <tr>
-            <th>코드</th>
-            <th>이름</th>
-            <th>state</th>
-            <th>봉</th>
-            <th>ms</th>
+            <th style={{width: 72}}>코드</th>
+            <th style={{width: '28%'}}>이름</th>
+            <th style={{width: 88}}>state</th>
+            <th style={{width: 56}}>봉</th>
+            <th style={{width: 56}}>ms</th>
             <th>메모</th>
           </tr>
         </thead>
@@ -97,11 +97,15 @@ export function CoordinatorPane() {
           {(snap?.stocks || []).map((s) => (
             <tr key={s.code} className={s.state === 'excluded' || s.state === 'halted' ? 'bad' : ''}>
               <td>{s.code}</td>
-              <td>{s.name}</td>
+              <td style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={s.name}>
+                {s.name}
+              </td>
               <td>{s.state}</td>
               <td>{s.bars}</td>
               <td>{s.ms}</td>
-              <td>{s.note}</td>
+              <td style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={s.note}>
+                {s.note}
+              </td>
             </tr>
           ))}
         </tbody>
