@@ -119,6 +119,7 @@ export class CybosBroker implements BrokerLike {
               codes: part,
               timeframe: input.timeframe,
               summary: Boolean(input.summary),
+              workers: 4,
             })
           : Promise.resolve({units: []} as CybosReply),
       ),

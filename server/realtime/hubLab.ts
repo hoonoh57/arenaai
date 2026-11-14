@@ -219,11 +219,11 @@ async function runOne(
     if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
     const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(Math.min(need, p.chartConcurrency));
     const workers = cybosOn
-      ? Math.min(4, Math.max(1, list.length))
+      ? Math.min(PROVIDER_SPECS.cybos.standard.concurrency, Math.max(1, list.length))
       : gate.ok
         ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1))
         : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · COM 1프로세스 일괄 · 15초 60건' : '캐시 없이 신규 분봉 · REST 총량 보호');
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · 같은 Plus에 StockChart 4개 동시 · 15초 60건' : '캐시 없이 신규 분봉 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
       let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];
@@ -285,8 +285,8 @@ async function runOne(
     const cybosOn = provider === 'cybos';
     if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
     const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(2);
-    const workers = cybosOn ? Math.min(4, Math.max(1, list.length)) : gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 1회/종 · COM 1프로세스' : '체결강도 · REST 총량 보호');
+    const workers = cybosOn ? Math.min(PROVIDER_SPECS.cybos.standard.concurrency, Math.max(1, list.length)) : gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 · StockChart 4개 동시' : '체결강도 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
       let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];

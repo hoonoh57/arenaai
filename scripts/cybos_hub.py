@@ -264,28 +264,53 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _chart_job(op: str, req: dict[str, Any], code: str) -> dict[str, Any]:
+    import pythoncom  # type: ignore
+
+    pythoncom.CoInitialize()
+    try:
+        one = chart({**req, "op": op, "code": code})
+    except Exception as e:
+        one = _fail(str(e))
+    finally:
+        pythoncom.CoUninitialize()
+    c6 = str(code).replace("A", "")[-6:]
+    return {
+        "code": c6,
+        "ok": bool(one.get("ok")),
+        "held": bool(one.get("held")),
+        "reason": one.get("reason") or "",
+        "candles": one.get("candles") or [],
+        "bars": int(one.get("bars") or 0),
+    }
+
+
 def charts(req: dict[str, Any]) -> dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     codes = req.get("codes") or []
-    units = []
     op = "strength" if req.get("op") == "strengths" else "chart"
-    for c in codes:
-        try:
-            one = chart({**req, "op": op, "code": c})
-        except Exception as e:
-            one = _fail(str(e))
-        code = str(c).replace("A", "")[-6:]
-        units.append(
-            {
-                "code": code,
-                "ok": bool(one.get("ok")),
-                "held": bool(one.get("held")),
-                "reason": one.get("reason") or "",
-                "candles": one.get("candles") or [],
-                "bars": int(one.get("bars") or 0),
-            }
-        )
+    workers = max(1, min(4, int(req.get("workers") or 4), len(codes) or 1))
+    units: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_chart_job, op, req, str(c)) for c in codes]
+        for fut in as_completed(futs):
+            try:
+                units.append(fut.result())
+            except Exception as e:
+                units.append({"code": "", "ok": False, "held": False, "reason": str(e), "candles": [], "bars": 0})
     ok = any(u.get("ok") for u in units)
-    return {"ok": ok, "held": False, "reason": "", "candles": [], "hasMore": False, "nextKey": "", "units": units, "provider": "cybos"}
+    return {
+        "ok": ok,
+        "held": False,
+        "reason": "",
+        "candles": [],
+        "hasMore": False,
+        "nextKey": "",
+        "units": units,
+        "workers": workers,
+        "provider": "cybos",
+    }
 
 
 def eye(req: dict[str, Any]) -> dict[str, Any]:

@@ -24,7 +24,8 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 - `GetLimitRemainCount(LT_NONTRADE_REQUEST=1)`, `LimitRequestRemainTime`(ms).
 - 주문 RQ는 15초 20건·초과 시 코드 4. **CYBOS로 주문하지 않음.**
 - 실시간 SB 최대 **400**.
-- 동시 워커 **4개**까지. 한도 초과 대기는 Plus가 하므로 스레드마다 임의 sleep 루프를 넣지 않는다. RemainCount가 0이면 그 스레드만 `LimitRequestRemainTime` 대기.
+- 동시 워커 **4개**까지. **같은 32비트 프로세스**에서 스레드마다 `CoInitialize` 후 **StockChart를 매번 새로 Dispatch**. .NET `Task.WhenAll`과 같다. 파이썬 프로세스 4개는 Plus `IsConnect`를 끊으므로 금지.
+- 한도 초과 대기는 Plus가 하므로 스레드마다 임의 sleep 루프를 넣지 않는다. RemainCount가 0이면 그 스레드만 `LimitRequestRemainTime` 대기.
 - `GetDibStatus`: 0 정상, -1 오류(`GetDibMsg1`), 1 수신대기(같은 객체에 겹쳐 Request 금지).
 
 ---
