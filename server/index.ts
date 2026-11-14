@@ -565,10 +565,15 @@ app.post('/api/hub/lab', async (req, res) => {
       res.status(400).json({error: `정식 등록되지 않은 기능은 측정·사용할 수 없습니다: ${scope}`});
       return;
     }
-    const realCodes = [...new Set([...deskChartCodes(), ...config.chartCodes, ...ranking.map((s) => s.code)])];
+    let realCodes = [...new Set([...deskChartCodes(), ...config.chartCodes, ...ranking.map((s) => s.code)])];
     const captured = bridge.capturedList().map((r) => r.code);
     const windowCount = loadDesks().desks.reduce((n, d) => n + d.windows.length, 0);
     const provider = req.body?.provider === 'cybos' ? 'cybos' : 'kiwoom';
+    const want = Math.max(1, Number(req.body?.params?.codes) || realCodes.length);
+    if (provider === 'cybos' && realCodes.length < want) {
+      const extra = await cybos.listCodes(want);
+      realCodes = [...new Set([...realCodes, ...extra])];
+    }
     const report = await runHubLab(hub, scope, req.body?.params, realCodes, captured, windowCount, provider, cybos);
     res.json(report);
   } catch (e) {

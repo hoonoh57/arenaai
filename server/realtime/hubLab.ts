@@ -5,6 +5,7 @@ import {RealtimeHub} from './hub';
 import {HUB_OP_TARGETS, type HubOpName} from './hubOps';
 import {DESK_MAX} from '../../shared/desk';
 import {clampLabParams, type LabParams} from '../../shared/hubLabParams';
+import {PROVIDER_SPECS} from '../../shared/marketProvider';
 
 export type LabCase = {
   id: HubOpName;
@@ -159,6 +160,10 @@ export type LabCaseResult = {
   constraints: number;
   units?: LabUnitRow[];
   perTargetMs?: number;
+  asked?: number;
+  got?: number;
+  passStandard?: boolean;
+  passExtreme?: boolean;
 };
 
 export type LabReport = {
@@ -527,6 +532,11 @@ export async function runHubLab(
       ? measured.every((u) => u.ok && (u.waitMs || u.ms) <= targetMs)
       : ms <= targetMs;
     const okAll = ok && !unitFail;
+    const band = PROVIDER_SPECS[provider].lab;
+    const asked = units?.length || 0;
+    const got = units?.filter((u) => u.ok && !u.held && !u.simulated).length || 0;
+    const passStandard = got >= Math.min(asked || band.standard.codes, band.standard.codes) && ms <= band.standard.deadlineMs && okAll;
+    const passExtreme = asked >= band.extreme.codes && got >= band.extreme.codes && ms <= band.extreme.deadlineMs && okAll;
     results.push({
       id: c.id,
       title: c.title,
@@ -542,6 +552,10 @@ export async function runHubLab(
       constraints,
       units,
       perTargetMs,
+      asked,
+      got,
+      passStandard,
+      passExtreme,
     });
   }
   const report: LabReport = {

@@ -127,7 +127,45 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
         return chart(req)
     if op == "eye":
         return eye(req)
+    if op == "list":
+        return list_codes(req)
     return _fail(f"미등록 op {op}")
+
+
+def list_codes(req: dict[str, Any]) -> dict[str, Any]:
+    import win32com.client  # type: ignore
+
+    n = max(1, min(2000, int(req.get("count") or 100)))
+    mgr = win32com.client.Dispatch("CpUtil.CpCodeMgr")
+    out: list[str] = []
+    for mkt in (1, 2):
+        try:
+            arr = mgr.GetStockListByMarket(mkt)
+        except Exception:
+            continue
+        size = int(getattr(arr, "Count", 0) or 0)
+        if size:
+            for i in range(size):
+                raw = str(arr.Item(i) if hasattr(arr, "Item") else arr[i])
+                code = raw.replace("A", "")[-6:]
+                if len(code) == 6 and code.isdigit() and code not in out:
+                    out.append(code)
+                if len(out) >= n:
+                    break
+        else:
+            try:
+                seq = list(arr)
+            except Exception:
+                seq = []
+            for raw in seq:
+                code = str(raw).replace("A", "")[-6:]
+                if len(code) == 6 and code.isdigit() and code not in out:
+                    out.append(code)
+                if len(out) >= n:
+                    break
+        if len(out) >= n:
+            break
+    return {"ok": len(out) > 0, "held": False, "reason": "", "candles": [], "hasMore": False, "nextKey": "", "codes": out[:n], "provider": "cybos"}
 
 
 def chart(req: dict[str, Any]) -> dict[str, Any]:

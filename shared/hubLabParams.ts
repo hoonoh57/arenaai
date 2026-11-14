@@ -51,7 +51,7 @@ export const LAB_PARAM_FIELDS: {
   {key: 'watchBudget', label: '감시 슬롯', min: 1, max: 100, step: 1, hint: '0B 구독 상한과 맞춤'},
   {key: 'orders', label: '주문 시도', min: 1, max: 80, step: 1, hint: '중복·한도 포함'},
   {key: 'maxPositions', label: '최대 보유', min: 1, max: 16, step: 1, hint: '위험 한도'},
-  {key: 'deadlineMs', label: '목표 ms', min: 50, max: 5000, step: 50, hint: '비교용 목표. 총량 허용 실측과 나란히 봄'},
+  {key: 'deadlineMs', label: '목표 ms', min: 50, max: 180000, step: 50, hint: '비교용 목표. CYBOS 100종은 수 초~수십 초'},
   {key: 'refreshMs', label: '차트 주기 ms', min: 5000, max: 300000, step: 1000, hint: '리프레시 예산'},
 ];
 
@@ -104,6 +104,32 @@ export const LAB_PARAM_PRESETS: {id: string; label: string; params: LabParams}[]
       restIntervalMs: 0,
       restDelayMs: 40,
       deadlineMs: 1000,
+    },
+  },
+  {
+    id: 'cybos100',
+    label: 'CYBOS 100',
+    params: {
+      ...LAB_PARAM_DEFAULT,
+      codes: 100,
+      windows: 16,
+      chartConcurrency: 4,
+      restIntervalMs: 0,
+      captured: 100,
+      deadlineMs: 30000,
+    },
+  },
+  {
+    id: 'cybosExtreme',
+    label: 'CYBOS 극한',
+    params: {
+      ...LAB_PARAM_DEFAULT,
+      codes: 200,
+      windows: 16,
+      chartConcurrency: 4,
+      restIntervalMs: 0,
+      captured: 200,
+      deadlineMs: 60000,
     },
   },
 ];

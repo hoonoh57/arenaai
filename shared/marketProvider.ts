@@ -17,6 +17,8 @@ export type CapBand = {
   subscribe: number;
 };
 
+export type LabBand = {codes: number; deadlineMs: number};
+
 export type ProviderSpec = {
   id: MarketProvider;
   title: string;
@@ -25,6 +27,7 @@ export type ProviderSpec = {
   standard: CapBand;
   /** 넘기면 held. Plus/키움 쪽 상한 */
   max: CapBand;
+  lab: {standard: LabBand; extreme: LabBand};
   note: string;
 };
 
@@ -35,6 +38,7 @@ export const PROVIDER_SPECS: Record<MarketProvider, ProviderSpec> = {
     lanes: ['trade', 'quote', 'bulk'],
     standard: {concurrency: 4, burst: 10, windowSec: 1, pageRows: 1, codesPerCall: 1, subscribe: 100},
     max: {concurrency: 4, burst: 10, windowSec: 1, pageRows: 1, codesPerCall: 1, subscribe: 100},
+    lab: {standard: {codes: 16, deadlineMs: 14000}, extreme: {codes: 16, deadlineMs: 20000}},
     note: '주문·조건·0B 전용. 분봉 1장 1.5~12초. 100종목 이력 REST 불가.',
   },
   cybos: {
@@ -43,7 +47,8 @@ export const PROVIDER_SPECS: Record<MarketProvider, ProviderSpec> = {
     lanes: ['bulk', 'quote'],
     standard: {concurrency: 4, burst: 60, windowSec: 15, pageRows: 2000, codesPerCall: 200, subscribe: 100},
     max: {concurrency: 4, burst: 60, windowSec: 15, pageRows: 2000, codesPerCall: 200, subscribe: 400},
-    note: '관리자 필수. 15초 60건. MarketEye 200. 봉은 reverse만, sort 금지. 주문 없음.',
+    lab: {standard: {codes: 16, deadlineMs: 8000}, extreme: {codes: 100, deadlineMs: 30000}},
+    note: '관리자 필수. 15초 60건. MarketEye 200. 표준 16종·극한 100종 분봉. 봉은 reverse만.',
   },
   other: {
     id: 'other',
@@ -51,6 +56,7 @@ export const PROVIDER_SPECS: Record<MarketProvider, ProviderSpec> = {
     lanes: ['bulk'],
     standard: {concurrency: 1, burst: 1, windowSec: 1, pageRows: 1, codesPerCall: 1, subscribe: 0},
     max: {concurrency: 1, burst: 1, windowSec: 1, pageRows: 1, codesPerCall: 1, subscribe: 0},
+    lab: {standard: {codes: 1, deadlineMs: 1000}, extreme: {codes: 1, deadlineMs: 1000}},
     note: '허브가 held. 창이 직접 호출 금지.',
   },
 };

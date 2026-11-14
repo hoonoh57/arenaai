@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS, clampLabParams, type LabParams} from '../shared/hubLabParams';
 
 type LabCase = {id: string; title: string; group: string; bulk?: boolean};
-type Speed = {ms: number; pass: boolean; detail: string};
+type Speed = {ms: number; pass: boolean; detail: string; asked?: number; got?: number; passStandard?: boolean; passExtreme?: boolean};
 type LabReport = {
   at: number;
   scope: string;
@@ -22,6 +22,10 @@ type LabReport = {
     constraints: number;
     units?: {code: string; name?: string; ms: number; ok: boolean; bars?: number; firstAt?: string; firstClose?: number; lastAt?: string; lastClose?: number; simulated?: boolean; waitMs?: number; held?: boolean}[];
     perTargetMs?: number;
+    asked?: number;
+    got?: number;
+    passStandard?: boolean;
+    passExtreme?: boolean;
   }[];
   bottlenecks: string[];
   missingOfficial?: string[];
@@ -270,7 +274,15 @@ export function HubLabPane() {
             ...prev,
             [hit.id]: {
               ...prev[hit.id],
-              [pv]: {ms: hit.ms, pass: Boolean(hit.pass), detail: hit.detail || ''},
+              [pv]: {
+                ms: hit.ms,
+                pass: Boolean(hit.pass),
+                detail: hit.detail || '',
+                asked: hit.asked,
+                got: hit.got,
+                passStandard: hit.passStandard,
+                passExtreme: hit.passExtreme,
+              },
             },
           }));
         }
@@ -505,7 +517,12 @@ export function HubLabPane() {
               <span>
                 키움 {k ? `${fmtMs(k.ms)} ${k.pass ? '통과' : '실패'}` : '미측정'}
                 {' · '}
-                CYBOS {c.bulk ? (y ? `${fmtMs(y.ms)} ${y.pass ? '통과' : '실패'}` : '미측정') : '해당없음'}
+                CYBOS{' '}
+                {c.bulk
+                  ? y
+                    ? `${y.got ?? '?'}/${y.asked ?? '?'}종 ${fmtMs(y.ms)} ${y.pass ? '통과' : '실패'} · 표준${y.passStandard ? '합격' : '미달'} · 극한${y.passExtreme ? '합격' : '미달'}`
+                    : '미측정'
+                  : '해당없음'}
                 {ratio ? ` · ${ratio}` : ''}
               </span>
             </div>
@@ -548,7 +565,12 @@ export function HubLabPane() {
                       <td>{r.ms}</td>
                       <td>{r.targetMs}</td>
                       <td>{r.constraints}</td>
-                      <td>{r.pass ? (r.onTarget ? '실측통과·목표이내' : '실측통과·목표초과') : '실패'}</td>
+                      <td>
+                        {r.pass ? (r.onTarget ? '실측통과·목표이내' : '실측통과·목표초과') : '실패'}
+                        {r.asked != null ? ` · ${r.got}/${r.asked}종` : ''}
+                        {r.passStandard ? ' · 표준합격' : ''}
+                        {r.passExtreme ? ' · 극한합격' : r.asked && r.asked >= 100 ? ' · 극한미달' : ''}
+                      </td>
                     </tr>
                   );
                   const kids = (r.units || []).map((u) => (
