@@ -55,12 +55,24 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 
 `Continue`가 참이면 입력값을 다시 넣지 않고 `BlockRequest`.
 
-수신: `GetHeaderValue(3)` 개수. 보통 **index 0 = 최신**. 허브 캐시는 오래된→최신으로 reverse. **sort 금지, reverse만.**
+수신: `GetHeaderValue(3)` 개수. **index 0 = 최신**(최근이 앞).
 
-### 봉 시각 = 봉 **종료** 시각
+### 순서 — sort 절대 금지 (틱·분·일 모두)
+
+CYBOS 시각은 **hhmm까지**다. 초가 없다. 같은 1분에 틱이 수십~수백 개여도 시각 키가 같다.
+
+- **다운로드한 뒤 `sort`하면 데이터가 완전히 망가진다.** 같은 hhmm끼리 순서가 섞인다.
+- 페이지를 **받은 그대로** 이어 붙인다(첫 페이지가 가장 최근).
+- **전부 받은 다음 `reverse`를 한 번만** 해서 오래된→최신으로 바꾼다.
+- 페이지마다 reverse 하지 않는다. `time`/`hhmm`으로 정렬·unique 제거하지 않는다.
+- 키움 `ka10080`/`ka10079`와 같다: reverse만. `shared/barOrder.ts`.
+
+### 봉 시각 = 봉 **종료** 시각, 키움과 동일 키
 
 필드 0 날짜 YYYYMMDD, 필드 1 시간 **hhmm**.  
-1분봉 `0901` = 09:00:00~09:01:00이 끝난 봉. 키움 시작시각과 섞지 말 것. 허브 `Candle.time`은 이 종료시각의 KST unix.
+1분봉 `0901` = 그 분이 **끝난** 시각. 허브 `Candle.time`은 키움과 같은 **KST unix 초** (`YYYYMMDDHHmmss` → `Date.parse(...+09:00)/1000`).
+
+틱: reverse 후 앞에서부터, **같은 hhmm이면 초만 0,1,2…로 붙인다**(최대 59). 시각을 맞추려고 sort하지 않는다. 키움 차트·캐시·merge가 같은 `time`을 그대로 쓴다.
 
 미완성 봉: `GetHeaderValue(4)` 마지막봉 틱수.
 
