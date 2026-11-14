@@ -171,11 +171,31 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _wait_limit() -> None:
+    """VB RequestLimiter: 비주문 RQ 잔량이 0이면 RemainTime만 대기."""
+    import time
+    import win32com.client  # type: ignore
+
+    cy = win32com.client.Dispatch("CpUtil.CpCybos")
+    left = int(cy.GetLimitRemainCount(1))
+    if left > 0:
+        return
+    ms = 0
+    try:
+        ms = int(cy.LimitRequestRemainTime)
+    except Exception:
+        try:
+            ms = int(cy.GetLimitRemainTime(1))
+        except Exception:
+            ms = 200
+    time.sleep(max(0, ms) / 1000.0)
+
+
 def _chart_spec(req: dict[str, Any], code: str) -> tuple[str, str, int, int, list[int]]:
     c = str(code).replace("A", "")
     acode = "A" + c if len(c) == 6 else str(code)
     tf = str(req.get("timeframe") or "1")
-    count = int(req.get("count") or 2000)
+    count = min(5000, max(1, int(req.get("count") or 2000)))
     chart_kind = "m"
     period = 1
     if tf in ("D", "W", "M"):
@@ -208,6 +228,7 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     acode, chart_kind, period, count, fields = _chart_spec(req, str(req.get("code") or ""))
     obj = win32com.client.Dispatch("CpSysDib.StockChart")
     _chart_bind(obj, acode, chart_kind, period, count, fields)
+    _wait_limit()
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
@@ -289,68 +310,17 @@ def _unit(code: str, one: dict[str, Any]) -> dict[str, Any]:
 
 
 def charts(req: dict[str, Any]) -> dict[str, Any]:
-    """같은 STA에서 StockChart를 종목마다 새로 만들고 Request를 최대 4개 겹친다. 스레드/프로세스 금지."""
-    import time
-    import pythoncom  # type: ignore
-    import win32com.client  # type: ignore
-
+    """VB CybosEngine.DoMinuteChart와 같음: 종목마다 New StockChart + WaitIfNeeded + BlockRequest. reverse만."""
     codes = [str(c) for c in (req.get("codes") or [])]
     op = "strength" if req.get("op") == "strengths" else "chart"
     body = {**req, "op": op}
-    workers = max(1, min(4, int(req.get("workers") or 4), len(codes) or 1))
     units: list[dict[str, Any]] = []
-    inflight: list[dict[str, Any]] = []
-    nxt = 0
-    t0 = time.time()
-    async_ok: bool | None = None
-
-    def launch(code: str) -> None:
-        acode, kind, period, count, fields = _chart_spec(body, code)
-        obj = win32com.client.Dispatch("CpSysDib.StockChart")
-        _chart_bind(obj, acode, kind, period, count, fields)
+    for code in codes:
         try:
-            obj.Request()
-            inflight.append({"code": code, "obj": obj, "kind": kind, "fields": fields, "t": time.time()})
-        except Exception:
-            obj.BlockRequest()
-            if int(obj.GetDibStatus()) != 0:
-                units.append(_unit(code, _fail(str(obj.GetDibMsg1()))))
-            else:
-                units.append(_unit(code, _chart_read(obj, body, kind, fields)))
-
-    while nxt < len(codes) or inflight:
-        while nxt < len(codes) and len(inflight) < workers:
-            launch(codes[nxt])
-            nxt += 1
-        if not inflight:
-            break
-        pythoncom.PumpWaitingMessages()
-        still: list[dict[str, Any]] = []
-        for job in inflight:
-            obj = job["obj"]
-            st = int(obj.GetDibStatus())
-            if st == 1 and time.time() - float(job["t"]) < 30:
-                still.append(job)
-                continue
-            if st != 0:
-                one = _fail(str(obj.GetDibMsg1()) or f"status {st}")
-            else:
-                try:
-                    one = _chart_read(obj, body, job["kind"], job["fields"])
-                except Exception as e:
-                    one = _fail(str(e))
-            units.append(_unit(str(job["code"]), one))
-        inflight = still
-        if async_ok is None and time.time() - t0 > 1.5:
-            async_ok = len(units) > 0
-            if not async_ok:
-                inflight = []
-                while nxt < len(codes):
-                    units.append(_unit(codes[nxt], chart({**body, "code": codes[nxt]})))
-                    nxt += 1
-                break
-        if inflight:
-            time.sleep(0.002)
+            one = chart({**body, "code": code})
+        except Exception as e:
+            one = _fail(str(e))
+        units.append(_unit(code, one))
     ok = any(u.get("ok") for u in units)
     return {
         "ok": ok,
@@ -360,7 +330,7 @@ def charts(req: dict[str, Any]) -> dict[str, Any]:
         "hasMore": False,
         "nextKey": "",
         "units": units,
-        "workers": workers,
+        "workers": 1,
         "provider": "cybos",
     }
 
@@ -380,6 +350,7 @@ def eye(req: dict[str, Any]) -> dict[str, Any]:
     obj = win32com.client.Dispatch("CpSysDib.MarketEye")
     obj.SetInputValue(0, [0, 4, 24, 118])
     obj.SetInputValue(1, out_codes)
+    _wait_limit()
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
