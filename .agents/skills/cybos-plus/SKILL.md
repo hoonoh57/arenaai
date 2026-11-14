@@ -20,8 +20,7 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 - **관리자 권한 필수.** 32비트·64비트 파이썬, COM 워커, 허브가 띄우는 프로세스 모두 **관리자 모드**로 실행한다. 일반 권한이면 CYBOS 오류가 나고 `IsConnect`가 안 된다. `ctypes.windll.shell32.IsUserAnAdmin()`이 아니면 요청하지 말고 실패로 돌린다.
 - **win32com은 32비트 파이썬.** `CYBOS_PYTHON32` 또는 `py -3-32`. 64비트에 pywin32를 설치하지 말 것.
 - `CpCybos.IsConnect == 1` 아니면 요청 금지.
-- 시세 RQ: **15초에 60건**. 초과 시 Plus가 `BlockRequest` 안에서 **스스로 대기 후 재시작**.
-- 시세 RQ 15초 60건. **RemainCount를 읽거나 sleep 하지 않는다.** 초과 시 Plus가 `BlockRequest` 안에서 대기 후 재개. CYBOS는 주문 레인이 아니므로 극한으로 친다.
+- 시세 RQ: **15초에 60건**. **RemainCount를 읽거나 sleep 하지 않는다.** 초과 시 Plus가 `BlockRequest` 안에서 대기 후 재개. CYBOS는 주문 레인이 아니므로 극한으로 친다.
 - 주문 RQ는 15초 20건·초과 시 코드 4. **CYBOS로 주문하지 않음.**
 - 실시간 SB 최대 **400**.
 - 분봉: 종목마다 `New StockChart` + **`BlockRequest`**, Continue, **reverse 한 번**. RemainCount/`Request` 겹침/프로세스 4개 금지.
