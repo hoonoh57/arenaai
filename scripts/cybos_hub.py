@@ -171,11 +171,9 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def chart(req: dict[str, Any]) -> dict[str, Any]:
-    import win32com.client  # type: ignore
-    code = str(req.get("code") or "")
-    if len(code) == 6:
-        code = "A" + code
+def _chart_spec(req: dict[str, Any], code: str) -> tuple[str, str, int, int, list[int]]:
+    c = str(code).replace("A", "")
+    acode = "A" + c if len(c) == 6 else str(code)
     tf = str(req.get("timeframe") or "1")
     count = int(req.get("count") or 2000)
     chart_kind = "m"
@@ -187,21 +185,36 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
         period = int(tf[1:] or "1")
     else:
         period = int(tf) if tf.isdigit() else 1
-    obj = win32com.client.Dispatch("CpSysDib.StockChart")
-    obj.SetInputValue(0, code)
-    obj.SetInputValue(1, ord("2"))
-    obj.SetInputValue(4, count)
     fields = [0, 1, 2, 3, 4, 5, 8]
     if req.get("op") == "strength" and chart_kind in ("m", "T"):
         fields = [0, 1, 2, 3, 4, 5, 8, 62, 63]
+    return acode, chart_kind, period, count, fields
+
+
+def _chart_bind(obj: Any, acode: str, chart_kind: str, period: int, count: int, fields: list[int]) -> None:
+    obj.SetInputValue(0, acode)
+    obj.SetInputValue(1, ord("2"))
+    obj.SetInputValue(4, count)
     obj.SetInputValue(5, fields)
     obj.SetInputValue(6, ord(chart_kind))
     obj.SetInputValue(7, period)
     obj.SetInputValue(9, ord("1"))
     obj.SetInputValue(12, ord("A"))
+
+
+def chart(req: dict[str, Any]) -> dict[str, Any]:
+    import win32com.client  # type: ignore
+
+    acode, chart_kind, period, count, fields = _chart_spec(req, str(req.get("code") or ""))
+    obj = win32com.client.Dispatch("CpSysDib.StockChart")
+    _chart_bind(obj, acode, chart_kind, period, count, fields)
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
+    return _chart_read(obj, req, chart_kind, fields)
+
+
+def _chart_read(obj: Any, req: dict[str, Any], chart_kind: str, fields: list[int]) -> dict[str, Any]:
     n = int(obj.GetHeaderValue(3))
     summary = bool(req.get("summary"))
     idxs = [0, n - 1] if summary and n else list(range(n))
@@ -264,19 +277,9 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _chart_job(op: str, req: dict[str, Any], code: str) -> dict[str, Any]:
-    import pythoncom  # type: ignore
-
-    pythoncom.CoInitialize()
-    try:
-        one = chart({**req, "op": op, "code": code})
-    except Exception as e:
-        one = _fail(str(e))
-    finally:
-        pythoncom.CoUninitialize()
-    c6 = str(code).replace("A", "")[-6:]
+def _unit(code: str, one: dict[str, Any]) -> dict[str, Any]:
     return {
-        "code": c6,
+        "code": str(code).replace("A", "")[-6:],
         "ok": bool(one.get("ok")),
         "held": bool(one.get("held")),
         "reason": one.get("reason") or "",
@@ -286,19 +289,68 @@ def _chart_job(op: str, req: dict[str, Any], code: str) -> dict[str, Any]:
 
 
 def charts(req: dict[str, Any]) -> dict[str, Any]:
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """같은 STA에서 StockChart를 종목마다 새로 만들고 Request를 최대 4개 겹친다. 스레드/프로세스 금지."""
+    import time
+    import pythoncom  # type: ignore
+    import win32com.client  # type: ignore
 
-    codes = req.get("codes") or []
+    codes = [str(c) for c in (req.get("codes") or [])]
     op = "strength" if req.get("op") == "strengths" else "chart"
+    body = {**req, "op": op}
     workers = max(1, min(4, int(req.get("workers") or 4), len(codes) or 1))
     units: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(_chart_job, op, req, str(c)) for c in codes]
-        for fut in as_completed(futs):
-            try:
-                units.append(fut.result())
-            except Exception as e:
-                units.append({"code": "", "ok": False, "held": False, "reason": str(e), "candles": [], "bars": 0})
+    inflight: list[dict[str, Any]] = []
+    nxt = 0
+    t0 = time.time()
+    async_ok: bool | None = None
+
+    def launch(code: str) -> None:
+        acode, kind, period, count, fields = _chart_spec(body, code)
+        obj = win32com.client.Dispatch("CpSysDib.StockChart")
+        _chart_bind(obj, acode, kind, period, count, fields)
+        try:
+            obj.Request()
+            inflight.append({"code": code, "obj": obj, "kind": kind, "fields": fields, "t": time.time()})
+        except Exception:
+            obj.BlockRequest()
+            if int(obj.GetDibStatus()) != 0:
+                units.append(_unit(code, _fail(str(obj.GetDibMsg1()))))
+            else:
+                units.append(_unit(code, _chart_read(obj, body, kind, fields)))
+
+    while nxt < len(codes) or inflight:
+        while nxt < len(codes) and len(inflight) < workers:
+            launch(codes[nxt])
+            nxt += 1
+        if not inflight:
+            break
+        pythoncom.PumpWaitingMessages()
+        still: list[dict[str, Any]] = []
+        for job in inflight:
+            obj = job["obj"]
+            st = int(obj.GetDibStatus())
+            if st == 1 and time.time() - float(job["t"]) < 30:
+                still.append(job)
+                continue
+            if st != 0:
+                one = _fail(str(obj.GetDibMsg1()) or f"status {st}")
+            else:
+                try:
+                    one = _chart_read(obj, body, job["kind"], job["fields"])
+                except Exception as e:
+                    one = _fail(str(e))
+            units.append(_unit(str(job["code"]), one))
+        inflight = still
+        if async_ok is None and time.time() - t0 > 1.5:
+            async_ok = len(units) > 0
+            if not async_ok:
+                inflight = []
+                while nxt < len(codes):
+                    units.append(_unit(codes[nxt], chart({**body, "code": codes[nxt]})))
+                    nxt += 1
+                break
+        if inflight:
+            time.sleep(0.002)
     ok = any(u.get("ok") for u in units)
     return {
         "ok": ok,
