@@ -30,6 +30,7 @@ import {SharedCache} from './realtime/cache';
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {isOfficialHubOp, loadReports, runHubLab, LAB_CASES, getLabUnitLive} from './realtime/hubLab';
 import {CYBOS_LAB_CASES, runCybosLab} from './cybosLab';
+import {Coordinator} from './realtime/coordinator';
 import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS} from '../shared/hubLabParams';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
@@ -82,6 +83,7 @@ const caps = new RealtimeCaps({
 
 const providerMode = parseProviderMode(process.env);
 const cybos = new CybosBroker();
+const coordinator = new Coordinator(cybos);
 
 const api = new Kiwoom(mode as 'mock' | 'real', governor, {
   onEvent: (event) => audit.record(event.kind === 'rate-limit' ? 'limit' : 'error', event.message, event.detail),
@@ -489,6 +491,44 @@ app.post('/api/hub/cybos-lab', async (req, res) => {
   const results = [];
   for (const one of ids) results.push(await runCybosLab(cybos, one, req.body || {}));
   res.json({results});
+});
+app.get('/api/hub/coordinator', (_req, res) => {
+  res.json(coordinator.snapshot());
+});
+app.post('/api/hub/coordinator', async (req, res) => {
+  const op = typeof req.body?.op === 'string' ? req.body.op : '';
+  const note = typeof req.body?.note === 'string' ? req.body.note : op;
+  try {
+    if (op === 'reset') return res.json(coordinator.reset());
+    if (op === 'halt') return res.json(coordinator.haltNow(note || '감독 정지'));
+    if (op === 'resume') return res.json(coordinator.resume(note || '재개'));
+    if (op === 'phase') {
+      const phase = req.body?.phase;
+      if (phase !== 'idle' && phase !== 'nxt_scan' && phase !== 'downloading' && phase !== 'ready_wait' && phase !== 'krx_open' && phase !== 'live' && phase !== 'halt') {
+        res.status(400).json({error: '시각 단계가 아닙니다'});
+        return;
+      }
+      return res.json(coordinator.setPhase(phase, note || phase));
+    }
+    if (op === 'detect') {
+      const raw = Array.isArray(req.body?.codes) ? req.body.codes : [];
+      const codes = raw.map((x: unknown) => {
+        if (typeof x === 'string') return {code: x};
+        const o = x as {code?: string; name?: string};
+        return {code: String(o.code || ''), name: o.name};
+      });
+      let list = codes;
+      if (!list.length) {
+        const extra = await cybos.listCodes(Math.max(1, Number(req.body?.count) || 16), req.body?.market === 'kosdaq' ? 'kosdaq' : 'kospi');
+        list = extra.map((c) => ({code: c, name: cybos.nameOf(c)}));
+      }
+      return res.json(coordinator.detect(list, note || 'NXT 포착 시뮬'));
+    }
+    if (op === 'download') return res.json(await coordinator.downloadReady());
+    res.status(400).json({error: `미등록 감독 op ${op}`});
+  } catch (e) {
+    res.status(400).json({error: e instanceof Error ? e.message : '감독 실패'});
+  }
 });
 app.get('/api/hub/lab/live', (_req, res) => {
   res.json({...(getLabUnitLive() || {idle: true}), quota: hub.quota()});
