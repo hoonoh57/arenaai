@@ -228,8 +228,8 @@ async function runOne(
       id,
       '종목',
       list.length,
-      cybosOn ? Math.min(4, Math.max(1, list.length)) : workers,
-      cybosOn ? 'CYBOS 분봉 · STA 4스레드 WhenAll · DispatchEx+BlockRequest' : '캐시 없이 신규 분봉 · REST 총량 보호',
+      1,
+      cybosOn ? 'CYBOS 분봉 · 메인 STA BlockRequest 순차 · 한도는 Plus 내부' : '캐시 없이 신규 분봉 · REST 총량 보호',
     );
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
