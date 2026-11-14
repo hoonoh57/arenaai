@@ -10,12 +10,14 @@ export type LabCase = {
   id: HubOpName;
   title: string;
   group: string;
+  /** 키움과 CYBOS를 같은 척도로 비교할 수 있는 대량 시세 */
+  bulk?: boolean;
 };
 
 /** 이곳에 없는 허브 기능은 정식 사용 거부. */
 export const LAB_CASES: LabCase[] = [
-  {id: 'ensureChartPage', title: '차트 페이지 1장', group: 'REST'},
-  {id: 'ensureStrengthPage', title: '체결강도 1장', group: 'REST'},
+  {id: 'ensureChartPage', title: '차트 페이지 1장', group: 'REST', bulk: true},
+  {id: 'ensureStrengthPage', title: '체결강도 1장', group: 'REST', bulk: true},
   {id: 'putChartPage', title: '공유 캐시 기록', group: '캐시'},
   {id: 'chartPage', title: '공유 캐시 읽기', group: '캐시'},
   {id: 'getQuote', title: '최근 체결 읽기', group: '캐시'},
@@ -130,10 +132,23 @@ function endUnits(): LabUnitRow[] {
   return rows;
 }
 
+export type LabProvider = 'kiwoom' | 'cybos';
+
+export type BulkChart = {
+  chartPage: (input: {code: string; timeframe: string; fresh?: boolean; singlePage?: boolean}) => Promise<{candles: Candle[]; hasMore: boolean; nextKey: string}>;
+  attachStrength: (
+    code: string,
+    timeframe: string,
+    candles: Candle[],
+    nextKey?: string,
+  ) => Promise<{candles: Candle[]; hasMore: boolean; nextKey: string; ready: boolean; nxt: boolean}>;
+};
+
 export type LabCaseResult = {
   id: HubOpName;
   title: string;
   group: string;
+  provider: LabProvider;
   ms: number;
   targetMs: number;
   ok: boolean;
@@ -177,27 +192,42 @@ async function runOne(
   realCodes: string[],
   captured: string[],
   windowCount: number,
+  provider: LabProvider = 'kiwoom',
+  bulk?: BulkChart,
 ): Promise<{detail: string; constraints: number; units?: LabUnitRow[]}> {
   const list = realCodes.slice(0, p.codes);
   const none = {detail: '실종목이 없습니다. 가짜 코드는 쓰지 않습니다.', constraints: 1, units: [] as LabUnitRow[]};
   if (!list.length && id !== 'status' && id !== 'bookSnapshot' && id !== 'demandWindowCap' && id !== 'chartRefreshBudget' && id !== 'unsubscribe') {
     return none;
   }
+  if (provider === 'cybos' && id !== 'ensureChartPage' && id !== 'ensureStrengthPage') {
+    return {detail: 'CYBOS 레인 아님(주문·WSS·조건은 키움)', constraints: 0, units: []};
+  }
   if (id === 'ensureChartPage') {
     const wall0 = Date.now();
     const need = list.length;
-    const gate = live.restAllowed(Math.min(need, p.chartConcurrency));
-    const workers = gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
-    beginUnits(id, '종목', list.length, workers, '캐시 없이 신규 분봉 · REST 총량 보호');
+    const cybosOn = provider === 'cybos';
+    if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
+    const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(Math.min(need, p.chartConcurrency));
+    const workers = cybosOn
+      ? Math.min(4, Math.max(1, list.length))
+      : gate.ok
+        ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1))
+        : 1;
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · 15초 60건 Plus 대기' : '캐시 없이 신규 분봉 · REST 총량 보호');
     await pool(list, workers, async (c) => {
       const t = Date.now();
-      const allow = live.restAllowed(1);
-      if (!allow.ok) {
-        markUnit(c, true, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0, held: true});
-        return;
+      if (!cybosOn) {
+        const allow = live.restAllowed(1);
+        if (!allow.ok) {
+          markUnit(c, true, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0, held: true});
+          return;
+        }
       }
       try {
-        const page = await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
+        const page = cybosOn
+          ? await bulk!.chartPage({code: c, timeframe: '1', singlePage: true})
+          : await live.ensureChartPage({code: c, timeframe: '1', fresh: true});
         const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         const waitMs = Date.now() - wall0;
@@ -219,17 +249,30 @@ async function runOne(
     };
   }
   if (id === 'ensureStrengthPage') {
-    const gate = live.restAllowed(2);
-    const workers = gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
-    beginUnits(id, '종목', list.length, workers, '체결강도 · REST 총량 보호');
+    const cybosOn = provider === 'cybos';
+    if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
+    const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(2);
+    const workers = cybosOn ? Math.min(4, Math.max(1, list.length)) : gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도' : '체결강도 · REST 총량 보호');
     await pool(list, workers, async (c) => {
       const t = Date.now();
-      const allow = live.restAllowed(2);
-      if (!allow.ok) {
-        markUnit(c, true, 0, {name: c, bars: 0, simulated: false, held: true});
-        return;
+      if (!cybosOn) {
+        const allow = live.restAllowed(2);
+        if (!allow.ok) {
+          markUnit(c, true, 0, {name: c, bars: 0, simulated: false, held: true});
+          return;
+        }
       }
       try {
+        if (cybosOn) {
+          const page = await bulk!.chartPage({code: c, timeframe: '1', singlePage: true});
+          const s = await bulk!.attachStrength(c, '1', page.candles);
+          const name = await live.stockName(c).catch(() => c);
+          const span = barSpan(s.candles);
+          const got = (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
+          markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
+          return;
+        }
         await live.ensureChartPage({code: c, timeframe: '1'});
         const s = await live.ensureStrengthPage({code: c, timeframe: '1'});
         const name = await live.stockName(c).catch(() => c);
@@ -426,6 +469,8 @@ export async function runHubLab(
   realCodes: string[] = [],
   captured: string[] = [],
   windowCount = 0,
+  provider: LabProvider = 'kiwoom',
+  bulk?: BulkChart,
 ): Promise<LabReport> {
   const params = clampLabParams(raw);
   const missingOfficial = (Object.keys(HUB_OP_TARGETS) as HubOpName[]).filter((n) => !OFFICIAL.has(n));
@@ -441,6 +486,7 @@ export async function runHubLab(
         id: c.id,
         title: c.title,
         group: c.group,
+        provider,
         ms: 0,
         targetMs: params.deadlineMs,
         ok: false,
@@ -463,7 +509,7 @@ export async function runHubLab(
     let ok = true;
     let units: LabUnitRow[] | undefined;
     try {
-      const out = await runOne(c.id, live, params, uniqReal, uniqCap, windowCount);
+      const out = await runOne(c.id, live, params, uniqReal, uniqCap, windowCount, provider, bulk);
       detail = out.detail;
       constraints = out.constraints;
       units = out.units;
@@ -485,6 +531,7 @@ export async function runHubLab(
       id: c.id,
       title: c.title,
       group: c.group,
+      provider,
       ms,
       targetMs,
       ok: okAll,

@@ -226,6 +226,7 @@
 .hub-lab-tools select{background:#0c1511;border:1px solid #355044;color:#e6f0e8;padding:6px 8px;border-radius:4px}
 .hub-lab-err{color:#ed6b72;margin-bottom:8px}
 .hub-lab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.hub-lab-pv{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .hub-lab-card{text-align:left;background:#122018;border:1px solid #2a3d32;color:#d5e6d8;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px}
 .hub-lab-card b{font-size:11px}
 .hub-lab-card small{color:#7e918b}

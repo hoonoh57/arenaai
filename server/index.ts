@@ -568,7 +568,8 @@ app.post('/api/hub/lab', async (req, res) => {
     const realCodes = [...new Set([...deskChartCodes(), ...config.chartCodes, ...ranking.map((s) => s.code)])];
     const captured = bridge.capturedList().map((r) => r.code);
     const windowCount = loadDesks().desks.reduce((n, d) => n + d.windows.length, 0);
-    const report = await runHubLab(hub, scope, req.body?.params, realCodes, captured, windowCount);
+    const provider = req.body?.provider === 'cybos' ? 'cybos' : 'kiwoom';
+    const report = await runHubLab(hub, scope, req.body?.params, realCodes, captured, windowCount, provider, cybos);
     res.json(report);
   } catch (e) {
     res.status(400).json({error: e instanceof Error ? e.message : '테스트랩 실행 실패'});

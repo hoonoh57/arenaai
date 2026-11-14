@@ -1,7 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS, clampLabParams, type LabParams} from '../shared/hubLabParams';
 
-type LabCase = {id: string; title: string; group: string};
+type LabCase = {id: string; title: string; group: string; bulk?: boolean};
+type Speed = {ms: number; pass: boolean; detail: string};
 type LabReport = {
   at: number;
   scope: string;
@@ -10,6 +11,7 @@ type LabReport = {
     id: string;
     title: string;
     group: string;
+    provider?: 'kiwoom' | 'cybos';
     ms: number;
     targetMs: number;
     ok: boolean;
@@ -118,6 +120,8 @@ export function HubLabPane() {
   const [nowTick, setNowTick] = useState(0);
   const [unit, setUnit] = useState<UnitLive | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
+  const [labProvider, setLabProvider] = useState<'kiwoom' | 'cybos'>('kiwoom');
+  const [speeds, setSpeeds] = useState<Record<string, {kiwoom?: Speed; cybos?: Speed}>>({});
   const [inspect, setInspect] = useState<null | {
     loading?: boolean;
     err?: string;
@@ -186,9 +190,12 @@ export function HubLabPane() {
     });
   }, []);
 
-  const run = async (id: 'all' | string) => {
+  const run = async (id: 'all' | string, provider: 'kiwoom' | 'cybos' = labProvider) => {
     const bodyParams = clampLabParams(params);
-    const queue = id === 'all' ? cases : cases.filter((c) => c.id === id);
+    const queue =
+      id === 'all'
+        ? cases.filter((c) => provider === 'kiwoom' || c.bulk)
+        : cases.filter((c) => c.id === id && (provider === 'kiwoom' || c.bulk));
     if (!queue.length) {
       setOverlay({kind: 'error', title: '실행할 기능이 없습니다'});
       return;
@@ -225,7 +232,7 @@ export function HubLabPane() {
         });
         const report = await j<LabReport>('/api/hub/lab', {
           method: 'POST',
-          body: JSON.stringify({id: c.id, params: bodyParams}),
+          body: JSON.stringify({id: c.id, params: bodyParams, provider}),
         });
         const row = report.results[0];
         const per = row?.perTargetMs ?? bodyParams.deadlineMs;
@@ -256,6 +263,17 @@ export function HubLabPane() {
           });
         }
         merged.results.push(...report.results);
+        const hit = report.results[0];
+        if (hit) {
+          const pv = hit.provider || provider;
+          setSpeeds((prev) => ({
+            ...prev,
+            [hit.id]: {
+              ...prev[hit.id],
+              [pv]: {ms: hit.ms, pass: Boolean(hit.pass), detail: hit.detail || ''},
+            },
+          }));
+        }
         merged.params = report.params || bodyParams;
         merged.at = report.at;
         const elapsed = Date.now() - runStarted.current;
@@ -437,7 +455,15 @@ export function HubLabPane() {
             </option>
           ))}
         </select>
-        <button className="hts-tool" disabled={busy} onClick={() => void run(pick)}>
+        <span className="hub-lab-pv">
+          <button className={'hts-tool' + (labProvider === 'kiwoom' ? ' on' : '')} disabled={busy} onClick={() => setLabProvider('kiwoom')}>
+            키움
+          </button>
+          <button className={'hts-tool' + (labProvider === 'cybos' ? ' on' : '')} disabled={busy} onClick={() => setLabProvider('cybos')}>
+            CYBOS
+          </button>
+        </span>
+        <button className="hts-tool" disabled={busy} onClick={() => void run(pick, labProvider)}>
           {busy ? '측정 중' : '이 파라미터로 실행'}
         </button>
         <button className="hts-tool" disabled={busy} onClick={() => void load().catch((e) => setOverlay({kind: 'error', title: (e as Error).message}))}>
@@ -448,22 +474,41 @@ export function HubLabPane() {
       <div className="hub-lab-grid">
         {cases.map((c) => {
           const row = shown?.results.find((r) => r.id === c.id);
+          const sp = speeds[c.id] || {};
+          const k = sp.kiwoom;
+          const y = sp.cybos;
+          const ratio =
+            k && y && k.ms > 0 && y.ms > 0
+              ? k.ms > y.ms
+                ? `CYBOS ${(k.ms / y.ms).toFixed(1)}배 빠름`
+                : y.ms > k.ms
+                  ? `키움 ${(y.ms / k.ms).toFixed(1)}배 빠름`
+                  : '동일'
+              : '';
           return (
-            <button key={c.id} className={'hub-lab-card' + (row && !row.pass ? ' bad' : row?.pass ? ' ok' : '')} onClick={() => void run(c.id)} disabled={busy}>
+            <div key={c.id} className={'hub-lab-card' + (row && !row.pass ? ' bad' : row?.pass ? ' ok' : '')}>
               <b>{c.title}</b>
               <small>{c.group}</small>
-              {row ? (
-                <span>
-                  {row.units?.length
-                    ? `${row.units.filter((u) => u.ok).length}/${row.units.length}종목 ${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)}`
-                    : `${fmtMs(row.ms)} / 목표 ${fmtMs(row.targetMs)}`}{' '}
-                  {row.pass ? '실측통과' : '실패'}
-                  {row.onTarget === false ? ' · 목표초과' : ''}
-                </span>
-              ) : (
-                <span>미측정</span>
-              )}
-            </button>
+              <span className="hub-lab-pv">
+                <button className={'hts-tool' + (k ? ' on' : '')} disabled={busy} onClick={() => void run(c.id, 'kiwoom')}>
+                  키움 {k ? fmtMs(k.ms) : ''}
+                </button>
+                <button
+                  className={'hts-tool' + (y ? ' on' : '')}
+                  disabled={busy || !c.bulk}
+                  title={c.bulk ? 'CYBOS 대량 시세' : 'CYBOS 레인 아님'}
+                  onClick={() => c.bulk && void run(c.id, 'cybos')}
+                >
+                  CYBOS {c.bulk ? (y ? fmtMs(y.ms) : '') : '불가'}
+                </button>
+              </span>
+              <span>
+                키움 {k ? `${fmtMs(k.ms)} ${k.pass ? '통과' : '실패'}` : '미측정'}
+                {' · '}
+                CYBOS {c.bulk ? (y ? `${fmtMs(y.ms)} ${y.pass ? '통과' : '실패'}` : '미측정') : '해당없음'}
+                {ratio ? ` · ${ratio}` : ''}
+              </span>
+            </div>
           );
         })}
       </div>
