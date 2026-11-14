@@ -13,7 +13,10 @@ type CybosReply = {
   admin?: boolean;
   connected?: boolean;
   bars?: number;
-  units?: (CybosReply & {code?: string})[];
+  ms?: number;
+  codes?: string[];
+  names?: Record<string, string>;
+  units?: (CybosReply & {code?: string; ms?: number})[];
 };
 
 const WORKERS = 1;
@@ -94,6 +97,8 @@ export class CybosBroker implements BrokerLike {
   private readonly workers: CybosWorker[];
   private readonly py: string;
   private readonly script: string;
+  private readonly names = new Map<string, string>();
+  private readonly listCache = new Map<string, {at: number; codes: string[]}>();
 
   constructor(opts: {python?: string; cwd?: string} = {}) {
     this.py = opts.python || process.env.CYBOS_PYTHON32 || process.env.CYBOS_PYTHON || 'python';
@@ -131,8 +136,14 @@ export class CybosBroker implements BrokerLike {
         bars: u.bars || (u.candles || []).length,
         ok: Boolean(u.ok),
         reason: u.reason,
+        ms: u.ms || 0,
+        name: this.names.get(u.code || '') || u.code || '',
       })),
     );
+  }
+
+  nameOf(code: string): string {
+    return this.names.get(code) || code;
   }
 
   async candles(code: string): Promise<Candle[]> {
@@ -182,9 +193,16 @@ export class CybosBroker implements BrokerLike {
   }
 
   async listCodes(count: number, market: 'kospi' | 'kosdaq' | 'both' = 'both'): Promise<string[]> {
+    const hit = this.listCache.get(market);
+    if (hit && Date.now() - hit.at < 6 * 3600_000 && hit.codes.length) {
+      return hit.codes.slice(0, Math.max(1, count));
+    }
     const r = await this.ask({op: 'list', count, market});
-    const codes = (r as CybosReply & {codes?: string[]}).codes;
-    return Array.isArray(codes) ? codes.filter((c) => /^\d{6}$/.test(c)) : [];
+    const codes = Array.isArray(r.codes) ? r.codes.filter((c) => /^\d{6}$/.test(c)) : [];
+    const names = r.names || {};
+    for (const [k, v] of Object.entries(names)) this.names.set(k, v);
+    this.listCache.set(market, {at: Date.now(), codes});
+    return codes;
   }
 
   async marketEye(codes: string[]): Promise<{code: string; price?: number; strength?: number}[]> {

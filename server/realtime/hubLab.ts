@@ -146,7 +146,8 @@ export type BulkChart = {
   chartPages?: (
     codes: string[],
     input?: {timeframe: string; summary?: boolean; strength?: boolean},
-  ) => Promise<{code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[]>;
+  ) => Promise<{code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string; ms?: number; name?: string}[]>;
+  nameOf?: (code: string) => string;
 };
 
 export type LabCaseResult = {
@@ -232,27 +233,28 @@ async function runOne(
     );
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];
+      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string; ms?: number; name?: string}[] = [];
       try {
         pages = await bulk.chartPages(list, {timeframe: '1', summary: true});
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
-        for (const c of list) markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        for (const c of list) markUnit(c, false, 0, {name: bulk.nameOf?.(c) || c, bars: 0, simulated: false, waitMs: 0});
         const units = endUnits();
         return {detail: `CYBOS 일괄 실패 ${reason}`, constraints: list.length, units};
       }
       const by = new Map(pages.map((p) => [p.code, p]));
       for (const c of list) {
         const page = by.get(c);
+        const name = page?.name || bulk.nameOf?.(c) || c;
         if (!page) {
-          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+          markUnit(c, false, 0, {name, bars: 0, simulated: false, waitMs: 0});
           continue;
         }
-        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         if (page.bars) span.bars = page.bars;
+        const took = page.ms || 0;
         const got = page.ok && (span.bars || 0) > 0;
-        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false, waitMs: Date.now() - wall0});
+        markUnit(c, got, took, {name, ...span, simulated: false, waitMs: took});
       }
     } else {
       await pool(list, workers, async (c) => {
@@ -295,27 +297,28 @@ async function runOne(
     beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 · StockChart 4개 동시' : '체결강도 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];
+      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string; ms?: number; name?: string}[] = [];
       try {
         pages = await bulk.chartPages(list, {timeframe: '1', summary: true, strength: true});
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
-        for (const c of list) markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
+        for (const c of list) markUnit(c, false, 0, {name: bulk.nameOf?.(c) || c, bars: 0, simulated: false});
         const units = endUnits();
         return {detail: `CYBOS 강도 일괄 실패 ${reason}`, constraints: list.length, units};
       }
       const by = new Map(pages.map((p) => [p.code, p]));
       for (const c of list) {
         const page = by.get(c);
+        const name = page?.name || bulk.nameOf?.(c) || c;
         if (!page) {
-          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
+          markUnit(c, false, 0, {name, bars: 0, simulated: false});
           continue;
         }
-        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         if (page.bars) span.bars = page.bars;
+        const took = page.ms || 0;
         const got = page.ok && (span.bars || 0) > 0;
-        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
+        markUnit(c, got, took, {name, ...span, simulated: false, waitMs: took});
       }
     } else {
       await pool(list, workers, async (c) => {

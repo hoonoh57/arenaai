@@ -157,6 +157,12 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
                 pool.append(code)
     if len(pool) > n:
         pool = random.sample(pool, n)
+    names: dict[str, str] = {}
+    for code in pool:
+        try:
+            names[code] = str(mgr.CodeToName("A" + code) or code)
+        except Exception:
+            names[code] = code
     return {
         "ok": len(pool) > 0,
         "held": False,
@@ -165,6 +171,7 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
         "hasMore": False,
         "nextKey": "",
         "codes": pool,
+        "names": names,
         "universe": len(pool),
         "market": m,
         "provider": "cybos",
@@ -280,7 +287,7 @@ def _chart_read(obj: Any, req: dict[str, Any], chart_kind: str, fields: list[int
     }
 
 
-def _unit(code: str, one: dict[str, Any]) -> dict[str, Any]:
+def _unit(code: str, one: dict[str, Any], ms: int = 0) -> dict[str, Any]:
     return {
         "code": str(code).replace("A", "")[-6:],
         "ok": bool(one.get("ok")),
@@ -288,6 +295,7 @@ def _unit(code: str, one: dict[str, Any]) -> dict[str, Any]:
         "reason": one.get("reason") or "",
         "candles": one.get("candles") or [],
         "bars": int(one.get("bars") or 0),
+        "ms": int(ms),
     }
 
 
@@ -295,6 +303,7 @@ def charts(req: dict[str, Any]) -> dict[str, Any]:
     """WhenAll 대응: STA 스레드 4개가 각자 DispatchEx+BlockRequest. ThreadPool(MTA) 금지."""
     import queue
     import threading
+    import time
 
     import pythoncom  # type: ignore
 
@@ -316,11 +325,12 @@ def charts(req: dict[str, Any]) -> dict[str, Any]:
                 code = in_q.get()
                 if code is None:
                     break
+                t0 = time.time()
                 try:
                     one = chart({**body, "code": code})
                 except Exception as e:
                     one = _fail(str(e))
-                out_q.put(_unit(code, one))
+                out_q.put(_unit(code, one, int((time.time() - t0) * 1000)))
         finally:
             pythoncom.CoUninitialize()
 
