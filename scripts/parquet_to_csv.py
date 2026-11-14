@@ -22,18 +22,29 @@ def convert_dir(src: Path) -> list[Path]:
     else:
         pd_mod = None
     written: list[Path] = []
+    skipped = 0
     for p in files:
         dest = out_dir / (p.stem + ".csv")
-        if pq is not None:
-            table = pq.read_table(p)
-            # pyarrow csv
-            import pyarrow.csv as pcsv  # type: ignore
+        if dest.is_file() and dest.stat().st_size > 0:
+            print(f"있음 {dest.name}")
+            written.append(dest)
+            continue
+        try:
+            if pq is not None:
+                table = pq.read_table(p)
+                import pyarrow.csv as pcsv  # type: ignore
 
-            pcsv.write_csv(table, dest)
-        else:
-            pd_mod.read_parquet(p).to_csv(dest, index=False)
+                pcsv.write_csv(table, dest)
+            else:
+                pd_mod.read_parquet(p).to_csv(dest, index=False)
+        except Exception as e:
+            skipped += 1
+            print(f"건너뜀 {p.name}: {e}", file=sys.stderr)
+            continue
         written.append(dest)
         print(f"{p.name} → {dest} ({dest.stat().st_size} bytes)")
+    if skipped:
+        print(f"깨진 parquet {skipped}개 건너뜀", file=sys.stderr)
     return written
 
 
