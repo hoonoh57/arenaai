@@ -81,6 +81,8 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
         return _fail("CYBOS 미연결")
     if op in ("chart", "strength"):
         return chart(req, win32com.client)
+    if op == "eye":
+        return eye(req, win32com.client)
     return _fail(f"미등록 op {op}")
 
 
@@ -156,6 +158,33 @@ def chart(req: dict[str, Any], win32com) -> dict[str, Any]:
         "nextKey": str(oldest) if more else "",
         "provider": "cybos",
     }
+
+
+def eye(req: dict[str, Any], win32com) -> dict[str, Any]:
+    codes = req.get("codes") or []
+    out_codes = []
+    for c in codes:
+        s = str(c).replace("A", "")
+        if len(s) == 6:
+            out_codes.append("A" + s)
+        if len(out_codes) >= 200:
+            break
+    if not out_codes:
+        return _fail("종목 없음")
+    obj = win32com.client.Dispatch("CpSysDib.MarketEye")
+    obj.SetInputValue(0, [0, 4, 24, 118])
+    obj.SetInputValue(1, out_codes)
+    obj.BlockRequest()
+    if int(obj.GetDibStatus()) != 0:
+        return _fail(str(obj.GetDibMsg1()))
+    n = int(obj.GetHeaderValue(2))
+    rows = []
+    for i in range(n):
+        code = str(obj.GetDataValue(0, i)).replace("A", "")
+        price = abs(float(obj.GetDataValue(1, i) or 0))
+        strength = float(obj.GetDataValue(2, i) or 0)
+        rows.append({"code": code, "price": price, "strength": strength})
+    return {"ok": True, "held": False, "reason": "", "candles": [], "hasMore": False, "nextKey": "", "rows": rows, "provider": "cybos"}
 
 
 def main() -> None:

@@ -7,7 +7,7 @@ export const DESK_MIN = 1;
 export const DESK_MAX = 8;
 /** 멀티차트 칸 수. 3×n 등 분할과 무관하게 한 화면에 16종목까지. */
 export const MULTI_CHART_MAX = 16;
-export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book', 'logs', 'hub-lab', 'hub-spec', 'trade-setup', 'trade-dash'] as const;
+export const WINDOW_KINDS = ['chart', 'multi-chart', 'scanner', 'search150', 'captures', 'verify', 'tr', 'events', 'book', 'logs', 'hub-lab', 'hub-spec', 'cybos-lab', 'trade-setup', 'trade-dash'] as const;
 export const GLOBAL_LOG_ID = 'win-global-logs';
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 export type WindowState = 'normal' | 'minimized' | 'maximized';
@@ -92,6 +92,7 @@ export const KIND_TITLE: Record<WindowKind, string> = {
   logs: '전역 로그',
   'hub-lab': '중앙관리자 테스트랩',
   'hub-spec': '중앙관리자 스펙',
+  'cybos-lab': 'CYBOS 검증',
   'trade-setup': '자동매매 설정',
   'trade-dash': '매매 대시보드',
 };
@@ -213,8 +214,8 @@ export function insertWindow(desk: VirtualDesk, kind: WindowKind, offset = desk.
     title: KIND_TITLE[kind],
     x: 24 + (offset % 6) * 28,
     y: 24 + (offset % 6) * 28,
-    w: kind === 'hub-lab' || kind === 'hub-spec' || kind === 'multi-chart' || kind === 'verify' || kind === 'search150' ? 720 : kind === 'scanner' || kind === 'captures' ? 380 : 520,
-    h: kind === 'hub-lab' || kind === 'hub-spec' || kind === 'scanner' || kind === 'captures' || kind === 'verify' || kind === 'search150' ? 560 : kind === 'multi-chart' ? 480 : 380,
+    w: kind === 'hub-lab' || kind === 'hub-spec' || kind === 'cybos-lab' || kind === 'multi-chart' || kind === 'verify' || kind === 'search150' ? 720 : kind === 'scanner' || kind === 'captures' ? 380 : 520,
+    h: kind === 'hub-lab' || kind === 'hub-spec' || kind === 'cybos-lab' || kind === 'scanner' || kind === 'captures' || kind === 'verify' || kind === 'search150' ? 560 : kind === 'multi-chart' ? 480 : 380,
     z,
     state: 'normal',
     locked: false,

@@ -30,6 +30,7 @@ import {ChartPane} from './ChartPane';
 import {TradeBar} from './chart/TradeBar';
 import {HubLabPane} from './HubLabPane';
 import {HubSpecPane} from './HubSpecPane';
+import {CybosLabPane} from './CybosLabPane';
 import {FormulaManager} from './FormulaManager';
 import {PineImport} from './PineImport';
 import {DAY_HOLD_PRESETS, HOLD_PRESETS, parseSearchAt} from '../shared/verify';
@@ -830,6 +831,7 @@ function Pane(props: {
   if (win.kind === 'logs') return <LogsPane />;
   if (win.kind === 'hub-lab') return <HubLabPane />;
   if (win.kind === 'hub-spec') return <HubSpecPane />;
+  if (win.kind === 'cybos-lab') return <CybosLabPane />;
   if (win.kind === 'trade-dash') return <TradeDashPane state={state} />;
   if (win.kind === 'trade-setup') {
     return (

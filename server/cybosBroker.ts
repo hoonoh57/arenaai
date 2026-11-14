@@ -75,6 +75,13 @@ export class CybosBroker implements BrokerLike {
     return this.ask({op: 'status'});
   }
 
+  async marketEye(codes: string[]): Promise<{code: string; price?: number; strength?: number}[]> {
+    const r = await this.ask({op: 'eye', codes});
+    if (!r.ok) throw new Error(r.reason || 'MarketEye 실패');
+    const rows = (r as CybosReply & {rows?: {code: string; price?: number; strength?: number}[]}).rows;
+    return Array.isArray(rows) ? rows : [];
+  }
+
   private ask(body: Record<string, unknown>): Promise<CybosReply> {
     const child = this.ensure();
     return new Promise((resolve, reject) => {

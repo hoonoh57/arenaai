@@ -29,6 +29,7 @@ import {SharedCache} from './realtime/cache';
 
 import {RealtimeHub, type WsLike} from './realtime/hub';
 import {isOfficialHubOp, loadReports, runHubLab, LAB_CASES, getLabUnitLive} from './realtime/hubLab';
+import {CYBOS_LAB_CASES, runCybosLab} from './cybosLab';
 import {LAB_PARAM_DEFAULT, LAB_PARAM_FIELDS, LAB_PARAM_PRESETS} from '../shared/hubLabParams';
 import {LimitGovernor, RealtimeCaps} from './realtime/limits';
 import {RiskManager} from './realtime/risk';
@@ -80,7 +81,7 @@ const caps = new RealtimeCaps({
 });
 
 const providerMode = parseProviderMode(process.env);
-const cybos = providerMode.bulk === 'cybos' || providerMode.quote === 'cybos' ? new CybosBroker() : null;
+const cybos = new CybosBroker();
 
 const api = new Kiwoom(mode as 'mock' | 'real', governor, {
   onEvent: (event) => audit.record(event.kind === 'rate-limit' ? 'limit' : 'error', event.message, event.detail),
@@ -96,7 +97,7 @@ const hub = new RealtimeHub({
   cache,
   audit,
   caps,
-  broker: routedBroker(api, cybos && providerMode.bulk === 'cybos' ? cybos : api),
+  broker: routedBroker(api, providerMode.bulk === 'cybos' ? cybos : api),
   orderBroker: {
     stockOrder: (input) => api.stockOrder(input),
     cancelStock: (input) => api.cancelStock(input),
@@ -478,6 +479,16 @@ app.get('/api/hub/ops', (_req, res) => {
 });
 app.get('/api/hub/providers', (_req, res) => {
   res.json({mode: providerMode, specs: PROVIDER_SPECS});
+});
+app.get('/api/hub/cybos-lab', (_req, res) => {
+  res.json({cases: CYBOS_LAB_CASES, specs: PROVIDER_SPECS.cybos});
+});
+app.post('/api/hub/cybos-lab', async (req, res) => {
+  const id = typeof req.body?.id === 'string' ? req.body.id : '';
+  const ids = id && id !== 'all' ? [id] : CYBOS_LAB_CASES.map((c) => c.id);
+  const results = [];
+  for (const one of ids) results.push(await runCybosLab(cybos, one, req.body || {}));
+  res.json({results});
 });
 app.get('/api/hub/lab/live', (_req, res) => {
   res.json({...(getLabUnitLive() || {idle: true}), quota: hub.quota()});
