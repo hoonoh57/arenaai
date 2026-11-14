@@ -223,16 +223,30 @@ async function runOne(
       : gate.ok
         ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1))
         : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · COM 워커 4 · 15초 60건' : '캐시 없이 신규 분봉 · REST 총량 보호');
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 분봉 · COM 1프로세스 일괄 · 15초 60건' : '캐시 없이 신규 분봉 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      const pages = await bulk.chartPages(list, {timeframe: '1', summary: true});
-      for (const page of pages) {
-        const name = await live.stockName(page.code).catch(() => page.code);
+      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];
+      try {
+        pages = await bulk.chartPages(list, {timeframe: '1', summary: true});
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        for (const c of list) markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+        const units = endUnits();
+        return {detail: `CYBOS 일괄 실패 ${reason}`, constraints: list.length, units};
+      }
+      const by = new Map(pages.map((p) => [p.code, p]));
+      for (const c of list) {
+        const page = by.get(c);
+        if (!page) {
+          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false, waitMs: Date.now() - wall0});
+          continue;
+        }
+        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         if (page.bars) span.bars = page.bars;
-        const got = page.ok && (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
-        markUnit(page.code, got, Date.now() - t, {name, ...span, simulated: false, waitMs: Date.now() - wall0});
+        const got = page.ok && (span.bars || 0) > 0;
+        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false, waitMs: Date.now() - wall0});
       }
     } else {
       await pool(list, workers, async (c) => {
@@ -272,16 +286,30 @@ async function runOne(
     if (cybosOn && !bulk) return {detail: 'CYBOS 브로커 없음', constraints: 1, units: []};
     const gate = cybosOn ? {ok: true, left: 4} : live.restAllowed(2);
     const workers = cybosOn ? Math.min(4, Math.max(1, list.length)) : gate.ok ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1)) : 1;
-    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 1회/종 · 워커 4' : '체결강도 · REST 총량 보호');
+    beginUnits(id, '종목', list.length, workers, cybosOn ? 'CYBOS 체결강도 1회/종 · COM 1프로세스' : '체결강도 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
-      const pages = await bulk.chartPages(list, {timeframe: '1', summary: true, strength: true});
-      for (const page of pages) {
-        const name = await live.stockName(page.code).catch(() => page.code);
+      let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];
+      try {
+        pages = await bulk.chartPages(list, {timeframe: '1', summary: true, strength: true});
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        for (const c of list) markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
+        const units = endUnits();
+        return {detail: `CYBOS 강도 일괄 실패 ${reason}`, constraints: list.length, units};
+      }
+      const by = new Map(pages.map((p) => [p.code, p]));
+      for (const c of list) {
+        const page = by.get(c);
+        if (!page) {
+          markUnit(c, false, Date.now() - t, {name: c, bars: 0, simulated: false});
+          continue;
+        }
+        const name = await live.stockName(c).catch(() => c);
         const span = barSpan(page.candles);
         if (page.bars) span.bars = page.bars;
-        const got = page.ok && (span.bars || 0) > 0 && Boolean(span.firstAt && span.lastAt);
-        markUnit(page.code, got, Date.now() - t, {name, ...span, simulated: false});
+        const got = page.ok && (span.bars || 0) > 0;
+        markUnit(c, got, Date.now() - t, {name, ...span, simulated: false});
       }
     } else {
       await pool(list, workers, async (c) => {

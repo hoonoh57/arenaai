@@ -16,7 +16,7 @@ type CybosReply = {
   units?: (CybosReply & {code?: string})[];
 };
 
-const WORKERS = 4;
+const WORKERS = 1;
 
 /**
  * 64비트 파이썬 엔트리(scripts/cybos_hub.py). COM은 그 안에서만.

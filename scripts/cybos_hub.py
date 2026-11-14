@@ -269,8 +269,21 @@ def charts(req: dict[str, Any]) -> dict[str, Any]:
     units = []
     op = "strength" if req.get("op") == "strengths" else "chart"
     for c in codes:
-        one = chart({**req, "op": op, "code": c})
-        units.append({"code": str(c).replace("A", "")[-6:], **one})
+        try:
+            one = chart({**req, "op": op, "code": c})
+        except Exception as e:
+            one = _fail(str(e))
+        code = str(c).replace("A", "")[-6:]
+        units.append(
+            {
+                "code": code,
+                "ok": bool(one.get("ok")),
+                "held": bool(one.get("held")),
+                "reason": one.get("reason") or "",
+                "candles": one.get("candles") or [],
+                "bars": int(one.get("bars") or 0),
+            }
+        )
     ok = any(u.get("ok") for u in units)
     return {"ok": ok, "held": False, "reason": "", "candles": [], "hasMore": False, "nextKey": "", "units": units, "provider": "cybos"}
 
