@@ -18,6 +18,7 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 ## 1. 연결·한도 (헤매면 여기)
 
 - **관리자 권한 필수.** 32비트·64비트 파이썬, COM 워커, 허브가 띄우는 프로세스 모두 **관리자 모드**로 실행한다. 일반 권한이면 CYBOS 오류가 나고 `IsConnect`가 안 된다. `ctypes.windll.shell32.IsUserAnAdmin()`이 아니면 요청하지 말고 실패로 돌린다.
+- **win32com은 32비트 파이썬.** `CYBOS_PYTHON32` 또는 `py -3-32`. 64비트에 pywin32를 설치하지 말 것.
 - `CpCybos.IsConnect == 1` 아니면 요청 금지.
 - 시세 RQ: **15초에 60건**. 초과 시 Plus가 `BlockRequest` 안에서 **스스로 대기 후 재시작**.
 - `GetLimitRemainCount(LT_NONTRADE_REQUEST=1)`, `LimitRequestRemainTime`(ms).

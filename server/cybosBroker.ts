@@ -25,7 +25,7 @@ export class CybosBroker implements BrokerLike {
   private readonly script: string;
 
   constructor(opts: {python?: string; cwd?: string} = {}) {
-    this.py = opts.python || process.env.CYBOS_PYTHON || 'python';
+    this.py = opts.python || process.env.CYBOS_PYTHON32 || process.env.CYBOS_PYTHON || 'python';
     this.script = join(opts.cwd || process.cwd(), 'scripts', 'cybos_hub.py');
   }
 
@@ -92,7 +92,11 @@ export class CybosBroker implements BrokerLike {
 
   private ensure(): ChildProcessWithoutNullStreams {
     if (this.child && !this.child.killed) return this.child;
-    const child = spawn(this.py, [this.script], {stdio: ['pipe', 'pipe', 'pipe']});
+    const child = spawn(this.py, [this.script], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8'},
+    });
+    child.stdout.setEncoding('utf8');
     this.child = child;
     let buf = '';
     child.stdout.on('data', (b: Buffer) => {

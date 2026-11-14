@@ -5,8 +5,53 @@ stdin JSON 한 줄 → stdout JSON 한 줄. sort 금지, 페이지는 reverse �
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+
+
+def _has_com() -> bool:
+    try:
+        import win32com.client  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _find_py32() -> list[str] | None:
+    env = (os.environ.get("CYBOS_PYTHON32") or "").strip()
+    if env:
+        return [env]
+    roots = [
+        Path(os.environ.get("LOCALAPPDATA") or "") / "Programs" / "Python",
+        Path(r"C:\\"),
+    ]
+    names = ["Python38-32", "Python39-32", "Python310-32", "Python311-32", "Python312-32", "Python37-32"]
+    for root in roots:
+        for name in names:
+            p = root / name / "python.exe"
+            if p.is_file():
+                return [str(p)]
+            p2 = Path(r"C:\\") / name / "python.exe"
+            if p2.is_file():
+                return [str(p2)]
+    for n in range(8, 14):
+        p = Path(rf"C:\Python3{n}-32\python.exe")
+        if p.is_file():
+            return [str(p)]
+    py = shutil.which("py")
+    if py:
+        return [py, "-3-32"]
+    return None
 
 
 def _admin() -> bool:
@@ -58,7 +103,7 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
                 cy = win32com.client.Dispatch("CpUtil.CpCybos")
                 connected = int(cy.IsConnect) == 1
             except Exception as e:
-                return _fail(f"CYBOS COM 없음: {e}")
+                return _fail(f"CYBOS COM 실패: {e}")
         return {
             "ok": admin and connected,
             "held": not (admin and connected),
@@ -72,10 +117,9 @@ def handle(req: dict[str, Any]) -> dict[str, Any]:
         }
     if not _admin():
         return _fail("관리자 권한 필요")
-    try:
-        import win32com.client  # type: ignore
-    except Exception:
-        return _fail("win32com 없음")
+    if not _has_com():
+        return _fail("32비트 파이썬 win32com 없음. CYBOS_PYTHON32 지정")
+    import win32com.client  # type: ignore
     cy = win32com.client.Dispatch("CpUtil.CpCybos")
     if int(cy.IsConnect) != 1:
         return _fail("CYBOS 미연결")
@@ -205,4 +249,29 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if not _has_com():
+        cmd = _find_py32()
+        if cmd:
+            script = str(Path(__file__).resolve())
+            proc = subprocess.Popen(
+                cmd + [script],
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            )
+            sys.exit(proc.wait())
+        def _no32() -> None:
+            for line in sys.stdin:
+                if not line.strip():
+                    continue
+                print(
+                    json.dumps(
+                        _fail("64비트 python에는 win32com이 없습니다. 32비트 파이썬 경로를 CYBOS_PYTHON32에 넣으세요."),
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+        _no32()
+    else:
+        main()
