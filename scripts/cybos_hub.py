@@ -270,7 +270,7 @@ def _chart_read(obj: Any, req: dict[str, Any], chart_kind: str, fields: list[int
             "held": False,
             "reason": "",
             "candles": [first, last] if first and last and first is not last else ([first] if first else []),
-            "bars": len(candles),
+            "bars": n,
             "hasMore": more,
             "nextKey": str(oldest) if more else "",
             "provider": "cybos",

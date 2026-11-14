@@ -307,6 +307,7 @@ export function HubLabPane() {
       }
       merged.bottlenecks = merged.results.filter((r) => !r.pass).map((r) => r.id);
       setCurrent(merged);
+      setUnit(null);
       setOverlay({
         kind: 'done',
         title: (() => {
@@ -354,14 +355,14 @@ export function HubLabPane() {
               </p>
             ) : null}
             <p className="hub-lab-work">{overlay.work || overlay.title}</p>
-            {unit && unit.total ? (
+            {overlay.kind === 'run' && unit && unit.total ? (
               <p>
                 {unit.note || overlay.title} · <b>{unit.done}/{unit.total}</b>
                 {unit.unit || '종목'}
                 {unit.lastCode ? ` · 방금 ${unit.lastCode} ${unit.lastOk === false ? '실패' : '성공'} ${fmtMs(unit.lastMs || 0)}` : ''}
               </p>
             ) : null}
-            {unit && unit.done ? (
+            {overlay.kind === 'run' && unit && unit.done ? (
               <p>
                 1{unit.unit || '종목'} 평균 {fmtMs(unit.avgMs || 0)}
                 {unit.parallel && unit.parallel > 1 ? ` · 병렬 ${unit.parallel}` : ''}
