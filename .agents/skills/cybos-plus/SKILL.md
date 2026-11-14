@@ -21,11 +21,10 @@ COM: `CpSysDib.StockChart`, `CpSysDib.MarketEye`, `CpUtil.CpCybos`, `CpUtil.CpCo
 - **win32com은 32비트 파이썬.** `CYBOS_PYTHON32` 또는 `py -3-32`. 64비트에 pywin32를 설치하지 말 것.
 - `CpCybos.IsConnect == 1` 아니면 요청 금지.
 - 시세 RQ: **15초에 60건**. 초과 시 Plus가 `BlockRequest` 안에서 **스스로 대기 후 재시작**.
-- `GetLimitRemainCount(LT_NONTRADE_REQUEST=1)`, `LimitRequestRemainTime`(ms).
+- 시세 RQ 15초 60건. **RemainCount를 읽거나 sleep 하지 않는다.** 초과 시 Plus가 `BlockRequest` 안에서 대기 후 재개. CYBOS는 주문 레인이 아니므로 극한으로 친다.
 - 주문 RQ는 15초 20건·초과 시 코드 4. **CYBOS로 주문하지 않음.**
 - 실시간 SB 최대 **400**.
-- 분봉은 VB `CybosEngine.DoMinuteChart`와 같다: **종목마다 `New StockChart`**, `GetLimitRemainCount(1)==0`이면 RemainTime 대기, **`BlockRequest`**, 페이지는 Continue, **reverse 한 번**. 스레드/`Request` 겹침/프로세스 4개는 수신 0이 된다. 상위 `Task.WhenAll`은 이 파일에 없고, STA에 모이면 결국 직렬이다.
-- 한도 초과 대기는 Plus가 하므로 스레드마다 임의 sleep 루프를 넣지 않는다. RemainCount가 0이면 그 스레드만 `LimitRequestRemainTime` 대기.
+- 분봉: 종목마다 `New StockChart` + **`BlockRequest`**, Continue, **reverse 한 번**. RemainCount/`Request` 겹침/프로세스 4개 금지.
 - `GetDibStatus`: 0 정상, -1 오류(`GetDibMsg1`), 1 수신대기(같은 객체에 겹쳐 Request 금지).
 
 ---

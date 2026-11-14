@@ -223,7 +223,7 @@ async function runOne(
       : gate.ok
         ? Math.min(p.chartConcurrency, Math.max(1, Math.floor(gate.left) || 1))
         : 1;
-    beginUnits(id, '종목', list.length, 1, cybosOn ? 'CYBOS 분봉 · VB와 동일 New StockChart+BlockRequest+한도대기' : '캐시 없이 신규 분봉 · REST 총량 보호');
+    beginUnits(id, '종목', list.length, 1, cybosOn ? 'CYBOS 분봉 · New StockChart+BlockRequest · 한도는 Plus 내부' : '캐시 없이 신규 분봉 · REST 총량 보호');
     if (cybosOn && bulk?.chartPages) {
       const t = Date.now();
       let pages: {code: string; candles: Candle[]; bars: number; ok: boolean; reason?: string}[] = [];

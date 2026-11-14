@@ -171,26 +171,6 @@ def list_codes(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _wait_limit() -> None:
-    """VB RequestLimiter: 비주문 RQ 잔량이 0이면 RemainTime만 대기."""
-    import time
-    import win32com.client  # type: ignore
-
-    cy = win32com.client.Dispatch("CpUtil.CpCybos")
-    left = int(cy.GetLimitRemainCount(1))
-    if left > 0:
-        return
-    ms = 0
-    try:
-        ms = int(cy.LimitRequestRemainTime)
-    except Exception:
-        try:
-            ms = int(cy.GetLimitRemainTime(1))
-        except Exception:
-            ms = 200
-    time.sleep(max(0, ms) / 1000.0)
-
-
 def _chart_spec(req: dict[str, Any], code: str) -> tuple[str, str, int, int, list[int]]:
     c = str(code).replace("A", "")
     acode = "A" + c if len(c) == 6 else str(code)
@@ -228,7 +208,6 @@ def chart(req: dict[str, Any]) -> dict[str, Any]:
     acode, chart_kind, period, count, fields = _chart_spec(req, str(req.get("code") or ""))
     obj = win32com.client.Dispatch("CpSysDib.StockChart")
     _chart_bind(obj, acode, chart_kind, period, count, fields)
-    _wait_limit()
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
@@ -350,7 +329,6 @@ def eye(req: dict[str, Any]) -> dict[str, Any]:
     obj = win32com.client.Dispatch("CpSysDib.MarketEye")
     obj.SetInputValue(0, [0, 4, 24, 118])
     obj.SetInputValue(1, out_codes)
-    _wait_limit()
     obj.BlockRequest()
     if int(obj.GetDibStatus()) != 0:
         return _fail(str(obj.GetDibMsg1()))
