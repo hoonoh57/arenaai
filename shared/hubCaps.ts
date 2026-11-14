@@ -13,3 +13,5 @@ export const HUB_CAPS = {
   signalFlushMs: 80,
   note: '분봉 신규 1장 1.5~12초. 11종목 벽시계 ~14초. REG 재전송=TRNM. 강도는 총량 안 페이징.',
 } as const;
+
+export {PROVIDER_SPECS, parseProviderMode} from './marketProvider';

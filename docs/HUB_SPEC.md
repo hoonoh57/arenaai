@@ -66,6 +66,18 @@
 
 새 창은 이 경로만 호출한다. 새 op가 필요하면 허브에 op를 등록한 뒤 경로를 추가한다. 미등록 op는 회신 `ok:false`.
 
+## 5b. Provider (`shared/marketProvider.ts`)
+
+창은 소스를 고르지 않는다. 허브 모드만 바꾼다.
+
+| 레인 | 기본 | 역할 |
+|---|---|---|
+| trade | kiwoom | 주문·조건검색·체결 |
+| bulk | kiwoom 또는 cybos | 분·틱·일봉, 강도 이력, MarketEye |
+| quote | kiwoom | 0B 실시간 순위 |
+
+CYBOS: 관리자, 15초 60건, 동시 4, MarketEye 200, 봉은 reverse만. 표준/최대 한도는 `PROVIDER_SPECS`. `GET /api/hub/providers`.
+
 ## 6. 용량 (랩 실측, `shared/hubCaps.ts`)
 
 - REST 버스트 10, **주문용 1칸 예약**, 대기 한도 초과 시 차트는 캐시.

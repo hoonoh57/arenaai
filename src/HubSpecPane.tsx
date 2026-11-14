@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {HUB_ASK_CATALOG, HUB_ASK_OPS} from '../shared/hubAsk';
 import {HUB_CAPS} from '../shared/hubCaps';
+import {PROVIDER_SPECS, type HubProviderMode} from '../shared/marketProvider';
 import {HUB_TR_CATALOG, HUB_TR_SCREENS} from '../shared/hubTrCatalog';
 
 type Dash = {
@@ -12,12 +13,15 @@ type Dash = {
 
 export function HubSpecPane() {
   const [dash, setDash] = useState<Dash>({});
+  const [prov, setProv] = useState<{mode?: HubProviderMode}>({});
   useEffect(() => {
     let stop = false;
     const pull = async () => {
       try {
         const s = await fetch('/api/state').then((r) => r.json());
         const live = await fetch('/api/hub/lab/live').then((r) => r.json()).catch(() => ({}));
+        const pv = await fetch('/api/hub/providers').then((r) => r.json()).catch(() => ({}));
+        if (!stop && pv.mode) setProv({mode: pv.mode});
         if (stop) return;
         setDash({
           rest: live.quota?.rest || s.quota?.rest,
@@ -77,7 +81,40 @@ export function HubSpecPane() {
         </div>
         <p className="hub-spec-note">
           한도: 버스트 {HUB_CAPS.restBurst} · 차트병렬 {HUB_CAPS.chartConcurrency} · {HUB_CAPS.note} 창은 키움 URL을 열지 않는다.
+          모드 trade {prov.mode?.trade || 'kiwoom'} · bulk {prov.mode?.bulk || 'kiwoom'} · quote {prov.mode?.quote || 'kiwoom'}.
         </p>
+        <table>
+          <thead>
+            <tr>
+              <th>provider</th>
+              <th>레인</th>
+              <th>표준 동시/버스트/창(초)</th>
+              <th>최대</th>
+              <th>페이지·종목/호출</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.values(PROVIDER_SPECS).map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <code>{s.id}</code> {s.title}
+                </td>
+                <td>{s.lanes.join(', ')}</td>
+                <td>
+                  {s.standard.concurrency} / {s.standard.burst} / {s.standard.windowSec}
+                </td>
+                <td>
+                  {s.max.concurrency} / {s.max.burst} / {s.max.windowSec} · 구독 {s.max.subscribe}
+                </td>
+                <td>
+                  {s.standard.pageRows} · {s.standard.codesPerCall}
+                </td>
+                <td>{s.note}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
       <section className="hub-spec-api">
         <h3>표준 함수 hub.ask — 다음 세션 수요 개발 참고</h3>

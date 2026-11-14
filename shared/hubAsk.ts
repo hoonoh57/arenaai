@@ -32,6 +32,8 @@ export type HubAsk = {
   orderType?: 'market' | 'limit';
   limitPrice?: number;
   orderId?: string;
+  /** bulk 시세 소스. 생략하면 허브 MARKET_BULK_PROVIDER */
+  provider?: 'kiwoom' | 'cybos' | 'other';
 };
 
 export type HubAskReply = {

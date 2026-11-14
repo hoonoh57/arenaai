@@ -4,6 +4,8 @@ import {createServer} from 'node:http';
 import {createServer as createViteServer} from 'vite';
 import WebSocket from 'ws';
 import {Kiwoom} from './kiwoom';
+import {CybosBroker, routedBroker} from './cybosBroker';
+import {parseProviderMode, PROVIDER_SPECS} from '../shared/marketProvider';
 import type {Candle, Stock, Weights} from './core';
 import {evaluate} from '../shared/formula';
 import {delayedEntry, delayedExit, judgePattern, maSlope} from '../shared/patternGate';
@@ -77,6 +79,9 @@ const caps = new RealtimeCaps({
   maxItemsPerPacket: positiveInt('KIWOOM_REALTIME_MAX_ITEMS_PER_PACKET', 10),
 });
 
+const providerMode = parseProviderMode(process.env);
+const cybos = providerMode.bulk === 'cybos' || providerMode.quote === 'cybos' ? new CybosBroker() : null;
+
 const api = new Kiwoom(mode as 'mock' | 'real', governor, {
   onEvent: (event) => audit.record(event.kind === 'rate-limit' ? 'limit' : 'error', event.message, event.detail),
 });
@@ -91,7 +96,7 @@ const hub = new RealtimeHub({
   cache,
   audit,
   caps,
-  broker: api,
+  broker: routedBroker(api, cybos && providerMode.bulk === 'cybos' ? cybos : api),
   orderBroker: {
     stockOrder: (input) => api.stockOrder(input),
     cancelStock: (input) => api.cancelStock(input),
@@ -470,6 +475,9 @@ app.get('/api/state', (_req, res) =>
 );
 app.get('/api/hub/ops', (_req, res) => {
   res.json({...hub.ops.report(), official: LAB_CASES.map((c) => c.id)});
+});
+app.get('/api/hub/providers', (_req, res) => {
+  res.json({mode: providerMode, specs: PROVIDER_SPECS});
 });
 app.get('/api/hub/lab/live', (_req, res) => {
   res.json({...(getLabUnitLive() || {idle: true}), quota: hub.quota()});
