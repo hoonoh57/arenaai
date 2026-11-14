@@ -125,6 +125,7 @@ export function HubLabPane() {
   const [unit, setUnit] = useState<UnitLive | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [labProvider, setLabProvider] = useState<'kiwoom' | 'cybos'>('kiwoom');
+  const [market, setMarket] = useState<'kospi' | 'kosdaq' | 'both'>('kospi');
   const [speeds, setSpeeds] = useState<Record<string, {kiwoom?: Speed; cybos?: Speed}>>({});
   const [inspect, setInspect] = useState<null | {
     loading?: boolean;
@@ -236,7 +237,7 @@ export function HubLabPane() {
         });
         const report = await j<LabReport>('/api/hub/lab', {
           method: 'POST',
-          body: JSON.stringify({id: c.id, params: bodyParams, provider}),
+          body: JSON.stringify({id: c.id, params: bodyParams, provider, market}),
         });
         const row = report.results[0];
         const per = row?.perTargetMs ?? bodyParams.deadlineMs;
@@ -475,6 +476,15 @@ export function HubLabPane() {
             CYBOS
           </button>
         </span>
+        {labProvider === 'cybos' ? (
+          <span className="hub-lab-pv">
+            {(['kospi', 'kosdaq', 'both'] as const).map((m) => (
+              <button key={m} className={'hts-tool' + (market === m ? ' on' : '')} disabled={busy} onClick={() => setMarket(m)}>
+                {m === 'kospi' ? 'KOSPI' : m === 'kosdaq' ? 'KOSDAQ' : '전체'}
+              </button>
+            ))}
+          </span>
+        ) : null}
         <button className="hts-tool" disabled={busy} onClick={() => void run(pick, labProvider)}>
           {busy ? '측정 중' : '이 파라미터로 실행'}
         </button>

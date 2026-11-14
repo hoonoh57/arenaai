@@ -25,14 +25,18 @@ function codesOf(raw: unknown, n: number): string[] {
 export async function runCybosLab(
   broker: CybosBroker,
   id: string,
-  input: {codes?: unknown; count?: number} = {},
+  input: {codes?: unknown; count?: number; market?: 'kospi' | 'kosdaq' | 'both'} = {},
 ): Promise<{id: string; title: string; group: string; ok: boolean; ms: number; detail: string}> {
   const meta = CYBOS_LAB_CASES.find((c) => c.id === id);
   const title = meta?.title || id;
   const group = meta?.group || '';
   const t0 = Date.now();
   const n = Math.min(PROVIDER_SPECS.cybos.max.codesPerCall, Math.max(1, Number(input.count) || 1));
-  const codes = codesOf(input.codes, n);
+  let codes = codesOf(input.codes, n);
+  if (n > 1 && (id === 'chartBatch' || id === 'eye' || id === 'strength')) {
+    const listed = await broker.listCodes(n, input.market || 'kospi');
+    if (listed.length) codes = listed;
+  }
   try {
     if (id === 'admin' || id === 'connect') {
       const s = await broker.status();

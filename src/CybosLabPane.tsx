@@ -10,6 +10,7 @@ export function CybosLabPane() {
   const [err, setErr] = useState('');
   const [code, setCode] = useState('005930');
   const [count, setCount] = useState(1);
+  const [market, setMarket] = useState<'kospi' | 'kosdaq' | 'both'>('kospi');
 
   useEffect(() => {
     void fetch('/api/hub/cybos-lab')
@@ -26,7 +27,7 @@ export function CybosLabPane() {
       const d = await fetch('/api/hub/cybos-lab', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id, codes, count}),
+        body: JSON.stringify({id, codes, count, market}),
       }).then((r) => r.json());
       const next = (d.results || []) as Row[];
       setRows((prev) => {
@@ -48,6 +49,12 @@ export function CybosLabPane() {
       <div className="v16-row">
         <span>종목</span>
         <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="005930,000660" />
+        <span>시장</span>
+        <select value={market} onChange={(e) => setMarket(e.target.value as 'kospi' | 'kosdaq' | 'both')}>
+          <option value="kospi">KOSPI</option>
+          <option value="kosdaq">KOSDAQ</option>
+          <option value="both">전체</option>
+        </select>
         <span>일괄수</span>
         <input type="number" min={1} max={200} value={count} onChange={(e) => setCount(Number(e.target.value) || 1)} />
         <button disabled={busy} onClick={() => void run('all')}>

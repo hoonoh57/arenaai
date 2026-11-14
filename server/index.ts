@@ -570,9 +570,10 @@ app.post('/api/hub/lab', async (req, res) => {
     const windowCount = loadDesks().desks.reduce((n, d) => n + d.windows.length, 0);
     const provider = req.body?.provider === 'cybos' ? 'cybos' : 'kiwoom';
     const want = Math.max(1, Number(req.body?.params?.codes) || realCodes.length);
-    if (provider === 'cybos' && realCodes.length < want) {
-      const extra = await cybos.listCodes(want);
-      realCodes = [...new Set([...realCodes, ...extra])];
+    const market = req.body?.market === 'kospi' || req.body?.market === 'kosdaq' ? req.body.market : 'both';
+    if (provider === 'cybos') {
+      const extra = await cybos.listCodes(want, market);
+      realCodes = extra.length ? extra : realCodes;
     }
     const report = await runHubLab(hub, scope, req.body?.params, realCodes, captured, windowCount, provider, cybos);
     res.json(report);

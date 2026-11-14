@@ -75,8 +75,8 @@ export class CybosBroker implements BrokerLike {
     return this.ask({op: 'status'});
   }
 
-  async listCodes(count: number): Promise<string[]> {
-    const r = await this.ask({op: 'list', count});
+  async listCodes(count: number, market: 'kospi' | 'kosdaq' | 'both' = 'both'): Promise<string[]> {
+    const r = await this.ask({op: 'list', count, market});
     const codes = (r as CybosReply & {codes?: string[]}).codes;
     return Array.isArray(codes) ? codes.filter((c) => /^\d{6}$/.test(c)) : [];
   }
